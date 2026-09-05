@@ -1,53 +1,28 @@
-# Build artifacts
-dist/
-dist-ssr/
+# Rust build artifacts
+/target/
+**/*.rs.bk
+Cargo.lock
 
-# Tauri
-src-tauri/target/
-src-tauri/release/
-src-tauri/bin/
-src-tauri/debug/
+# Kron internal state (NEVER commit)
+/.kron/
+/.kron-internal/
 
-# Logs
-*.log
-npm-debug.log*
-pnpm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-store/
-
-# Editor directories and files
+# Editor
 .vscode/*
 !.vscode/extensions.json
 .idea/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-*.suo
-*.user
-*.userosscache
-*.sln.docstates
+*.swp
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Node
-node_modules/
-pnpm-lock.yaml
-package-lock.json
-yarn.lock
+# Logs
+*.log
 
-# Environment
-.env
-.env.local
-.env.*.local
-
-# Test
-coverage/
-
-# Temporary
+# Temp
 *.tmp
 *.temp
+
+# Node (not used by Kron, but in case)
+node_modules/
