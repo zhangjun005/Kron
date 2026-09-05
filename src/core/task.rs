@@ -154,6 +154,98 @@ pub fn next_task_id(project_root: &Path, vertex: &str) -> Result<String> {
     Ok(format!("T{}", max + 1))
 }
 
+/// Locate the file containing a task with the given id, scanning all vertex
+/// directories under `KRON/VERTEX/`. Returns `(path, vertex)`.
+pub fn find_task(project_root: &Path, task_id: &str) -> Result<(PathBuf, String)> {
+    let vertex_root = project_root.join("KRON").join("VERTEX");
+    if !vertex_root.is_dir() {
+        return Err(KronError::NotFound(vertex_root));
+    }
+    let filename = format!("{task_id}.md");
+    for entry in fs::read_dir(&vertex_root)? {
+        let entry = entry?;
+        let vdir = entry.path();
+        if !vdir.is_dir() {
+            continue;
+        }
+        let candidate = vdir.join(&filename);
+        if candidate.is_file() {
+            let vertex = entry.file_name().to_string_lossy().into_owned();
+            return Ok((candidate, vertex));
+        }
+    }
+    Err(KronError::NotFound(vertex_root.join(format!("<any>/{filename}"))))
+}
+
+/// Re-write the task's MD file with updated fields.
+/// Bumps `updated_at`. Caller is responsible for the updated_at semantics.
+pub fn update_task(path: &Path, task: &Task) -> Result<()> {
+    let raw = render_task_md(task)?;
+    fs::write(path, raw)?;
+    Ok(())
+}
+
+/// Re-write the task, then physically move the file from one vertex
+/// directory to another. Also updates the two state indexes.
+///
+/// Returns the new file path.
+pub fn move_task(
+    project_root: &Path,
+    task_id: &str,
+    new_vertex: &str,
+) -> Result<(PathBuf, String)> {
+    let (old_path, old_vertex) = find_task(project_root, task_id)?;
+    validate_vertex_name(new_vertex)?;
+
+    if old_vertex == new_vertex {
+        // already there — no-op
+        return Ok((old_path, old_vertex));
+    }
+
+    let mut task = read_task(&old_path)?;
+    task.state = new_vertex.to_string();
+    task.updated_at = Utc::now();
+    task.source_file = None;
+
+    // Ensure destination vertex dir exists.
+    let new_dir = vertex_public_dir(project_root, new_vertex);
+    fs::create_dir_all(&new_dir)?;
+    let new_path = new_dir.join(format!("{task_id}.md"));
+
+    // Write to new path first, then remove old. If write fails, old stays.
+    fs::write(&new_path, render_task_md(&task)?)?;
+    fs::remove_file(&old_path)?;
+
+    // Update state indexes.
+    append_to_vertex_state(project_root, new_vertex, task_id)?;
+    remove_from_vertex_state(project_root, &old_vertex, task_id)?;
+
+    Ok((new_path, new_vertex.to_string()))
+}
+
+/// Remove a task's MD file and update the vertex state index.
+pub fn delete_task(project_root: &Path, task_id: &str) -> Result<()> {
+    let (path, vertex) = find_task(project_root, task_id)?;
+    fs::remove_file(&path)?;
+    remove_from_vertex_state(project_root, &vertex, task_id)?;
+    Ok(())
+}
+
+/// Remove a task ID from a vertex's state index (no-op if absent).
+pub fn remove_from_vertex_state(project_root: &Path, vertex: &str, task_id: &str) -> Result<()> {
+    let p = vertex_state_file(project_root, vertex);
+    if !p.exists() {
+        return Ok(());
+    }
+    let mut state = read_vertex_state(project_root, vertex)?;
+    let before = state.tasks.len();
+    state.tasks.retain(|id| id != task_id);
+    if state.tasks.len() != before {
+        fs::write(&p, serde_json::to_string_pretty(&state)?)?;
+    }
+    Ok(())
+}
+
 // ---- Markdown rendering ----
 
 fn render_task_md(task: &Task) -> Result<String> {

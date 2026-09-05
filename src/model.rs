@@ -128,3 +128,60 @@ impl Project {
         }
     }
 }
+
+// ---- Task state ----
+
+/// Lifecycle state of a task. The state also corresponds to which
+/// vertex directory the task lives under (simplified M1 model):
+/// `KRON/VERTEX/<state>/<id>.md`.
+///
+/// The default vertex trio is `todo / doing / done`. Users may add
+/// more (e.g. `backlog`, `review`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskState {
+    /// Not yet started.
+    Todo,
+    /// In progress.
+    Doing,
+    /// Finished.
+    Done,
+}
+
+impl TaskState {
+    /// Canonical lower-case name used as the vertex directory name.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TaskState::Todo => "todo",
+            TaskState::Doing => "doing",
+            TaskState::Done => "done",
+        }
+    }
+
+    /// The default starting state for a freshly-added task.
+    pub fn default_for_new() -> Self {
+        TaskState::Todo
+    }
+}
+
+impl Default for TaskState {
+    fn default() -> Self {
+        TaskState::Todo
+    }
+}
+
+impl std::fmt::Display for TaskState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Parse an arbitrary state string into a [`TaskState`].
+/// Falls back to the given string being treated as a custom vertex
+/// name (i.e. always returns Ok for non-empty slugs).
+pub fn parse_state(s: &str) -> Result<String, String> {
+    if s.is_empty() {
+        return Err("state name must not be empty".into());
+    }
+    Ok(s.to_ascii_lowercase())
+}

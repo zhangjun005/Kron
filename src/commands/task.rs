@@ -103,35 +103,16 @@ pub fn run(ctx: Ctx, args: TaskArgs) -> Result<()> {
             add_task(ctx, &vertex, &title, desc.as_deref(), message.as_deref(), &tag)
         }
         TaskAction::Describe { id, message, editor } => {
-            if editor {
-                Err(KronError::NotYetImplemented("task describe --editor"))
-            } else if message.is_empty() {
-                Err(KronError::Cli("--message is required for `task describe`".into()))
-            } else {
-                let _ = id;
-                Err(KronError::NotYetImplemented("task describe"))
-            }
+            describe_task(ctx, &id, &message, editor)
         }
-        TaskAction::Move { id, to } => {
-            let _ = (id, to);
-            Err(KronError::NotYetImplemented("task move"))
-        }
-        TaskAction::Start { id } => {
-            let _ = id;
-            Err(KronError::NotYetImplemented("task start"))
-        }
-        TaskAction::Done { id } => {
-            let _ = id;
-            Err(KronError::NotYetImplemented("task done"))
-        }
+        TaskAction::Move { id, to } => move_task_cmd(ctx, &id, &to),
+        TaskAction::Start { id } => move_task_cmd(ctx, &id, "doing"),
+        TaskAction::Done { id } => move_task_cmd(ctx, &id, "done"),
         TaskAction::Edit { id } => {
             let _ = id;
             Err(KronError::NotYetImplemented("task edit"))
         }
-        TaskAction::Delete { id, force } => {
-            let _ = (id, force);
-            Err(KronError::NotYetImplemented("task delete"))
-        }
+        TaskAction::Delete { id, force } => delete_task_cmd(ctx, &id, force),
     }
 }
 
@@ -210,52 +191,149 @@ fn list_tasks(ctx: Ctx, vertex: &str, state_filter: Option<&str>, tag_filter: &[
 
 fn show_task(ctx: Ctx, id: &str) -> Result<()> {
     let project = require_project()?;
-    let vertex_dir = project.join("KRON").join("VERTEX");
+    let (path, _vertex) = core_task::find_task(&project, id)?;
+    let t = core_task::read_task(&path)?;
 
-    if !vertex_dir.is_dir() {
-        return Err(KronError::NotFound(vertex_dir));
-    }
-
-    for entry in std::fs::read_dir(&vertex_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
+    match ctx.mode {
+        crate::output::OutputMode::Json => {
+            println!("{}", serde_json::to_string_pretty(&t)?);
         }
-        let candidate = path.join(format!("{id}.md"));
-        if candidate.exists() {
-            let t = core_task::read_task(&candidate)?;
-            match ctx.mode {
-                crate::output::OutputMode::Json => {
-                    println!("{}", serde_json::to_string_pretty(&t)?);
-                }
-                crate::output::OutputMode::Porcelain => {
-                    println!("{}\t{}\t{}\t{}", t.id, t.state, t.title, t.tags.join(","));
-                    println!("# description: {}", t.description);
-                    if !t.body.is_empty() {
-                        println!("# body: {}", t.body);
-                    }
-                }
-                crate::output::OutputMode::Human => {
-                    println!("Task {} [{}]", t.id, t.state);
-                    println!("  Title:       {}", t.title);
-                    println!("  Description: {}", t.description);
-                    if !t.tags.is_empty() {
-                        println!("  Tags:        {}", t.tags.join(", "));
-                    }
-                    println!("  Created:     {}", t.created_at.to_rfc3339());
-                    println!("  Updated:     {}", t.updated_at.to_rfc3339());
-                    println!("  File:        {}", candidate.display());
-                    if !t.body.is_empty() {
-                        println!();
-                        println!("{}", t.body);
-                    }
-                }
+        crate::output::OutputMode::Porcelain => {
+            println!("{}\t{}\t{}\t{}", t.id, t.state, t.title, t.tags.join(","));
+            println!("# description: {}", t.description);
+            if !t.body.is_empty() {
+                println!("# body: {}", t.body);
             }
-            return Ok(());
+        }
+        crate::output::OutputMode::Human => {
+            println!("Task {} [{}]", t.id, t.state);
+            println!("  Title:       {}", t.title);
+            println!("  Description: {}", t.description);
+            if !t.tags.is_empty() {
+                println!("  Tags:        {}", t.tags.join(", "));
+            }
+            println!("  Created:     {}", t.created_at.to_rfc3339());
+            println!("  Updated:     {}", t.updated_at.to_rfc3339());
+            println!("  File:        {}", path.display());
+            if !t.body.is_empty() {
+                println!();
+                println!("{}", t.body);
+            }
         }
     }
-    Err(KronError::NotFound(project.join("KRON").join("VERTEX").join(format!("{id}.md"))))
+    Ok(())
+}
+
+// ---- describe (update description) ----
+
+fn describe_task(ctx: Ctx, id: &str, message: &str, editor: bool) -> Result<()> {
+    if editor {
+        return Err(KronError::NotYetImplemented("task describe --editor"));
+    }
+    if message.is_empty() {
+        return Err(KronError::Cli("--message is required for `task describe`".into()));
+    }
+    let project = require_project()?;
+    let (path, _vertex) = core_task::find_task(&project, id)?;
+    let mut task = core_task::read_task(&path)?;
+
+    let (desc, truncated) = core_task::normalize_description(message);
+    task.description = desc;
+    task.updated_at = Utc::now();
+    task.source_file = None;
+    core_task::update_task(&path, &task)?;
+
+    match ctx.mode {
+        crate::output::OutputMode::Json => {
+            let summary = serde_json::json!({
+                "id": task.id,
+                "description": task.description,
+                "updated_at": task.updated_at.to_rfc3339(),
+                "truncated": truncated,
+            });
+            println!("{}", serde_json::to_string_pretty(&summary)?);
+        }
+        crate::output::OutputMode::Porcelain => {
+            println!("{}\t{}", task.id, task.description);
+            if truncated {
+                println!("# (truncated to 200 chars)");
+            }
+        }
+        crate::output::OutputMode::Human => {
+            println!("\u{2713} Task {} description updated", task.id);
+            println!("  Description: {}", task.description);
+            if truncated {
+                println!("\u{26a0}  description was truncated to 200 chars");
+            }
+        }
+    }
+    Ok(())
+}
+
+// ---- move (also handles start/done as synonyms) ----
+
+fn move_task_cmd(ctx: Ctx, id: &str, to: &str) -> Result<()> {
+    let normalized = crate::model::parse_state(to)
+        .map_err(|e| KronError::Cli(format!("invalid target state '{to}': {e}")))?;
+    crate::core::task::validate_vertex_name(&normalized)
+        .map_err(|e| KronError::Cli(format!("invalid target vertex '{normalized}': {e}")))?;
+
+    let project = require_project()?;
+    let (new_path, new_vertex) = core_task::move_task(&project, id, &normalized)?;
+
+    match ctx.mode {
+        crate::output::OutputMode::Json => {
+            let summary = serde_json::json!({
+                "id": id,
+                "vertex": new_vertex,
+                "file": new_path.display().to_string(),
+            });
+            println!("{}", serde_json::to_string_pretty(&summary)?);
+        }
+        crate::output::OutputMode::Porcelain => {
+            println!("{}\t{}", id, new_vertex);
+        }
+        crate::output::OutputMode::Human => {
+            println!("\u{2713} {} moved to {} ({})", id, new_vertex, new_path.display());
+        }
+    }
+    Ok(())
+}
+
+// ---- delete ----
+
+fn delete_task_cmd(ctx: Ctx, id: &str, force: bool) -> Result<()> {
+    let project = require_project()?;
+    let (path, vertex) = core_task::find_task(&project, id)?;
+
+    if !force {
+        // In human mode and TTY we could prompt; for the skeleton we just
+        // require --force to avoid accidental deletions.
+        return Err(KronError::Cli(format!(
+            "delete {id} requires --force (file: {})",
+            path.display()
+        )));
+    }
+
+    core_task::delete_task(&project, id)?;
+
+    match ctx.mode {
+        crate::output::OutputMode::Json => {
+            let summary = serde_json::json!({
+                "id": id,
+                "deleted_from": vertex,
+                "file": path.display().to_string(),
+            });
+            println!("{}", serde_json::to_string_pretty(&summary)?);
+        }
+        crate::output::OutputMode::Porcelain => {
+            println!("{}\t{}\t{}", id, vertex, "deleted");
+        }
+        crate::output::OutputMode::Human => {
+            println!("\u{2713} Task {id} deleted (was in '{vertex}')");
+        }
+    }
+    Ok(())
 }
 
 // ---- add ----
