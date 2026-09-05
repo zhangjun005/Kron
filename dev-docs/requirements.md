@@ -1814,29 +1814,37 @@ in_progress → todo（暂停）
 - 但项目代码历史（git log、git diff）、依赖关系、API 文档等中间产物对 AI 很重要
 - 这些文档通常很大、很杂，不适合手动维护
 
-**方案**：**Kron CLI 提供命令生成"中间文档"**，放到 `KRON/.kron-context/` 目录，AI 自然读取。
+**方案**：**Kron CLI 提供命令生成"事实型结构快照"**，放到 `KRON/.kron-context/` 目录，AI 自然读取。
 
-##### 2.4.1 中间文档目录结构
+> **⚠️ 范围声明（2026-09-05 修正，与 04b § 3.7 一致）**：
+> - Kron 只生成**机器可重现的事实数据**——git log、文件树、依赖清单、分支对比
+> - **不做语义理解**——不调 LLM、不生成"项目是干啥的"这种内容
+> - **AI 真正理解项目靠三件事**：（1）根 README.md；（2）`KRON/important/` 人类文档；（3）AI 自己读源码
+> - `.kron-context/` 是**锦上添花**（省去 AI 反复跑 `git log`），不是"AI 上手银弹"
+
+##### 2.4.1 中间文档目录结构（v1 锁定 4 个文件）
 
 ```
 KRON/.kron-context/
-├── README.md                    ← 中间文档索引（说明每个文件的用途）
+├── README.md                    ← 中间文档索引（说明每个文件的用途 + 明确范围边界）
 ├── git/
-│   ├── recent-commits.md        ← 最近 N 次 commit
-│   ├── branch-summary.md        ← 当前分支与主分支的对比
-│   └── file-history.md          ← 重要文件的修改历史
-├── code/
-│   ├── structure.md             ← 代码目录结构（树状）
-│   ├── dependencies.md          ← 依赖列表（package.json / Cargo.toml 等）
-│   └── important-files.md       ← 重要文件清单
-└── api/
-    └── public-apis.md           ← 公开 API 摘要（如果项目有 API）
+│   └── recent-commits.md        ← 最近 N 次 commit（事实型，N 默认 100）
+└── code/
+    └── structure.md             ← 代码目录结构（树状，深度 3，跳过 node_modules/target/.git）
 ```
+
+**v1 不实现**（避免过度膨胀，详见 04b § 3.7 Q26）：
+- ~~`branch-summary.md`~~ → **已实现**（并入 v1 清单）
+- ~~`file-history.md`~~（v2）
+- ~~`dependencies.md`~~（需多语言解析器，v2）
+- ~~`languages.md`~~（tokei 依赖重，v2）
+- ~~`public-apis.md`~~（v2）
+- ~~`important-files.md`~~（已在 `important/` 内，AI 直接读更准）
 
 **目录在 `.kron-context/` 而非 `important/` 的原因**：
 
 - `important/`：用户主动添加的**重要 idea / 设计文档**（长期保留）
-- `.kron-context/`：Kron 自动生成的**项目上下文**（可重新生成）
+- `.kron-context/`：Kron 自动生成的**事实型快照**（可随时重新生成）
 
 ##### 2.4.2 CLI 命令清单
 
