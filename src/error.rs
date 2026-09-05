@@ -42,9 +42,35 @@ pub enum KronError {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// JSON serialization/deserialization failure.
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
+
+    /// YAML serialization/deserialization failure.
+    #[error("yaml error: {0}")]
+    Yaml(#[from] serde_yaml::Error),
+
     /// Catch-all for unexpected internal errors (should be rare).
     #[error("internal error: {0}")]
     Internal(String),
+
+    // ---- Phase 2 (CLI skeleton) additions ----
+
+    /// Workspace is already initialized; user must pass --force to re-init.
+    #[error("already initialized at {0} (use --force to re-initialize)")]
+    AlreadyInitialized(PathBuf),
+
+    /// Operation requires a Git repository.
+    #[error("not a Git repository: {0} (use --no-git to bypass)")]
+    NotGitRepo(PathBuf),
+
+    /// CLI-level error (invalid args, conflicting flags, ...).
+    #[error("cli: {0}")]
+    Cli(String),
+
+    /// A feature is not yet implemented (placeholder for stub commands).
+    #[error("not yet implemented: {0}")]
+    NotYetImplemented(&'static str),
 }
 
 /// Convenient Result alias.

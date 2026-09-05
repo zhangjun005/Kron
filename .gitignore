@@ -7,6 +7,9 @@ Cargo.lock
 /.kron/
 /.kron-internal/
 
+# Local scratch project (used for end-to-end CLI testing)
+/testProject/
+
 # Editor
 .vscode/*
 !.vscode/extensions.json
