@@ -118,7 +118,7 @@ impl ImportantIndex {
     }
 
     /// Remove a path from the index (does not delete files).
-    pub fn remove(&mut self, rel_path: &str) -> bool {
+    pub fn remove_entry(&mut self, rel_path: &str) -> bool {
         self.files.remove(rel_path).is_some()
     }
 }

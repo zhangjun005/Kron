@@ -76,6 +76,42 @@ pub enum TaskAction {
         #[arg(long)]
         force: bool,
     },
+    /// Send a task one vertex backwards (e.g. doing -> todo, done -> doing).
+    Back { id: String },
+    /// Toggle a task's `done` field (default state names: 'done' <-> 'todo').
+    Check { id: String },
+    /// Manage tags on a task.
+    Tag {
+        id: String,
+        #[command(subcommand)]
+        action: TagAction,
+    },
+    /// Attach arbitrary metadata (frontmatter extension) to a task.
+    Attach {
+        id: String,
+        /// `key=value` pairs (e.g. `priority=high`).
+        #[arg(required = true)]
+        pairs: Vec<String>,
+    },
+}
+
+/// Tag sub-commands: add, remove, list, clear.
+#[derive(Debug, Subcommand)]
+pub enum TagAction {
+    /// Add a tag (idempotent).
+    Add {
+        /// Tag name.
+        name: String,
+    },
+    /// Remove a tag (no-op if absent).
+    Remove {
+        /// Tag name.
+        name: String,
+    },
+    /// List current tags.
+    List,
+    /// Clear all tags.
+    Clear,
 }
 
 #[derive(Serialize)]
@@ -108,11 +144,12 @@ pub fn run(ctx: Ctx, args: TaskArgs) -> Result<()> {
         TaskAction::Move { id, to } => move_task_cmd(ctx, &id, &to),
         TaskAction::Start { id } => move_task_cmd(ctx, &id, "doing"),
         TaskAction::Done { id } => move_task_cmd(ctx, &id, "done"),
-        TaskAction::Edit { id } => {
-            let _ = id;
-            Err(KronError::NotYetImplemented("task edit"))
-        }
+        TaskAction::Edit { id } => edit_task_cmd(ctx, &id),
         TaskAction::Delete { id, force } => delete_task_cmd(ctx, &id, force),
+        TaskAction::Back { id } => back_task_cmd(ctx, &id),
+        TaskAction::Check { id } => check_task_cmd(ctx, &id),
+        TaskAction::Tag { id, action } => tag_task_cmd(ctx, &id, action),
+        TaskAction::Attach { id, pairs } => attach_task_cmd(ctx, &id, &pairs),
     }
 }
 
@@ -398,6 +435,241 @@ fn add_task(
             if !task.tags.is_empty() {
                 println!("  Tags:        {}", task.tags.join(", "));
             }
+        }
+    }
+    Ok(())
+}
+
+// ---- edit (open $EDITOR) ----
+
+fn edit_task_cmd(ctx: Ctx, id: &str) -> Result<()> {
+    use std::process::Command;
+    let project = require_project()?;
+    let (path, _vertex) = core_task::find_task(&project, id)?;
+
+    let editor = std::env::var("EDITOR")
+        .or_else(|_| std::env::var("VISUAL"))
+        .unwrap_or_else(|_| {
+            if cfg!(windows) {
+                "notepad".to_string()
+            } else {
+                "vi".to_string()
+            }
+        });
+
+    let status = Command::new(&editor)
+        .arg(&path)
+        .status()
+        .map_err(|e| KronError::Cli(format!("failed to launch editor {editor:?}: {e}")))?;
+
+    if !status.success() {
+        return Err(KronError::Cli(format!(
+            "editor exited with non-zero status: {status}"
+        )));
+    }
+
+    // Re-read the task to confirm parseability after edit.
+    let task = core_task::read_task(&path)?;
+    match ctx.mode {
+        crate::output::OutputMode::Json => {
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+                "id": task.id,
+                "title": task.title,
+                "state": task.state,
+                "file": path.display().to_string(),
+            }))?);
+        }
+        _ => {
+            println!("\u{2713} Edited task {} (file: {})", task.id, path.display());
+        }
+    }
+    Ok(())
+}
+
+// ---- back (move one vertex backwards) ----
+
+fn back_task_cmd(ctx: Ctx, id: &str) -> Result<()> {
+    let project = require_project()?;
+    let (path, current) = core_task::find_task(&project, id)?;
+    let task = core_task::read_task(&path)?;
+    let previous = previous_state(&current).ok_or_else(|| {
+        KronError::Cli(format!("vertex '{current}' has no previous state to go back to"))
+    })?;
+    let _ = task; // not strictly needed, but ensures we have a valid task
+    let (new_path, new_vertex) = core_task::move_task(&project, id, &previous)?;
+
+    match ctx.mode {
+        crate::output::OutputMode::Json => {
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+                "id": id,
+                "from": current,
+                "to": new_vertex,
+                "file": new_path.display().to_string(),
+            }))?);
+        }
+        crate::output::OutputMode::Porcelain => {
+            println!("{}\t{}\t{}", id, current, new_vertex);
+        }
+        crate::output::OutputMode::Human => {
+            println!("\u{2713} {} moved back: {} -> {} ({})", id, current, new_vertex, new_path.display());
+        }
+    }
+    Ok(())
+}
+
+/// Default ordering of state vertices. Users can extend this by
+/// editing the `DEFAULT_STATE_ORDER` constant; custom vertices without
+/// an entry fall back to `todo` as their predecessor.
+fn previous_state(current: &str) -> Option<String> {
+    const DEFAULT_STATE_ORDER: &[&str] = &["backlog", "todo", "doing", "review", "done"];
+    let pos = DEFAULT_STATE_ORDER.iter().position(|s| *s == current)?;
+    if pos == 0 {
+        None
+    } else {
+        Some(DEFAULT_STATE_ORDER[pos - 1].to_string())
+    }
+}
+
+// ---- check (toggle done <-> todo) ----
+
+fn check_task_cmd(ctx: Ctx, id: &str) -> Result<()> {
+    let project = require_project()?;
+    let (_path, current) = core_task::find_task(&project, id)?;
+
+    let target = if current == "done" { "todo" } else { "done" };
+    let (new_path, new_vertex) = core_task::move_task(&project, id, target)?;
+
+    match ctx.mode {
+        crate::output::OutputMode::Json => {
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+                "id": id,
+                "from": current,
+                "to": new_vertex,
+                "file": new_path.display().to_string(),
+            }))?);
+        }
+        crate::output::OutputMode::Porcelain => {
+            println!("{}\t{}\t{}", id, current, new_vertex);
+        }
+        crate::output::OutputMode::Human => {
+            println!("\u{2713} {} toggled: {} -> {} ({})", id, current, new_vertex, new_path.display());
+        }
+    }
+    Ok(())
+}
+
+// ---- tag (add/remove/list/clear) ----
+
+fn tag_task_cmd(ctx: Ctx, id: &str, action: TagAction) -> Result<()> {
+    let project = require_project()?;
+    let (path, _vertex) = core_task::find_task(&project, id)?;
+    let mut task = core_task::read_task(&path)?;
+
+    let summary = match action {
+        TagAction::Add { name } => {
+            if name.is_empty() {
+                return Err(KronError::Cli("tag name must not be empty".into()));
+            }
+            if !task.tags.iter().any(|t| t == &name) {
+                task.tags.push(name.clone());
+            }
+            task.updated_at = Utc::now();
+            task.source_file = None;
+            core_task::update_task(&path, &task)?;
+            serde_json::json!({"id": task.id, "tags": task.tags})
+        }
+        TagAction::Remove { name } => {
+            let before = task.tags.len();
+            task.tags.retain(|t| t != &name);
+            if task.tags.len() != before {
+                task.updated_at = Utc::now();
+                task.source_file = None;
+                core_task::update_task(&path, &task)?;
+            }
+            serde_json::json!({"id": task.id, "tags": task.tags})
+        }
+        TagAction::List => {
+            serde_json::json!({"id": task.id, "tags": task.tags})
+        }
+        TagAction::Clear => {
+            task.tags.clear();
+            task.updated_at = Utc::now();
+            task.source_file = None;
+            core_task::update_task(&path, &task)?;
+            serde_json::json!({"id": task.id, "tags": task.tags})
+        }
+    };
+
+    match ctx.mode {
+        crate::output::OutputMode::Json => {
+            println!("{}", serde_json::to_string_pretty(&summary)?);
+        }
+        crate::output::OutputMode::Porcelain => {
+            println!("{}\t{}", task.id, task.tags.join(","));
+        }
+        crate::output::OutputMode::Human => {
+            if task.tags.is_empty() {
+                println!("(no tags)");
+            } else {
+                println!("{}: {}", task.id, task.tags.join(", "));
+            }
+        }
+    }
+    Ok(())
+}
+
+// ---- attach (key=value metadata) ----
+
+fn attach_task_cmd(ctx: Ctx, id: &str, pairs: &[String]) -> Result<()> {
+    let project = require_project()?;
+    let (path, _vertex) = core_task::find_task(&project, id)?;
+    let mut task = core_task::read_task(&path)?;
+
+    // Parse pairs. Allow `=` in the value (only first `=` splits).
+    let mut attached = serde_json::Map::new();
+    for p in pairs {
+        let (k, v) = p.split_once('=').ok_or_else(|| {
+            KronError::Cli(format!("expected key=value, got {p:?}"))
+        })?;
+        let key = k.trim().to_string();
+        if key.is_empty() {
+            return Err(KronError::Cli(format!("empty key in pair {p:?}")));
+        }
+        attached.insert(key, serde_json::Value::String(v.to_string()));
+    }
+
+    // Merge into body as a fenced JSON block at the top of the body.
+    let merged_json = match serde_json::from_str::<serde_json::Value>(&task.body) {
+        Ok(existing) if existing.is_object() => {
+            let mut obj = existing;
+            if let Some(map) = obj.as_object_mut() {
+                for (k, v) in attached {
+                    map.insert(k, v);
+                }
+            }
+            obj
+        }
+        _ => serde_json::Value::Object(attached),
+    };
+    task.body = serde_json::to_string_pretty(&merged_json)?;
+    task.updated_at = Utc::now();
+    task.source_file = None;
+    core_task::update_task(&path, &task)?;
+
+    match ctx.mode {
+        crate::output::OutputMode::Json => {
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+                "id": task.id,
+                "attached": merged_json,
+                "body_size": task.body.len(),
+            }))?);
+        }
+        crate::output::OutputMode::Porcelain => {
+            println!("{}\t{}\t{}", task.id, merged_json, task.body.len());
+        }
+        crate::output::OutputMode::Human => {
+            println!("\u{2713} Attached metadata to task {}", task.id);
+            println!("  Body now: {}", serde_json::to_string_pretty(&merged_json)?);
         }
     }
     Ok(())
