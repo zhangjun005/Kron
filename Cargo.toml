@@ -35,5 +35,8 @@ chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# Hashing (P2 sync engine)
+md5 = "0.7"
+
 [dev-dependencies]
 tempfile = "3.10"

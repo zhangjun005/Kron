@@ -185,3 +185,157 @@ pub fn parse_state(s: &str) -> Result<String, String> {
     }
     Ok(s.to_ascii_lowercase())
 }
+
+// ---- Sync state (P2 dual-source synchronization) ----
+
+/// Per-file sync state for an important file.
+///
+/// Mirrors the 5-state machine in
+/// `dev-docs/design/03-双源同步机制.md` § 2.2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncState {
+    /// Both copies are byte-identical (or only one exists and matches).
+    Synced,
+    /// Project-side copy is missing; internal copy retained.
+    InternalOnly,
+    /// Internal copy is missing; project-side copy retained.
+    ProjectOnly,
+    /// Both copies exist with different hashes — user decision required.
+    Conflict,
+    /// A sync operation is currently in progress.
+    Syncing,
+}
+
+impl SyncState {
+    /// Lowercase string form used in JSON output.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SyncState::Synced => "synced",
+            SyncState::InternalOnly => "internal_only",
+            SyncState::ProjectOnly => "project_only",
+            SyncState::Conflict => "conflict",
+            SyncState::Syncing => "syncing",
+        }
+    }
+
+    /// True if this state requires user action to resolve.
+    pub fn needs_user_action(self) -> bool {
+        matches!(self, SyncState::Conflict)
+    }
+}
+
+impl std::fmt::Display for SyncState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for SyncState {
+    type Err = String;
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "synced" => Ok(SyncState::Synced),
+            "internal_only" => Ok(SyncState::InternalOnly),
+            "project_only" => Ok(SyncState::ProjectOnly),
+            "conflict" => Ok(SyncState::Conflict),
+            "syncing" => Ok(SyncState::Syncing),
+            other => Err(format!("unknown sync state: {other:?}")),
+        }
+    }
+}
+
+/// Resolution choice applied to a conflict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictResolution {
+    /// Keep the project-side version (overwrite internal).
+    UseProject,
+    /// Keep the internal version (overwrite project-side).
+    UseInternal,
+    /// Mark the conflict as Ignored — keep both copies as-is.
+    Ignore,
+}
+
+impl std::fmt::Display for ConflictResolution {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            ConflictResolution::UseProject => "use_project",
+            ConflictResolution::UseInternal => "use_internal",
+            ConflictResolution::Ignore => "ignore",
+        })
+    }
+}
+
+/// Persistent record of one detected conflict.
+///
+/// Stored at `kron-internal/conflicts/<id>.json`. Backups of both
+/// versions live next to it under `<id>/`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConflictRecord {
+    /// Stable identifier (timestamp + short hash of path).
+    pub id: String,
+    /// Path relative to project root, e.g. `src/main.rs`.
+    pub relative_path: String,
+    /// When the conflict was first detected.
+    pub detected_at: DateTime<Utc>,
+    /// Absolute path to the backup of the project-side version.
+    pub project_backup: PathBuf,
+    /// Absolute path to the backup of the internal-side version.
+    pub internal_backup: PathBuf,
+    /// MD5 of the project-side content at detection time.
+    pub project_hash: String,
+    /// MD5 of the internal-side content at detection time.
+    pub internal_hash: String,
+    /// mtime of the project-side file at detection time (ISO 8601).
+    pub project_mtime: DateTime<Utc>,
+    /// mtime of the internal-side file at detection time (ISO 8601).
+    pub internal_mtime: DateTime<Utc>,
+    /// Current lifecycle status of the conflict.
+    pub status: ConflictStatus,
+    /// Resolution applied (None while pending).
+    pub resolution: Option<ConflictResolution>,
+    /// When the resolution was applied (None while pending).
+    pub resolved_at: Option<DateTime<Utc>>,
+}
+
+/// Lifecycle status of a conflict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ConflictStatus {
+    /// Detected, awaiting decision.
+    Pending,
+    /// User resolved (UseProject or UseInternal).
+    Resolved,
+    /// User marked as Ignored — stays in conflict state.
+    Ignored,
+}
+
+impl ConflictStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ConflictStatus::Pending => "pending",
+            ConflictStatus::Resolved => "resolved",
+            ConflictStatus::Ignored => "ignored",
+        }
+    }
+}
+
+impl std::fmt::Display for ConflictStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Summary of one file pair after a scan (used for status & JSON output).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SyncPair {
+    pub relative_path: String,
+    pub sync_state: SyncState,
+    /// True when the project-side copy exists at scan time.
+    pub project_exists: bool,
+    /// True when the internal-side copy exists at scan time.
+    pub internal_exists: bool,
+    /// ID of the conflict record (only set when state == Conflict).
+    pub conflict_id: Option<String>,
+}

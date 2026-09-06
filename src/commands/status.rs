@@ -4,6 +4,8 @@ use clap::Args;
 use serde::Serialize;
 
 use crate::commands::Ctx;
+use crate::core::sync::conflict as core_conflict;
+use crate::core::sync::daemon as core_daemon;
 use crate::error::Result;
 
 #[derive(Debug, Args)]
@@ -78,14 +80,29 @@ pub fn run(ctx: Ctx, args: StatusArgs) -> Result<()> {
         0
     };
 
+    // P2: real pending-conflict count + daemon status.
+    let pending_conflicts: u32 = if initialized {
+        core_conflict::list_by_status(&cwd, "pending")
+            .map(|v| v.len() as u32)
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    let daemon_running = initialized && core_daemon::is_running(&cwd);
+    let daemon_pid = if daemon_running {
+        core_daemon::status(&cwd).ok().flatten().map(|s| s.pid)
+    } else {
+        None
+    };
+
     let report = StatusReport {
         project: cwd.display().to_string(),
         initialized,
         vertices,
         tasks,
         important_files,
-        pending_conflicts: 0, // P2 stub
-        daemon: DaemonInfo { running: false, pid: None },
+        pending_conflicts,
+        daemon: DaemonInfo { running: daemon_running, pid: daemon_pid },
     };
 
     match ctx.mode {
