@@ -6,7 +6,6 @@
 pub mod config;
 pub mod conflict;
 pub mod context;
-pub mod daemon;
 pub mod important;
 pub mod init;
 pub mod list_projects;

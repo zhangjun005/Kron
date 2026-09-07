@@ -3,7 +3,7 @@
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
-use crate::commands::{config, conflict, context, daemon, important, init, list_projects, path, status, task, vertex, Ctx};
+use crate::commands::{config, conflict, context, important, init, list_projects, path, status, task, vertex, Ctx};
 use crate::error::Result;
 use crate::output::OutputMode;
 
@@ -54,7 +54,6 @@ pub enum Command {
     /// Manage sync conflicts.
     Conflict(conflict::ConflictArgs),
     /// Control the background daemon.
-    Daemon(daemon::DaemonArgs),
     /// Generate AI-friendly context artifacts.
     Context(context::ContextArgs),
 }
@@ -91,7 +90,6 @@ pub fn run() -> Result<()> {
         Command::Vertex(a)  => vertex::run(ctx, a)?,
         Command::Important(a) => important::run(ctx, a)?,
         Command::Conflict(a) => conflict::run(ctx, a)?,
-        Command::Daemon(a)  => daemon::run(ctx, a)?,
         Command::Context(a) => context::run(ctx, a)?,
     }
     Ok(())

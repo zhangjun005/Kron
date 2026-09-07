@@ -1,9 +1,8 @@
 //! Integration tests for the P2 sync engine (conflict detection,
-//! daemon PID lock, conflict resolution).
+//! conflict resolution).
 
 use kron::core::init::{materialize, prepare};
 use kron::core::sync::conflict::{self, list_by_status, resolve, ScanResult};
-use kron::core::sync::daemon::{self, DaemonStatus};
 use kron::core::sync::sync_index::{
     internal_path_for, project_path_for, ImportantIndex,
 };
@@ -288,56 +287,7 @@ fn resolve_twice_fails_on_second_call() {
     assert!(err.is_err(), "second resolve must fail");
 }
 
-// ---- daemon ----
-
-#[test]
-fn daemon_start_registers_pid_and_status() {
-    let tmp = fresh_project();
-    let root = tmp.path();
-    assert!(!daemon::is_running(root));
-
-    let outcome = daemon::start(root).expect("start");
-    assert!(outcome.pid > 0);
-    assert!(daemon::is_running(root));
-
-    let st = daemon::status(root).expect("status");
-    let st: DaemonStatus = st.expect("status not None");
-    assert_eq!(st.pid, std::process::id());
-    assert!(st.last_scan.is_some());
-    assert!(st.last_scan_at.is_some());
-}
-
-#[test]
-fn daemon_start_twice_fails() {
-    let tmp = fresh_project();
-    let root = tmp.path();
-    let _ = daemon::start(root).expect("start 1");
-    let err = daemon::start(root);
-    assert!(err.is_err(), "second start must fail");
-}
-
-#[test]
-fn daemon_stop_removes_marker() {
-    let tmp = fresh_project();
-    let root = tmp.path();
-    let _ = daemon::start(root).expect("start");
-    assert!(daemon::is_running(root));
-    let removed = daemon::stop(root).expect("stop");
-    assert!(removed);
-    assert!(!daemon::is_running(root));
-}
-
-#[test]
-fn daemon_stop_when_not_running_is_idempotent() {
-    let tmp = fresh_project();
-    let root = tmp.path();
-    let removed = daemon::stop(root).expect("stop (first)");
-    assert!(!removed);
-    let removed = daemon::stop(root).expect("stop (second)");
-    assert!(!removed);
-}
-
-// ---- end-to-end ----
+// ---- end-to-end: init → detect → resolve ----
 
 #[test]
 fn full_lifecycle_init_to_resolved_conflict() {
@@ -348,9 +298,9 @@ fn full_lifecycle_init_to_resolved_conflict() {
     register_important(root, "src/main.rs", "v1\n");
     register_important(root, "docs/readme.md", "first\n");
 
-    let r = daemon::start(root).expect("daemon start");
-    assert_eq!(r.scan.scanned, 2);
-    assert_eq!(r.scan.synced, 2);
+    let r = conflict::detect(root).expect("first detect");
+    assert_eq!(r.stats.scanned, 2);
+    assert_eq!(r.stats.synced, 2);
 
     // 2. Diverge one file on the project side.
     fs::write(project_path_for(root, "src/main.rs"), "v2-from-project\n").unwrap();
@@ -380,9 +330,4 @@ fn full_lifecycle_init_to_resolved_conflict() {
     assert_eq!(r3.stats.conflicts_existing, 0);
     let pending = list_by_status(root, "pending").unwrap();
     assert!(pending.is_empty());
-
-    // 6. The daemon status still records the last scan.
-    let st = daemon::status(root).expect("status");
-    let st = st.expect("status Some");
-    assert!(st.last_scan.is_some());
 }

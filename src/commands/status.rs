@@ -5,7 +5,6 @@ use serde::Serialize;
 
 use crate::commands::Ctx;
 use crate::core::sync::conflict as core_conflict;
-use crate::core::sync::daemon as core_daemon;
 use crate::error::Result;
 
 #[derive(Debug, Args)]
@@ -23,13 +22,6 @@ struct StatusReport {
     tasks: u32,
     important_files: u32,
     pending_conflicts: u32,
-    daemon: DaemonInfo,
-}
-
-#[derive(Serialize)]
-struct DaemonInfo {
-    running: bool,
-    pid: Option<u32>,
 }
 
 /// Count `.md` files directly under a directory (one level).
@@ -80,19 +72,12 @@ pub fn run(ctx: Ctx, args: StatusArgs) -> Result<()> {
         0
     };
 
-    // P2: real pending-conflict count + daemon status.
     let pending_conflicts: u32 = if initialized {
         core_conflict::list_by_status(&root, "pending")
             .map(|v| v.len() as u32)
             .unwrap_or(0)
     } else {
         0
-    };
-    let daemon_running = initialized && core_daemon::is_running(&root);
-    let daemon_pid = if daemon_running {
-        core_daemon::status(&root).ok().flatten().map(|s| s.pid)
-    } else {
-        None
     };
 
     let report = StatusReport {
@@ -102,19 +87,17 @@ pub fn run(ctx: Ctx, args: StatusArgs) -> Result<()> {
         tasks,
         important_files,
         pending_conflicts,
-        daemon: DaemonInfo { running: daemon_running, pid: daemon_pid },
     };
 
     ctx.json(&report)?;
-    ctx.porcelain(format!("{}\t{}\t{}\t{}\t{}\t{}\trunning={}\tpid={}",
+    ctx.porcelain(format!(
+        "{}\t{}\t{}\t{}\t{}\t{}",
         report.project,
         report.initialized,
         report.vertices,
         report.tasks,
         report.important_files,
         report.pending_conflicts,
-        report.daemon.running,
-        report.daemon.pid.map(|p| p.to_string()).unwrap_or_else(|| "-".into()),
     ));
     ctx.human(format!("Project:       {}", report.project));
     ctx.human(format!("Initialized:   {}", report.initialized));
@@ -122,12 +105,6 @@ pub fn run(ctx: Ctx, args: StatusArgs) -> Result<()> {
     ctx.human(format!("Tasks:         {}", report.tasks));
     ctx.human(format!("Important:     {}", report.important_files));
     ctx.human(format!("Conflicts:     {} pending", report.pending_conflicts));
-    ctx.human(format!("Daemon:        {}",
-        if report.daemon.running {
-            format!("running (pid {})", report.daemon.pid.unwrap_or(0))
-        } else {
-            "stopped".into()
-        }));
     if args.watch.is_some() {
         ctx.human("\u{2139}  --watch is a Phase 2 stub; not refreshing.");
     }
