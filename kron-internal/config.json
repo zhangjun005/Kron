@@ -1,0 +1,12 @@
+{
+  "name": "Kron",
+  "project_path": "E:\\works\\Kron",
+  "kron_data_path": "E:\\works\\Kron\\kron-internal",
+  "created_at": "2026-09-07T05:32:49.972395600Z",
+  "kron_version": "0.1.0",
+  "settings": {
+    "conflict_threshold_minutes": 5,
+    "auto_resolve": "prompt",
+    "context_refresh_minutes": 5
+  }
+}

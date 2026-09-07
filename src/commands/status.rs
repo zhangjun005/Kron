@@ -47,9 +47,9 @@ fn count_md(dir: &std::path::Path) -> u32 {
 }
 
 pub fn run(ctx: Ctx, args: StatusArgs) -> Result<()> {
-    let cwd = std::env::current_dir()?;
-    let kron_dir = cwd.join("kron-internal");
-    let kron_public = cwd.join("KRON");
+    let root = crate::commands::require_project_root(&ctx)?;
+    let kron_dir = root.join("kron-internal");
+    let kron_public = root.join("KRON");
 
     let initialized = kron_dir.join("config.json").exists();
 
@@ -82,21 +82,21 @@ pub fn run(ctx: Ctx, args: StatusArgs) -> Result<()> {
 
     // P2: real pending-conflict count + daemon status.
     let pending_conflicts: u32 = if initialized {
-        core_conflict::list_by_status(&cwd, "pending")
+        core_conflict::list_by_status(&root, "pending")
             .map(|v| v.len() as u32)
             .unwrap_or(0)
     } else {
         0
     };
-    let daemon_running = initialized && core_daemon::is_running(&cwd);
+    let daemon_running = initialized && core_daemon::is_running(&root);
     let daemon_pid = if daemon_running {
-        core_daemon::status(&cwd).ok().flatten().map(|s| s.pid)
+        core_daemon::status(&root).ok().flatten().map(|s| s.pid)
     } else {
         None
     };
 
     let report = StatusReport {
-        project: cwd.display().to_string(),
+        project: root.display().to_string(),
         initialized,
         vertices,
         tasks,
@@ -105,39 +105,31 @@ pub fn run(ctx: Ctx, args: StatusArgs) -> Result<()> {
         daemon: DaemonInfo { running: daemon_running, pid: daemon_pid },
     };
 
-    match ctx.mode {
-        crate::output::OutputMode::Json => {
-            println!("{}", serde_json::to_string_pretty(&report)?);
-        }
-        crate::output::OutputMode::Porcelain => {
-            println!("{}\t{}\t{}\t{}\t{}\t{}\trunning={}\tpid={}",
-                report.project,
-                report.initialized,
-                report.vertices,
-                report.tasks,
-                report.important_files,
-                report.pending_conflicts,
-                report.daemon.running,
-                report.daemon.pid.map(|p| p.to_string()).unwrap_or_else(|| "-".into()),
-            );
-        }
-        crate::output::OutputMode::Human => {
-            println!("Project:       {}", report.project);
-            println!("Initialized:   {}", report.initialized);
-            println!("Vertices:      {}", report.vertices);
-            println!("Tasks:         {}", report.tasks);
-            println!("Important:     {}", report.important_files);
-            println!("Conflicts:     {} pending", report.pending_conflicts);
-            println!("Daemon:        {}",
-                if report.daemon.running {
-                    format!("running (pid {})", report.daemon.pid.unwrap_or(0))
-                } else {
-                    "stopped".into()
-                });
-            if args.watch.is_some() {
-                println!("\u{2139}  --watch is a Phase 2 stub; not refreshing.");
-            }
-        }
+    ctx.json(&report)?;
+    ctx.porcelain(format!("{}\t{}\t{}\t{}\t{}\t{}\trunning={}\tpid={}",
+        report.project,
+        report.initialized,
+        report.vertices,
+        report.tasks,
+        report.important_files,
+        report.pending_conflicts,
+        report.daemon.running,
+        report.daemon.pid.map(|p| p.to_string()).unwrap_or_else(|| "-".into()),
+    ));
+    ctx.human(format!("Project:       {}", report.project));
+    ctx.human(format!("Initialized:   {}", report.initialized));
+    ctx.human(format!("Vertices:      {}", report.vertices));
+    ctx.human(format!("Tasks:         {}", report.tasks));
+    ctx.human(format!("Important:     {}", report.important_files));
+    ctx.human(format!("Conflicts:     {} pending", report.pending_conflicts));
+    ctx.human(format!("Daemon:        {}",
+        if report.daemon.running {
+            format!("running (pid {})", report.daemon.pid.unwrap_or(0))
+        } else {
+            "stopped".into()
+        }));
+    if args.watch.is_some() {
+        ctx.human("\u{2139}  --watch is a Phase 2 stub; not refreshing.");
     }
     Ok(())
 }

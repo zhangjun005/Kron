@@ -45,10 +45,14 @@ fn make_task(id: &str, title: &str, state: &str) -> Task {
 
 #[test]
 fn parse_state_lowercases_and_rejects_empty() {
-    assert_eq!(parse_state("DOING").unwrap(), "doing");
-    assert_eq!(parse_state("todo").unwrap(), "todo");
-    assert_eq!(parse_state("Custom-Vertex").unwrap(), "custom-vertex");
+    // Anchor #8 / Q1: parse_state now returns TaskState and refuses
+    // anything outside the canonical trio.
+    use kron::model::TaskState;
+    assert_eq!(parse_state("DOING").unwrap(), TaskState::Doing);
+    assert_eq!(parse_state("todo").unwrap(), TaskState::Todo);
+    assert_eq!(parse_state("done").unwrap(), TaskState::Done);
     assert!(parse_state("").is_err());
+    assert!(parse_state("Custom-Vertex").is_err(), "non-canonical names must be rejected");
 }
 
 #[test]
@@ -109,11 +113,10 @@ fn move_task_rejects_invalid_target() {
 
     // The command path applies parse_state first (lowercasing) before
     // reaching move_task; verify the parse step rejects empty and
-    // normalizes case.
+    // anything outside the canonical trio.
     assert!(parse_state("").is_err());
-    assert_eq!(parse_state("UPPER").unwrap(), "upper");
-    // After normalization, "upper" is still a valid slug:
-    assert!(kron::core::task::validate_vertex_name("upper").is_ok());
+    assert!(parse_state("UPPER").is_err(), "non-canonical must be rejected");
+    assert!(parse_state("foo").is_err());
 }
 
 #[test]

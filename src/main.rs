@@ -4,22 +4,18 @@
 //!
 //! The binary entry point: parses argv and runs the CLI.
 
-use kron::{cli, error::KronError};
+use kron::cli;
 
 fn main() {
     if let Err(e) = cli::run() {
         eprintln!("error: {e}");
-        std::process::exit(exit_code_for(&e));
-    }
-}
-
-/// Map error variants to process exit codes.
-///
-/// Conventions follow dev-docs/design/03-双源同步机制.md § 5.8.
-fn exit_code_for(err: &KronError) -> i32 {
-    match err {
-        KronError::AlreadyInitialized(_) => 4,
-        KronError::Cli(_) => 2,
-        _ => 1,
+        // Day 3 (Anchor #8): all error → exit code mapping now lives
+        // in `KronError::exit_code()`. Two sources of truth (the old
+        // local `exit_code_for` shadowing the canonical mapping in
+        // `error.rs`) were a correctness bug — the local version
+        // returned `1` for everything not in `{Cli, AlreadyInitialized}`
+        // while the canonical mapping distinguishes PermissionDenied (9),
+        // Io (6), NotFound (8), etc. Single source of truth.
+        std::process::exit(e.exit_code());
     }
 }

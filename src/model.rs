@@ -131,13 +131,21 @@ impl Project {
 
 // ---- Task state ----
 
-/// Lifecycle state of a task. The state also corresponds to which
-/// vertex directory the task lives under (simplified M1 model):
-/// `KRON/VERTEX/<state>/<id>.md`.
+/// Lifecycle state of a task. Locked to the canonical triad
+/// `todo / doing / done` — see dev-docs/dev-journal/2026-09-06-cli-semantic-decisions.md
+/// (Anchor #8, decision Q1 + Q9).
 ///
-/// The default vertex trio is `todo / doing / done`. Users may add
-/// more (e.g. `backlog`, `review`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// **Vertex vs state**: a vertex (e.g. `开发`, `需求分析`) is a phase /
+/// project-side concept and may be any slug registered in
+/// `kron-internal/vertices.json`. A `TaskState` is a logical lifecycle
+/// label and is one of exactly three values, independent of the vertex
+/// under which the task happens to live on disk.
+///
+/// Tasks are physically stored under `KRON/VERTEX/<vertex>/T<n>.md`; the
+/// `state` is also persisted in the file's front matter so that a move
+/// from `todo` to `doing` updates both the front matter and the
+/// containing directory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum TaskState {
     /// Not yet started.
@@ -162,6 +170,26 @@ impl TaskState {
     pub fn default_for_new() -> Self {
         TaskState::Todo
     }
+
+    /// The next state in the canonical `todo → doing → done` chain.
+    /// Returns `None` once the task is already in the terminal `done`
+    /// state (callers can decide whether to no-op, error, or wrap).
+    pub fn next_in_chain(self) -> Option<Self> {
+        match self {
+            TaskState::Todo => Some(TaskState::Doing),
+            TaskState::Doing => Some(TaskState::Done),
+            TaskState::Done => None,
+        }
+    }
+
+    /// The previous state in the canonical chain (for `kron task back`).
+    pub fn prev_in_chain(self) -> Option<Self> {
+        match self {
+            TaskState::Todo => None,
+            TaskState::Doing => Some(TaskState::Todo),
+            TaskState::Done => Some(TaskState::Doing),
+        }
+    }
 }
 
 impl Default for TaskState {
@@ -176,14 +204,91 @@ impl std::fmt::Display for TaskState {
     }
 }
 
-/// Parse an arbitrary state string into a [`TaskState`].
-/// Falls back to the given string being treated as a custom vertex
-/// name (i.e. always returns Ok for non-empty slugs).
-pub fn parse_state(s: &str) -> Result<String, String> {
+impl std::str::FromStr for TaskState {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        parse_state(s)
+    }
+}
+
+/// Parse a state string **strictly** into a [`TaskState`].
+///
+/// Anchor #8 / Q1: this used to be a passthrough that turned any
+/// non-empty string into a `String`. That made `task move --to foo`
+/// silently create a new vertex, blurring the boundary between
+/// lifecycle states and project-side phases. The strict version
+/// rejects anything that isn't exactly `todo`, `doing`, or `done`
+/// (case-insensitive).
+///
+/// **Backwards compatibility note**: this is a deliberate breaking
+/// change to the `parse_state` signature — it now returns
+/// `TaskState` instead of `String`. The v1 CLI never shipped, so no
+/// external consumer depends on the old behaviour (Anchor #8 / Q13).
+pub fn parse_state(s: &str) -> Result<TaskState, String> {
     if s.is_empty() {
         return Err("state name must not be empty".into());
     }
-    Ok(s.to_ascii_lowercase())
+    match s.to_ascii_lowercase().as_str() {
+        "todo" => Ok(TaskState::Todo),
+        "doing" => Ok(TaskState::Doing),
+        "done" => Ok(TaskState::Done),
+        other => Err(format!(
+            "invalid state '{other}', expected one of: todo, doing, done"
+        )),
+    }
+}
+
+#[cfg(test)]
+mod task_state_tests {
+    use super::*;
+
+    #[test]
+    fn parse_accepts_canonical_triplet() {
+        assert_eq!(parse_state("todo").unwrap(), TaskState::Todo);
+        assert_eq!(parse_state("doing").unwrap(), TaskState::Doing);
+        assert_eq!(parse_state("done").unwrap(), TaskState::Done);
+    }
+
+    #[test]
+    fn parse_is_case_insensitive() {
+        assert_eq!(parse_state("TODO").unwrap(), TaskState::Todo);
+        assert_eq!(parse_state("Doing").unwrap(), TaskState::Doing);
+        assert_eq!(parse_state("DoNe").unwrap(), TaskState::Done);
+    }
+
+    #[test]
+    fn parse_rejects_anything_else() {
+        for s in ["foo", "bar", "backlog", "review", "todo ", " todo"] {
+            assert!(
+                parse_state(s).is_err(),
+                "expected '{s}' to be rejected, got Ok"
+            );
+        }
+        assert!(parse_state("").is_err(), "empty string must be rejected");
+    }
+
+    #[test]
+    fn chain_has_three_states() {
+        assert_eq!(TaskState::Todo.next_in_chain(), Some(TaskState::Doing));
+        assert_eq!(TaskState::Doing.next_in_chain(), Some(TaskState::Done));
+        assert_eq!(TaskState::Done.next_in_chain(), None);
+    }
+
+    #[test]
+    fn prev_chain_is_inverse_of_next() {
+        for s in [TaskState::Todo, TaskState::Doing, TaskState::Done] {
+            if let Some(n) = s.next_in_chain() {
+                assert_eq!(n.prev_in_chain(), Some(s));
+            }
+        }
+    }
+
+    #[test]
+    fn display_matches_as_str() {
+        assert_eq!(TaskState::Todo.to_string(), "todo");
+        assert_eq!(TaskState::Doing.to_string(), "doing");
+        assert_eq!(TaskState::Done.to_string(), "done");
+    }
 }
 
 // ---- Sync state (P2 dual-source synchronization) ----

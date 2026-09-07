@@ -1,6 +1,6 @@
 //! Integration tests for `kron task add` / `list` / `show`.
 
-use kron::core::task::{read_task, vertex_public_dir, vertex_state_file, normalize_description, validate_vertex_name};
+use kron::core::task::{read_task, validate_description, vertex_public_dir, vertex_state_file, validate_vertex_name};
 use std::fs;
 use tempfile::TempDir;
 
@@ -47,14 +47,20 @@ fn validate_vertex_name_rejects_invalid_slugs() {
 }
 
 #[test]
-fn normalize_description_truncates_over_200_chars() {
+fn validate_description_rejects_over_200_chars() {
+    // Anchor #8 / Q8: silent truncation is gone. >200 chars is a hard error.
     let long = "x".repeat(250);
-    let (s, truncated) = normalize_description(&long);
-    assert_eq!(s.len(), 200);
-    assert!(truncated);
-    let (s, truncated) = normalize_description("short");
-    assert_eq!(s, "short");
-    assert!(!truncated);
+    let err = validate_description(&long).unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("max is 200"), "unexpected error message: {msg}");
+
+    // Edge cases: ≤200 succeeds, exactly 200 succeeds.
+    let short = "hello";
+    assert_eq!(validate_description(short).unwrap(), "hello");
+    let exactly = "x".repeat(200);
+    assert!(validate_description(&exactly).is_ok());
+    let over = "x".repeat(201);
+    assert!(validate_description(&over).is_err());
 }
 
 #[test]

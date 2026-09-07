@@ -78,6 +78,23 @@ pub fn find(project_root: &Path, name: &str) -> Result<Option<VertexRecord>> {
     Ok(reg.into_iter().find(|v| v.name == name))
 }
 
+/// Look up a vertex by name and refuse with a helpful hint if it
+/// isn't registered.
+///
+/// Anchor #8 / Q6: `task add <vertex>` must never create a vertex
+/// implicitly. Every caller that wants to mutate tasks under a
+/// vertex should go through this function so the error message
+/// matches `04b-CLI设计.md` § 3.3 (`Use existing vertex; or run
+/// 'kron vertex create'`).
+pub fn find_required(project_root: &Path, name: &str) -> Result<VertexRecord> {
+    find(project_root, name)?
+        .ok_or_else(|| {
+            KronError::Cli(format!(
+                "vertex '{name}' does not exist; run 'kron vertex create {name}' first"
+            ))
+        })
+}
+
 /// Default project-side path for a vertex (matches P1 layout).
 pub fn default_path(name: &str) -> String {
     format!("KRON/VERTEX/{name}")

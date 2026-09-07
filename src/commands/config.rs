@@ -50,14 +50,6 @@ struct ConfigSettingsView {
     context_refresh_minutes: u32,
 }
 
-fn project_path() -> Result<std::path::PathBuf> {
-    let cwd = std::env::current_dir()?;
-    if !cwd.join("kron-internal").join("config.json").exists() {
-        return Err(KronError::NotAProject(cwd));
-    }
-    Ok(cwd)
-}
-
 fn load_project(root: &Path) -> Result<Project> {
     let path = root.join("kron-internal").join("config.json");
     if !path.exists() {
@@ -168,48 +160,32 @@ pub fn run(ctx: Ctx, args: ConfigArgs) -> Result<()> {
 }
 
 fn get_cmd(ctx: Ctx, key: &str) -> Result<()> {
-    let root = project_path()?;
+    let root = crate::commands::require_project_root(&ctx)?;
     let project = load_project(&root)?;
     let value = get_value(&project, key)?;
 
-    match ctx.mode {
-        crate::output::OutputMode::Json => {
-            let kv = KeyValue { key: key.into(), value };
-            println!("{}", serde_json::to_string_pretty(&kv)?);
-        }
-        crate::output::OutputMode::Porcelain => {
-            println!("{}\t{}", key, value);
-        }
-        crate::output::OutputMode::Human => {
-            println!("{}: {}", key, value);
-        }
-    }
+    let kv = KeyValue { key: key.into(), value: value.clone() };
+    ctx.json(&kv)?;
+    ctx.porcelain(format!("{}\t{}", key, value));
+    ctx.human(format!("{}: {}", key, value));
     Ok(())
 }
 
 fn set_cmd(ctx: Ctx, key: &str, raw: &str) -> Result<()> {
-    let root = project_path()?;
+    let root = crate::commands::require_project_root(&ctx)?;
     let mut project = load_project(&root)?;
     let new_value = set_value(&mut project, key, raw)?;
     save_project(&root, &project)?;
 
-    match ctx.mode {
-        crate::output::OutputMode::Json => {
-            let kv = KeyValue { key: key.into(), value: new_value };
-            println!("{}", serde_json::to_string_pretty(&kv)?);
-        }
-        crate::output::OutputMode::Porcelain => {
-            println!("{}\t{}", key, new_value);
-        }
-        crate::output::OutputMode::Human => {
-            println!("\u{2713} {} = {}", key, new_value);
-        }
-    }
+    let kv = KeyValue { key: key.into(), value: new_value.clone() };
+    ctx.json(&kv)?;
+    ctx.porcelain(format!("{}\t{}", key, new_value));
+    ctx.human(format!("\u{2713} {} = {}", key, new_value));
     Ok(())
 }
 
 fn list_cmd(ctx: Ctx) -> Result<()> {
-    let root = project_path()?;
+    let root = crate::commands::require_project_root(&ctx)?;
     let project = load_project(&root)?;
     let view = ConfigListing {
         project: project.name.clone(),
@@ -220,33 +196,29 @@ fn list_cmd(ctx: Ctx) -> Result<()> {
         },
     };
 
-    match ctx.mode {
-        crate::output::OutputMode::Json => {
-            println!("{}", serde_json::to_string_pretty(&view)?);
-        }
-        crate::output::OutputMode::Porcelain => {
-            println!("name\t{}", project.name);
-            println!("kron_version\t{}", project.kron_version);
-            println!("project_path\t{}", project.project_path.display());
-            println!("kron_data_path\t{}", project.kron_data_path.display());
-            println!("created_at\t{}", project.created_at.to_rfc3339());
-            println!("settings.conflict_threshold_minutes\t{}", project.settings.conflict_threshold_minutes);
-            println!("settings.auto_resolve\t{}", format!("{:?}", project.settings.auto_resolve).to_lowercase());
-            println!("settings.context_refresh_minutes\t{}", project.settings.context_refresh_minutes);
-        }
-        crate::output::OutputMode::Human => {
-            println!("Project");
-            println!("  name:           {}", project.name);
-            println!("  kron_version:   {}", project.kron_version);
-            println!("  project_path:   {}", project.project_path.display());
-            println!("  kron_data_path: {}", project.kron_data_path.display());
-            println!("  created_at:     {}", project.created_at.to_rfc3339());
-            println!();
-            println!("Settings");
-            println!("  settings.conflict_threshold_minutes: {}", project.settings.conflict_threshold_minutes);
-            println!("  settings.auto_resolve:               {}", format!("{:?}", project.settings.auto_resolve).to_lowercase());
-            println!("  settings.context_refresh_minutes:    {}", project.settings.context_refresh_minutes);
-        }
+    ctx.json(&view)?;
+    for line in &[
+        format!("name\t{}", project.name),
+        format!("kron_version\t{}", project.kron_version),
+        format!("project_path\t{}", project.project_path.display()),
+        format!("kron_data_path\t{}", project.kron_data_path.display()),
+        format!("created_at\t{}", project.created_at.to_rfc3339()),
+        format!("settings.conflict_threshold_minutes\t{}", project.settings.conflict_threshold_minutes),
+        format!("settings.auto_resolve\t{}", format!("{:?}", project.settings.auto_resolve).to_lowercase()),
+        format!("settings.context_refresh_minutes\t{}", project.settings.context_refresh_minutes),
+    ] {
+        ctx.porcelain(line.clone());
     }
+    ctx.human("Project");
+    ctx.human(format!("  name:           {}", project.name));
+    ctx.human(format!("  kron_version:   {}", project.kron_version));
+    ctx.human(format!("  project_path:   {}", project.project_path.display()));
+    ctx.human(format!("  kron_data_path: {}", project.kron_data_path.display()));
+    ctx.human(format!("  created_at:     {}", project.created_at.to_rfc3339()));
+    ctx.human(String::new());
+    ctx.human("Settings");
+    ctx.human(format!("  settings.conflict_threshold_minutes: {}", project.settings.conflict_threshold_minutes));
+    ctx.human(format!("  settings.auto_resolve:               {}", format!("{:?}", project.settings.auto_resolve).to_lowercase()));
+    ctx.human(format!("  settings.context_refresh_minutes:    {}", project.settings.context_refresh_minutes));
     Ok(())
 }

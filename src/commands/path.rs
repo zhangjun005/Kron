@@ -6,6 +6,7 @@
 use clap::Args;
 
 use crate::commands::Ctx;
+use crate::core::project;
 use crate::error::{KronError, Result};
 
 #[derive(Debug, Args)]
@@ -28,15 +29,15 @@ pub fn run(ctx: Ctx, args: PathArgs) -> Result<()> {
         ));
     }
 
-    let cwd = std::env::current_dir().map_err(KronError::Io)?;
+    // Resolve project root via ancestor search (Git-style). If no project is
+    // found we still return a conventional path so the output is predictable.
+    let root = project::find_project_root(&std::env::current_dir().map_err(KronError::Io)?)
+        .unwrap_or_else(|| std::env::current_dir().map_err(KronError::Io).unwrap());
 
-    // Conventional locations per dev-docs/design/00-总览与架构.md § 5
-    // and 04b-CLI设计.md § 3.1.
-    // Real resolution (does the project exist?) lands with Phase 1 milestone.
     let path = if args.kron_root {
-        cwd.join("kron-internal")
+        root.join("kron-internal")
     } else {
-        cwd.join("KRON").join("important")
+        root.join("KRON").join("important")
     };
 
     if ctx.mode == crate::output::OutputMode::Human {

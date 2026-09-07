@@ -65,6 +65,27 @@ pub fn vertex_public_dir(project_root: &Path, vertex: &str) -> PathBuf {
     project_root.join("KRON").join("VERTEX").join(vertex)
 }
 
+/// Verify that a vertex's physical directory exists.
+///
+/// This is the hard boundary for the user's R2 rule: task operations
+/// are strictly confined to already-existing vertex directories. No
+/// task command may create, or implicitly rely on the creation of,
+/// a vertex directory.
+///
+/// Call this at the top of every command-layer function that reads or
+/// writes tasks under a given vertex, before any filesystem operation.
+pub fn require_vertex_dir(project_root: &Path, vertex: &str) -> Result<()> {
+    let dir = vertex_public_dir(project_root, vertex);
+    if dir.is_dir() {
+        return Ok(());
+    }
+    Err(KronError::Cli(format!(
+        "vertex '{vertex}' has no physical directory at '{}'; \
+         run 'kron vertex create {vertex}' first",
+        dir.display()
+    )))
+}
+
 /// Locate the kron-internal state file for a vertex.
 pub fn vertex_state_file(project_root: &Path, vertex: &str) -> PathBuf {
     project_root
@@ -354,13 +375,79 @@ pub fn validate_vertex_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Truncate a one-line description to ≤200 chars (warn-level, but we still
-/// persist the truncated version — exit code stays 0).
-pub fn normalize_description(s: &str) -> (String, bool) {
-    let trimmed: String = s.chars().take(200).collect();
-    let truncated = trimmed.len() < s.chars().count();
-    (trimmed, truncated)
+/// Validate that a one-line description is at most 200 characters.
+///
+/// Anchor #8 / Q8: this used to be a silent truncation (`normalize_description`)
+/// that pretended to accept arbitrarily long strings but reduced them
+/// without telling the caller in any way an agent could trust. The new
+/// behaviour is a strict length cap — over-length input is rejected
+/// with a `Cli` error (exit code 2) so that AI agents and humans
+/// see the same outcome.
+///
+/// The cap matches the convention in `04b-CLI设计.md` § 3.2 (≤ 200
+/// chars for the one-line description field). Body content is
+/// stored verbatim because it lives in its own MD block.
+pub const MAX_DESCRIPTION_CHARS: usize = 200;
+
+pub fn validate_description(s: &str) -> Result<String> {
+    let count = s.chars().count();
+    if count > MAX_DESCRIPTION_CHARS {
+        return Err(KronError::Cli(format!(
+            "description is {count} chars; max is {MAX_DESCRIPTION_CHARS} \
+             (use --body for long-form markdown)"
+        )));
+    }
+    Ok(s.to_string())
 }
 
 /// A no-op token exported for tests that need a SLUG_RE reference.
 pub const SLUG_REGEX_DOC: &str = SLUG_RE;
+
+/// Truncate a one-line description to ≤200 chars (warn-level, but we still
+/// persist the truncated version — exit code stays 0).
+///
+/// **Deprecated** (Anchor #8 / Q8): replaced by [`validate_description`].
+/// Kept as a thin wrapper so existing call sites and tests still compile
+/// during the Day 1 migration; will be removed in Day 2.
+#[deprecated(note = "use validate_description — silent truncation hides bugs")]
+pub fn normalize_description(s: &str) -> (String, bool) {
+    let trimmed: String = s.chars().take(MAX_DESCRIPTION_CHARS).collect();
+    let truncated = trimmed.chars().count() < s.chars().count();
+    (trimmed, truncated)
+}
+
+#[cfg(test)]
+mod description_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_short_strings() {
+        assert_eq!(validate_description("hello").unwrap(), "hello");
+        assert_eq!(validate_description("").unwrap(), "");
+    }
+
+    #[test]
+    fn accepts_exactly_max_chars() {
+        let s: String = "x".repeat(MAX_DESCRIPTION_CHARS);
+        assert_eq!(validate_description(&s).unwrap().chars().count(), MAX_DESCRIPTION_CHARS);
+    }
+
+    #[test]
+    fn rejects_over_max_chars() {
+        let s: String = "x".repeat(MAX_DESCRIPTION_CHARS + 1);
+        let err = validate_description(&s).unwrap_err();
+        match err {
+            KronError::Cli(msg) => {
+                assert!(msg.contains("max is 200"), "unexpected message: {msg}");
+            }
+            other => panic!("expected Cli error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn counts_chars_not_bytes() {
+        // Each Chinese char is 3 UTF-8 bytes but counts as 1 char.
+        let s: String = "中".repeat(MAX_DESCRIPTION_CHARS);
+        assert!(validate_description(&s).is_ok(), "char-counting must be UTF-8 aware");
+    }
+}

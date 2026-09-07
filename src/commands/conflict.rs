@@ -7,6 +7,7 @@ use crate::commands::Ctx;
 use crate::core::sync::conflict as core_conflict;
 use crate::error::{KronError, Result};
 use crate::model::{ConflictRecord, ConflictResolution, ConflictStatus};
+use crate::output::OutputMode;
 
 #[derive(Debug, Args)]
 pub struct ConflictArgs {
@@ -104,14 +105,6 @@ struct ConflictResolveSummary {
     backup_retained_at: String,
 }
 
-fn require_project() -> Result<std::path::PathBuf> {
-    let cwd = std::env::current_dir()?;
-    if !cwd.join("kron-internal").join("config.json").exists() {
-        return Err(KronError::NotAProject(cwd));
-    }
-    Ok(cwd)
-}
-
 pub fn run(ctx: Ctx, args: ConflictArgs) -> Result<()> {
     match args.action {
         ConflictAction::List { status, since: _ } => list_cmd(ctx, &status),
@@ -124,67 +117,59 @@ pub fn run(ctx: Ctx, args: ConflictArgs) -> Result<()> {
 }
 
 fn list_cmd(ctx: Ctx, status: &str) -> Result<()> {
-    let project = require_project()?;
+    let project = crate::commands::require_project_root(&ctx)?;
     let records = core_conflict::list_by_status(&project, status)?;
 
-    match ctx.mode {
-        crate::output::OutputMode::Json => {
-            let rows: Vec<ConflictListRow> = records
-                .iter()
-                .map(|r| ConflictListRow {
-                    id: r.id.clone(),
-                    file: r.relative_path.clone(),
-                    status: r.status.to_string(),
-                    detected_at: r.detected_at.to_rfc3339(),
-                    project_hash: r.project_hash.clone(),
-                    internal_hash: r.internal_hash.clone(),
-                })
-                .collect();
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                "conflicts": rows,
-                "total": rows.len(),
-                "filter": status,
-            }))?);
-        }
-        crate::output::OutputMode::Porcelain => {
-            for r in &records {
-                println!(
-                    "{}\t{}\t{}\t{}\t{}\t{}",
-                    r.id,
-                    r.relative_path,
-                    r.status,
-                    r.detected_at.to_rfc3339(),
-                    r.project_hash,
-                    r.internal_hash,
-                );
-            }
-            if records.is_empty() {
-                println!("# (no {status} conflicts)");
-            }
-        }
-        crate::output::OutputMode::Human => {
-            if records.is_empty() {
-                println!("(no {status} conflicts)");
-                return Ok(());
-            }
-            println!("{:<32}  {:<30}  {:<10}  {}", "ID", "FILE", "STATUS", "DETECTED");
-            println!("{}", "-".repeat(96));
-            for r in &records {
-                println!(
-                    "{:<32}  {:<30}  {:<10}  {}",
-                    r.id,
-                    truncate(&r.relative_path, 30),
-                    r.status,
-                    r.detected_at.to_rfc3339(),
-                );
-            }
-        }
+    let rows: Vec<ConflictListRow> = records
+        .iter()
+        .map(|r| ConflictListRow {
+            id: r.id.clone(),
+            file: r.relative_path.clone(),
+            status: r.status.to_string(),
+            detected_at: r.detected_at.to_rfc3339(),
+            project_hash: r.project_hash.clone(),
+            internal_hash: r.internal_hash.clone(),
+        })
+        .collect();
+    ctx.json(&serde_json::json!({
+        "conflicts": rows,
+        "total": rows.len(),
+        "filter": status,
+    }))?;
+    for r in &records {
+        ctx.porcelain(format!(
+            "{}\t{}\t{}\t{}\t{}\t{}",
+            r.id,
+            r.relative_path,
+            r.status,
+            r.detected_at.to_rfc3339(),
+            r.project_hash,
+            r.internal_hash,
+        ));
+    }
+    if records.is_empty() {
+        ctx.porcelain(format!("# (no {status} conflicts)"));
+    }
+    if records.is_empty() {
+        ctx.human(format!("(no {status} conflicts)"));
+        return Ok(());
+    }
+    ctx.human(format!("{:<32}  {:<30}  {:<10}  {}", "ID", "FILE", "STATUS", "DETECTED"));
+    ctx.human("-".repeat(96));
+    for r in &records {
+        ctx.human(format!(
+            "{:<32}  {:<30}  {:<10}  {}",
+            r.id,
+            truncate(&r.relative_path, 30),
+            r.status,
+            r.detected_at.to_rfc3339(),
+        ));
     }
     Ok(())
 }
 
 fn show_cmd(ctx: Ctx, id: &str, diff_only: bool) -> Result<()> {
-    let project = require_project()?;
+    let project = crate::commands::require_project_root(&ctx)?;
     let rec = core_conflict::load_record(&project, id)?
         .ok_or_else(|| KronError::NotFound(project.join("kron-internal").join("conflicts").join(id)))?;
 
@@ -204,20 +189,20 @@ fn show_cmd(ctx: Ctx, id: &str, diff_only: bool) -> Result<()> {
         .map(|p| p.display().to_string())
         .unwrap_or_default();
 
-    if diff_only {
-        if ctx.mode != crate::output::OutputMode::Human {
-            // Even for diff_only we emit JSON if requested, so AI agents
-            // can pipe it without parsing human text.
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                "id": rec.id,
-                "file": rec.relative_path,
-                "diff": unified_diff,
-            }))?);
-        } else {
-            println!("{unified_diff}");
+        if diff_only {
+            if ctx.mode != OutputMode::Human {
+                // Even for diff_only we emit JSON if requested, so AI agents
+                // can pipe it without parsing human text.
+                ctx.json(&serde_json::json!({
+                    "id": rec.id,
+                    "file": rec.relative_path,
+                    "diff": unified_diff,
+                }))?;
+            } else {
+                ctx.human(&unified_diff);
+            }
+            return Ok(());
         }
-        return Ok(());
-    }
 
     let proj_preview = String::from_utf8_lossy(&proj_bytes).to_string();
     let int_preview = String::from_utf8_lossy(&int_bytes).to_string();
@@ -246,44 +231,36 @@ fn show_cmd(ctx: Ctx, id: &str, diff_only: bool) -> Result<()> {
         ],
     };
 
-    match ctx.mode {
-        crate::output::OutputMode::Json => {
-            println!("{}", serde_json::to_string_pretty(&show)?);
-        }
-        crate::output::OutputMode::Porcelain => {
-            println!(
-                "{}\t{}\t{}\tproject={}B\tinternal={}B\tbackup={}",
-                show.id, show.file, show.status,
-                show.project_version.size, show.internal_version.size, backup_path
-            );
-        }
-        crate::output::OutputMode::Human => {
-            println!("Conflict ID:    {}", show.id);
-            println!("File:           {}", show.file);
-            println!("Detected:       {}", show.detected_at);
-            println!("Status:         {}", show.status);
-            println!("Backup at:      {}", show.backup_path);
-            println!();
-            println!("Project version ({} bytes, MD5 {}):", show.project_version.size, show.project_version.hash);
-            println!("{}", "-".repeat(72));
-            println!("{}", truncate(&show.project_version.preview, 2000));
-            println!();
-            println!("Internal version ({} bytes, MD5 {}):", show.internal_version.size, show.internal_version.hash);
-            println!("{}", "-".repeat(72));
-            println!("{}", truncate(&show.internal_version.preview, 2000));
-            println!();
-            println!("Unified diff:");
-            println!("{}", "-".repeat(72));
-            println!("{}", show.diff.unified_diff);
-            println!();
-            println!("Resolutions: use --use project|internal | ignore");
-        }
-    }
+    ctx.json(&show)?;
+    ctx.porcelain(format!(
+        "{}\t{}\t{}\tproject={}B\tinternal={}B\tbackup={}",
+        show.id, show.file, show.status,
+        show.project_version.size, show.internal_version.size, backup_path
+    ));
+    ctx.human(format!("Conflict ID:    {}", show.id));
+    ctx.human(format!("File:           {}", show.file));
+    ctx.human(format!("Detected:       {}", show.detected_at));
+    ctx.human(format!("Status:         {}", show.status));
+    ctx.human(format!("Backup at:      {}", show.backup_path));
+    ctx.human(String::new());
+    ctx.human(format!("Project version ({} bytes, MD5 {}):", show.project_version.size, show.project_version.hash));
+    ctx.human("-".repeat(72));
+    ctx.human(truncate(&show.project_version.preview, 2000));
+    ctx.human(String::new());
+    ctx.human(format!("Internal version ({} bytes, MD5 {}):", show.internal_version.size, show.internal_version.hash));
+    ctx.human("-".repeat(72));
+    ctx.human(truncate(&show.internal_version.preview, 2000));
+    ctx.human(String::new());
+    ctx.human("Unified diff:");
+    ctx.human("-".repeat(72));
+    ctx.human(&show.diff.unified_diff);
+    ctx.human(String::new());
+    ctx.human("Resolutions: use --use project|internal | ignore");
     Ok(())
 }
 
 fn resolve_cmd(ctx: Ctx, id: &str, decision: ConflictResolution) -> Result<()> {
-    let project = require_project()?;
+    let project = crate::commands::require_project_root(&ctx)?;
     let updated = core_conflict::resolve(&project, id, decision)?;
 
     let summary = ConflictResolveSummary {
@@ -305,33 +282,25 @@ fn resolve_cmd(ctx: Ctx, id: &str, decision: ConflictResolution) -> Result<()> {
             .unwrap_or_default(),
     };
 
-    match ctx.mode {
-        crate::output::OutputMode::Json => {
-            println!("{}", serde_json::to_string_pretty(&summary)?);
-        }
-        crate::output::OutputMode::Porcelain => {
-            println!(
-                "{}\t{}\t{}\t{}\t{}",
-                summary.id,
-                summary.file,
-                summary.resolution,
-                summary.sync_state_after,
-                summary.backup_retained_at
-            );
-        }
-        crate::output::OutputMode::Human => {
-            println!(
-                "\u{2713} Resolved: {} now matches ({})",
-                summary.file, summary.resolution
-            );
-            println!("  Backup retained at: {}", summary.backup_retained_at);
-        }
-    }
+    ctx.json(&summary)?;
+    ctx.porcelain(format!(
+        "{}\t{}\t{}\t{}\t{}",
+        summary.id,
+        summary.file,
+        summary.resolution,
+        summary.sync_state_after,
+        summary.backup_retained_at
+    ));
+    ctx.human(format!(
+        "\u{2713} Resolved: {} now matches ({})",
+        summary.file, summary.resolution
+    ));
+    ctx.human(format!("  Backup retained at: {}", summary.backup_retained_at));
     Ok(())
 }
 
 fn ignore_cmd(ctx: Ctx, id: &str) -> Result<()> {
-    let project = require_project()?;
+    let project = crate::commands::require_project_root(&ctx)?;
     let updated = core_conflict::resolve(&project, id, ConflictResolution::Ignore)?;
 
     let summary = ConflictResolveSummary {
@@ -346,21 +315,13 @@ fn ignore_cmd(ctx: Ctx, id: &str) -> Result<()> {
             .unwrap_or_default(),
     };
 
-    match ctx.mode {
-        crate::output::OutputMode::Json => {
-            println!("{}", serde_json::to_string_pretty(&summary)?);
-        }
-        crate::output::OutputMode::Porcelain => {
-            println!(
-                "{}\t{}\tignored\tconflict\t{}",
-                summary.id, summary.file, summary.backup_retained_at
-            );
-        }
-        crate::output::OutputMode::Human => {
-            println!("\u{26a0} Conflict {} marked as Ignored.", summary.id);
-            println!("  File remains in conflict state until you resolve it.");
-        }
-    }
+    ctx.json(&summary)?;
+    ctx.porcelain(format!(
+        "{}\t{}\tignored\tconflict\t{}",
+        summary.id, summary.file, summary.backup_retained_at
+    ));
+    ctx.human(format!("\u{26a0} Conflict {} marked as Ignored.", summary.id));
+    ctx.human("  File remains in conflict state until you resolve it.");
     Ok(())
 }
 

@@ -1,4 +1,4 @@
-//! `kron important` — important-file management (P4 implementation).
+﻿//! `kron important` — important-file management (P4 implementation).
 //!
 //! `important` files live in two places:
 //! - Project side: any user-chosen path (typically under `KRON/`).
@@ -45,13 +45,22 @@ pub enum ImportantAction {
         message: Option<String>,
     },
     /// Unregister an important file.
+    ///
+    /// Anchor #8 / Q3: the **default** behaviour is now to delete the
+    /// project-side source file (matches user intuition — `remove`
+    /// means *remove*). Pass `--keep-source` to opt out of the source
+    /// deletion and keep the project-side copy intact (only the
+    /// kron-internal mirror is removed).
     Remove {
         /// Path relative to project root.
         path: String,
         #[arg(long)]
         force: bool,
+        /// Keep the project-side source file (only remove the
+        /// kron-internal mirror). The default is to also remove the
+        /// source file.
         #[arg(long)]
-        also_delete_source: bool,
+        keep_source: bool,
     },
     /// Show details of one important file.
     Show {
@@ -77,13 +86,7 @@ struct ImportantRow {
     conflict_id: Option<String>,
 }
 
-fn project_root() -> Result<std::path::PathBuf> {
-    let cwd = std::env::current_dir()?;
-    if !cwd.join("kron-internal").join("config.json").exists() {
-        return Err(KronError::NotAProject(cwd));
-    }
-    Ok(cwd)
-}
+
 
 /// Public test-only accessor for `normalize_rel`.
 pub fn normalize_rel_for_test(path: &str) -> Result<String> {
@@ -159,8 +162,9 @@ pub fn run(ctx: Ctx, args: ImportantArgs) -> Result<()> {
         ImportantAction::Add { path, copy, symlink, tag: _, message: _ } => {
             add_cmd(ctx, &path, copy, symlink)
         }
-        ImportantAction::Remove { path, force, also_delete_source } => {
-            remove_cmd(ctx, &path, force, also_delete_source)
+        // Anchor #8 / Q3: see the field doc on `Remove.keep_source`.
+        ImportantAction::Remove { path, force, keep_source } => {
+            remove_cmd(ctx, &path, force, keep_source)
         }
         ImportantAction::Show { path } => show_cmd(ctx, &path),
         ImportantAction::Sync { dry_run } => sync_cmd(ctx, dry_run),
@@ -168,56 +172,48 @@ pub fn run(ctx: Ctx, args: ImportantArgs) -> Result<()> {
 }
 
 fn list_cmd(ctx: Ctx) -> Result<()> {
-    let root = project_root()?;
+    let root = crate::commands::require_project_root(&ctx)?;
     let idx = ImportantIndex::load(&root)?;
     let mut entries: Vec<(&String, &ImportantEntry)> = idx.files.iter().collect();
     entries.sort_by(|a, b| a.0.cmp(b.0));
 
-    match ctx.mode {
-        crate::output::OutputMode::Json => {
-            let rows: Vec<ImportantRow> = entries
-                .iter()
-                .map(|(rel, e)| row_for(&root, rel, e))
-                .collect();
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                "files": rows,
-                "total": rows.len(),
-            }))?);
-        }
-        crate::output::OutputMode::Porcelain => {
-            for (rel, e) in &entries {
-                println!("{}\t{}\t{}", rel, e.sync_state, e.updated_at.to_rfc3339());
-            }
-            if entries.is_empty() {
-                println!("# (no important files — try `kron important add <path>`)");
-            }
-        }
-        crate::output::OutputMode::Human => {
-            if entries.is_empty() {
-                println!("(no important files — try `kron important add <path>`)");
-                return Ok(());
-            }
-            println!("{:<40}  {:<14}  {:<8}  {}", "PATH", "STATE", "SIZE", "UPDATED");
-            println!("{}", "-".repeat(86));
-            for (rel, e) in &entries {
-                let internal = sync_index::internal_path_for(&root, rel);
-                let sz = file_size(&internal).unwrap_or(0);
-                println!(
-                    "{:<40}  {:<14}  {:<8}  {}",
-                    rel,
-                    e.sync_state.to_string(),
-                    sz,
-                    e.updated_at.to_rfc3339(),
-                );
-            }
-        }
+    let rows: Vec<ImportantRow> = entries
+        .iter()
+        .map(|(rel, e)| row_for(&root, rel, e))
+        .collect();
+    ctx.json(&serde_json::json!({
+        "files": rows,
+        "total": rows.len(),
+    }))?;
+    for (rel, e) in &entries {
+        ctx.porcelain(format!("{}\t{}\t{}", rel, e.sync_state, e.updated_at.to_rfc3339()));
+    }
+    if entries.is_empty() {
+        ctx.porcelain("# (no important files — try `kron important add <path>`)");
+    }
+    if entries.is_empty() {
+        ctx.human("(no important files — try `kron important add <path>`)");
+        return Ok(());
+    }
+    ctx.human(format!("{:<40}  {:<14}  {:<8}  {}", "PATH", "STATE", "SIZE", "UPDATED"));
+    ctx.human("-".repeat(86));
+    for (rel, e) in &entries {
+        let internal = sync_index::internal_path_for(&root, rel);
+        let sz = file_size(&internal).unwrap_or(0);
+        ctx.human(format!(
+            "{:<40}  {:<14}  {:<8}  {}",
+            rel,
+            e.sync_state.to_string(),
+            sz,
+            e.updated_at.to_rfc3339(),
+        ));
     }
     Ok(())
 }
 
 fn add_cmd(ctx: Ctx, path: &str, copy: bool, symlink: bool) -> Result<()> {
     let _ = (copy, symlink); // both modes are implemented as plain copy in v1
-    let root = project_root()?;
+    let root = crate::commands::require_project_root(&ctx)?;
     let rel = normalize_rel(path)?;
     let proj = sync_index::project_path_for(&root, &rel);
     if !proj.exists() {
@@ -254,29 +250,21 @@ fn add_cmd(ctx: Ctx, path: &str, copy: bool, symlink: bool) -> Result<()> {
     }
     idx.save(&root)?;
 
-    match ctx.mode {
-        crate::output::OutputMode::Json => {
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                "added": rel,
-                "size": data.len(),
-                "hash": sync_index::md5_hex(&data),
-                "sync_state": "synced",
-            }))?);
-        }
-        crate::output::OutputMode::Porcelain => {
-            println!("{}\tsynced\t{}", rel, data.len());
-        }
-        crate::output::OutputMode::Human => {
-            println!("\u{2713} Registered '{}' as important ({} bytes)", rel, data.len());
-            println!("  Mirror:    {}", sync_index::internal_path_for(&root, &rel).display());
-            println!("  Sync:      synced");
-        }
-    }
+    ctx.json(&serde_json::json!({
+        "added": rel,
+        "size": data.len(),
+        "hash": sync_index::md5_hex(&data),
+        "sync_state": "synced",
+    }))?;
+    ctx.porcelain(format!("{}\tsynced\t{}", rel, data.len()));
+    ctx.human(format!("\u{2713} Registered '{}' as important ({} bytes)", rel, data.len()));
+    ctx.human(format!("  Mirror:    {}", sync_index::internal_path_for(&root, &rel).display()));
+    ctx.human("  Sync:      synced");
     Ok(())
 }
 
-fn remove_cmd(ctx: Ctx, path: &str, force: bool, also_delete_source: bool) -> Result<()> {
-    let root = project_root()?;
+fn remove_cmd(ctx: Ctx, path: &str, force: bool, keep_source: bool) -> Result<()> {
+    let root = crate::commands::require_project_root(&ctx)?;
     let rel = normalize_rel(path)?;
 
     let mut idx = ImportantIndex::load(&root)?;
@@ -291,6 +279,10 @@ fn remove_cmd(ctx: Ctx, path: &str, force: bool, also_delete_source: bool) -> Re
     idx.remove_entry(&rel);
     idx.save(&root)?;
 
+    // Anchor #8 / Q3: the **default** now also deletes the project-side
+    // source file (matches user intuition). `--keep-source` opts out.
+    let also_delete_source = !keep_source;
+
     // Optionally remove the mirror and/or the project-side source.
     let internal = sync_index::internal_path_for(&root, &rel);
     if internal.exists() {
@@ -303,31 +295,30 @@ fn remove_cmd(ctx: Ctx, path: &str, force: bool, also_delete_source: bool) -> Re
         }
     }
 
-    match ctx.mode {
-        crate::output::OutputMode::Json => {
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                "removed": rel,
-                "also_deleted_source": also_delete_source,
-            }))?);
-        }
-        crate::output::OutputMode::Porcelain => {
-            println!("{}\tremoved", rel);
-        }
-        crate::output::OutputMode::Human => {
-            println!("\u{2713} Unregistered '{rel}' from important");
-            if also_delete_source {
-                println!("  Source file also deleted.");
-            } else {
-                println!("  Mirror at {} removed.", internal.display());
-                println!("  (project-side source untouched — pass --also-delete-source to remove it)");
-            }
+    ctx.json(&serde_json::json!({
+        "removed": rel,
+        "also_deleted_source": also_delete_source,
+        "kept_source": keep_source,
+    }))?;
+    ctx.porcelain(format!("{}\tremoved", rel));
+    ctx.human(format!("\u{2713} Unregistered '{rel}' from important"));
+    if keep_source {
+        ctx.human(format!("  Source file kept: {}", sync_index::project_path_for(&root, &rel).display()));
+        ctx.human(format!("  Mirror at {} removed.", internal.display()));
+    } else {
+        ctx.human(format!("  Mirror at {} removed.", internal.display()));
+        let proj = sync_index::project_path_for(&root, &rel);
+        if proj.exists() {
+            ctx.human(format!("  Source file {} deleted.", proj.display()));
+        } else {
+            ctx.human("  Source file already missing — mirror removed only.");
         }
     }
     Ok(())
 }
 
 fn show_cmd(ctx: Ctx, path: &str) -> Result<()> {
-    let root = project_root()?;
+    let root = crate::commands::require_project_root(&ctx)?;
     let rel = normalize_rel(path)?;
     let idx = ImportantIndex::load(&root)?;
     let entry = idx
@@ -342,44 +333,36 @@ fn show_cmd(ctx: Ctx, path: &str) -> Result<()> {
 
     let row = row_for(&root, &rel, entry);
 
-    match ctx.mode {
-        crate::output::OutputMode::Json => {
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                "path": row.path,
-                "sync_state": row.sync_state,
-                "project": { "exists": proj_exists, "size": row.project_size, "path": proj.display().to_string() },
-                "internal": { "exists": internal_exists, "size": row.internal_size, "path": internal.display().to_string() },
-                "added_at": row.added_at,
-                "updated_at": row.updated_at,
-                "conflict_id": row.conflict_id,
-            }))?);
-        }
-        crate::output::OutputMode::Porcelain => {
-            println!("{}\t{}\t{}\t{}", rel, row.sync_state, row.internal_size, row.updated_at);
-        }
-        crate::output::OutputMode::Human => {
-            println!("Important file: {}", rel);
-            println!("  Sync state:  {}", row.sync_state);
-            println!("  Project:     {} ({}, {})",
-                if proj_exists { "exists" } else { "missing" },
-                row.project_size.map(|s| format!("{s} bytes")).unwrap_or_else(|| "-".into()),
-                proj.display());
-            println!("  Internal:    {} ({}, {})",
-                if internal_exists { "exists" } else { "missing" },
-                row.internal_size,
-                internal.display());
-            println!("  Added:       {}", row.added_at);
-            println!("  Updated:     {}", row.updated_at);
-            if let Some(cid) = &row.conflict_id {
-                println!("  Conflict:    {} (run `kron conflict show {}`)", cid, cid);
-            }
-        }
+    ctx.json(&serde_json::json!({
+        "path": row.path,
+        "sync_state": row.sync_state,
+        "project": { "exists": proj_exists, "size": row.project_size, "path": proj.display().to_string() },
+        "internal": { "exists": internal_exists, "size": row.internal_size, "path": internal.display().to_string() },
+        "added_at": row.added_at,
+        "updated_at": row.updated_at,
+        "conflict_id": row.conflict_id,
+    }))?;
+    ctx.porcelain(format!("{}\t{}\t{}\t{}", rel, row.sync_state, row.internal_size, row.updated_at));
+    ctx.human(format!("Important file: {}", rel));
+    ctx.human(format!("  Sync state:  {}", row.sync_state));
+    ctx.human(format!("  Project:     {} ({}, {})",
+        if proj_exists { "exists" } else { "missing" },
+        row.project_size.map(|s| format!("{s} bytes")).unwrap_or_else(|| "-".into()),
+        proj.display()));
+    ctx.human(format!("  Internal:    {} ({}, {})",
+        if internal_exists { "exists" } else { "missing" },
+        row.internal_size,
+        internal.display()));
+    ctx.human(format!("  Added:       {}", row.added_at));
+    ctx.human(format!("  Updated:     {}", row.updated_at));
+    if let Some(cid) = &row.conflict_id {
+        ctx.human(format!("  Conflict:    {} (run `kron conflict show {}`)", cid, cid));
     }
     Ok(())
 }
 
 fn sync_cmd(ctx: Ctx, dry_run: bool) -> Result<()> {
-    let root = project_root()?;
+    let root = crate::commands::require_project_root(&ctx)?;
     if dry_run {
         let idx = ImportantIndex::load(&root)?;
         for (rel, e) in &idx.files {
@@ -388,33 +371,25 @@ fn sync_cmd(ctx: Ctx, dry_run: bool) -> Result<()> {
         return Ok(());
     }
     let result = crate::core::sync::conflict::detect(&root)?;
-    match ctx.mode {
-        crate::output::OutputMode::Json => {
-            let summary = serde_json::json!({
-                "scanned": result.stats.scanned,
-                "synced": result.stats.synced,
-                "conflicts_new": result.stats.conflicts_new,
-                "conflicts_existing": result.stats.conflicts_existing,
-                "internal_only": result.stats.internal_only,
-                "project_only": result.stats.project_only,
-            });
-            println!("{}", serde_json::to_string_pretty(&summary)?);
-        }
-        crate::output::OutputMode::Porcelain => {
-            println!("scanned={}\tsynced={}\tconflicts_new={}\tinternal_only={}\tproject_only={}",
-                result.stats.scanned, result.stats.synced,
-                result.stats.conflicts_new, result.stats.internal_only,
-                result.stats.project_only);
-        }
-        crate::output::OutputMode::Human => {
-            println!("Scan complete:");
-            println!("  scanned:            {}", result.stats.scanned);
-            println!("  synced:             {}", result.stats.synced);
-            println!("  conflicts new:      {}", result.stats.conflicts_new);
-            println!("  conflicts existing: {}", result.stats.conflicts_existing);
-            println!("  internal_only:      {}", result.stats.internal_only);
-            println!("  project_only:       {}", result.stats.project_only);
-        }
-    }
+    let summary = serde_json::json!({
+        "scanned": result.stats.scanned,
+        "synced": result.stats.synced,
+        "conflicts_new": result.stats.conflicts_new,
+        "conflicts_existing": result.stats.conflicts_existing,
+        "internal_only": result.stats.internal_only,
+        "project_only": result.stats.project_only,
+    });
+    ctx.json(&summary)?;
+    ctx.porcelain(format!("scanned={}\tsynced={}\tconflicts_new={}\tinternal_only={}\tproject_only={}",
+        result.stats.scanned, result.stats.synced,
+        result.stats.conflicts_new, result.stats.internal_only,
+        result.stats.project_only));
+    ctx.human("Scan complete:");
+    ctx.human(format!("  scanned:            {}", result.stats.scanned));
+    ctx.human(format!("  synced:             {}", result.stats.synced));
+    ctx.human(format!("  conflicts new:      {}", result.stats.conflicts_new));
+    ctx.human(format!("  conflicts existing: {}", result.stats.conflicts_existing));
+    ctx.human(format!("  internal_only:      {}", result.stats.internal_only));
+    ctx.human(format!("  project_only:       {}", result.stats.project_only));
     Ok(())
 }

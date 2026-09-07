@@ -5,6 +5,7 @@ use serde::Serialize;
 
 use crate::commands::Ctx;
 use crate::core::init as core_init;
+use crate::core::project;
 use crate::error::{KronError, Result};
 use crate::model::LinkMode;
 
@@ -42,6 +43,14 @@ struct InitSummary {
 pub fn run(ctx: Ctx, args: InitArgs) -> Result<()> {
     let cwd = std::env::current_dir().map_err(KronError::Io)?;
 
+    // Refuse to nest a Kron project inside another one (mirrors Git's contract).
+    if let Some(ancestor) = project::find_ancestor_project(&cwd) {
+        return Err(KronError::AncestorProject {
+            attempted: cwd,
+            ancestor,
+        });
+    }
+
     let prep = core_init::prepare(&cwd, args.no_git)?;
 
     if prep.kron_dir_exists && !args.force {
@@ -60,40 +69,39 @@ pub fn run(ctx: Ctx, args: InitArgs) -> Result<()> {
         skipped: outcome.skipped.clone(),
     };
 
-    match ctx.mode {
-        crate::output::OutputMode::Json => {
-            println!("{}", serde_json::to_string_pretty(&summary)?);
-        }
-        crate::output::OutputMode::Porcelain => {
-            println!("{}\t{:?}\t{}\t{}",
-                summary.project,
-                summary.mode,
-                summary.no_vertex,
-                summary.git_check_skipped);
-            for c in &summary.created {
-                println!("+\t{c}");
-            }
-            for s in &summary.skipped {
-                println!("=\t{s}");
-            }
-        }
-        crate::output::OutputMode::Human => {
-            if ctx.verbose {
-                eprintln!("[debug] mode={:?} no_vertex={} no_git={} force={}",
-                    args.mode, args.no_vertex, args.no_git, args.force);
-            }
-            for c in &outcome.created {
-                println!("\u{2713} Created {c}");
-            }
-            for s in &outcome.skipped {
-                println!("= Skipped {s}");
-            }
-            println!();
-            println!("Project:    {}", outcome.project.name);
-            println!("Data:       {}", outcome.project.kron_data_path.display());
-            println!("Link mode:  {:?}", outcome.link_mode);
-            println!("Git repo:   {}", if prep.is_git { "yes" } else { "no (--no-git)" });
-        }
+    ctx.json(&summary)?;
+    ctx.porcelain(format!("{}\t{:?}\t{}\t{}",
+        summary.project,
+        summary.mode,
+        summary.no_vertex,
+        summary.git_check_skipped));
+    for c in &summary.created {
+        ctx.porcelain(format!("+\t{c}"));
     }
+    for s in &summary.skipped {
+        ctx.porcelain(format!("=\t{s}"));
+    }
+    if ctx.verbose {
+        eprintln!("[debug] mode={:?} no_vertex={} no_git={} force={}",
+            args.mode, args.no_vertex, args.no_git, args.force);
+    }
+    for c in &outcome.created {
+        ctx.human(format!("\u{2713} Created {c}"));
+    }
+    for s in &outcome.skipped {
+        ctx.human(format!("= Skipped {s}"));
+    }
+    ctx.human(String::new());
+    ctx.human(format!("Project:    {}", outcome.project.name));
+    ctx.human(format!("Data:       {}", outcome.project.kron_data_path.display()));
+    ctx.human(format!("Link mode:  {:?}", outcome.link_mode));
+    ctx.human(format!("Git repo:   {}", if prep.is_git { "yes" } else { "no (--no-git)" }));
+    ctx.human(String::new());
+    // Anchor #8 / Q12: init does NOT auto-create vertex
+    // directories or registry entries. Print a hint so the
+    // user knows the next step.
+    ctx.human("hint: run `kron vertex create todo/doing/done` to bootstrap state columns,");
+    ctx.human("      then `kron vertex use todo` to set the current vertex");
+    ctx.human("      (`kron task list` uses the current vertex; you can switch later)");
     Ok(())
 }
