@@ -81,9 +81,17 @@ pub enum KronError {
     #[error("cli: {0}")]
     Cli(String),
 
+    /// CLI-level error with a custom message (not from the enum).
+    #[error("{0}")]
+    CliCustom(String),
+
     /// A feature is not yet implemented (placeholder for stub commands).
     #[error("not yet implemented: {0}")]
     NotYetImplemented(&'static str),
+
+    /// A text file could not be parsed into the expected structure.
+    #[error("parse error: {0}")]
+    Parse(String),
 }
 
 /// Convenient Result alias.
@@ -98,9 +106,10 @@ impl KronError {
     /// switch over.
     pub fn exit_code(&self) -> i32 {
         match self {
-            // Cli-style errors: bad arguments, mutually-exclusive flags,
+            // Cli-style errors: bad arguments, conflicting flags,
             // invalid state strings, invalid task / vertex names.
             Self::Cli(_)
+            | Self::CliCustom(_)
             | Self::InvalidFrontmatter { .. }
             | Self::InvalidVertexName(_)
             | Self::InvalidTaskFilename(_)
@@ -113,9 +122,8 @@ impl KronError {
             | Self::NotGitRepo(_)
             | Self::AncestorProject { .. } => 4,
 
-            // Filesystem / parsing errors that the caller cannot
-            // reasonably recover from without operator intervention.
-            Self::PermissionDenied(_) => 9,
+            // Filesystem / parsing / permission errors.
+            Self::PermissionDenied(_) | Self::Parse(_) => 9,
             Self::Io(_) | Self::Json(_) | Self::Yaml(_) => 6,
 
             // Resource-not-found is a single exit code regardless of

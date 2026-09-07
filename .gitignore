@@ -5,9 +5,9 @@ Cargo.lock
 
 # Kron internal state (NEVER commit)
 /.kron/
-/.kron-internal/
+/kron-internal/
 /KRON/           # test artifacts from `kron init`
-kron-internal/   # test artifacts from `kron init`
+KRON/.kron-context/  # AI context snapshots (auto-generated, rebuild anytime)
 
 # Local scratch project (used for end-to-end CLI testing)
 /testProject/
