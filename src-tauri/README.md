@@ -43,15 +43,15 @@ frontend/                       Solid.js + Vite frontend
 ### Prerequisites
 
 - Rust toolchain (stable)
-- Node 20+ + pnpm
+- Node 20+ + npm
 - Tauri 2 prerequisites for Windows: see https://v2.tauri.app/start/prerequisites/
 
 ### First time setup
 
 ```bash
-# Frontend deps
+# Frontend deps (from the frontend/ directory)
 cd frontend
-pnpm install
+npm install
 
 # Backend will compile on first `cargo tauri dev`
 ```
@@ -61,20 +61,26 @@ pnpm install
 From the repo root:
 
 ```bash
+# Make sure frontend/dist/ exists (Tauri needs it for cargo check)
+# It's already created with a .gitkeep; Vite overwrites it on first build.
+
 cd src-tauri
 cargo tauri dev
 ```
 
 This will:
-1. Start Vite dev server on port 5173
+1. Run `npm run dev` in `frontend/` (Vite dev server on port 5173)
 2. Compile Rust backend
 3. Launch Tauri window pointing at the dev server
 
 ### Build (production)
 
 ```bash
-cd src-tauri
-cargo tauri build
+cd frontend
+npm run build       # outputs to frontend/dist/
+
+cd ../src-tauri
+cargo tauri build   # produces MSI + NSIS installers
 ```
 
 Outputs MSI + NSIS installers in `src-tauri/target/release/bundle/`.

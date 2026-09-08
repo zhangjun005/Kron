@@ -4,9 +4,15 @@
   "version": "0.1.0",
   "identifier": "com.kron.gui",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": {
+      "cwd": "../frontend",
+      "cmd": "npm run dev"
+    },
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": {
+      "cwd": "../frontend",
+      "cmd": "npm run build"
+    },
     "frontendDist": "../frontend/dist"
   },
   "app": {

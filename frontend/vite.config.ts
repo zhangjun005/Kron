@@ -3,7 +3,8 @@ import solid from 'vite-plugin-solid';
 
 const host = process.env.TAURI_DEV_HOST;
 
-export default defineConfig(async () => ({
+// https://vitejs.dev/config/
+export default defineConfig({
   plugins: [solid()],
 
   // Tauri uses fixed dev port; fail if not available
@@ -29,4 +30,4 @@ export default defineConfig(async () => ({
     minify: !process.env.TAURI_ENV_DEBUG ? 'esbuild' : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
   },
-}));
+});
