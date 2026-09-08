@@ -1,0 +1,49 @@
+[package]
+name = "kron-gui"
+version = "0.1.0"
+edition = "2024"
+description = "Kron desktop GUI (Tauri 2 + Solid frontend)"
+license = "MIT"
+
+[lib]
+name = "kron_gui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+# Tauri runtime
+tauri = { version = "2.0", features = [] }
+tauri-plugin-shell = "2.0"
+tauri-plugin-opener = "2.0"
+
+# Reuse kron core library (sibling crate)
+kron = { path = "../" }
+
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+
+# File watching
+notify = "6.1"
+notify-debouncer-full = "0.3"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Errors
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+[features]
+# Default Tauri features
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

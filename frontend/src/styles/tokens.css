@@ -1,0 +1,202 @@
+/* Kron GUI Design Tokens — see dev-docs/design/05c-GUI设计tokens.md */
+/* DO NOT add raw color/spacing/font-size values in component CSS.        */
+/* Use var(--token-name) referencing the tokens defined here.             */
+
+:root[data-theme="light"] {
+  /* —— 背景层 —— */
+  --bg-canvas: #f5f1e8;
+  --bg-surface: #faf6ed;
+  --bg-surface-elevated: #ffffff;
+  --bg-inset: #ece5d3;
+  --bg-overlay: rgba(45, 42, 38, 0.45);
+
+  /* —— 文字 —— */
+  --text-primary: #2d2a26;
+  --text-secondary: #6b6358;
+  --text-muted: #a89e8e;
+  --text-inverse: #faf6ed;
+  --text-link: #8b5e3c;
+
+  /* —— 边框 —— */
+  --border-default: #d8cfb9;
+  --border-strong: #b8ad94;
+  --border-subtle: #e8e1cf;
+  --border-focus: #c47854;
+
+  /* —— 主色 —— */
+  --color-primary: #c47854;
+  --color-primary-hover: #b06a48;
+  --color-primary-active: #9c5b3c;
+  --color-primary-bg: #f0d9c8;
+  --color-primary-fg: #ffffff;
+
+  /* —— 强调 —— */
+  --color-accent: #6b8e5a;
+  --color-accent-hover: #5a7a4a;
+  --color-accent-bg: #e2ead7;
+  --color-accent-fg: #ffffff;
+
+  /* —— 警告 —— */
+  --color-warning: #d4a04b;
+  --color-warning-bg: #f6e8c8;
+  --color-warning-fg: #5a3f1a;
+
+  /* —— 危险 —— */
+  --color-danger: #b85542;
+  --color-danger-hover: #a04530;
+  --color-danger-bg: #f5dad3;
+  --color-danger-fg: #ffffff;
+
+  /* —— 信息 —— */
+  --color-info: #6b8397;
+  --color-info-bg: #dde4eb;
+  --color-info-fg: #ffffff;
+
+  /* —— 状态色（看板列） —— */
+  --state-todo-bg: #ece5d3;
+  --state-doing-bg: #f0d9c8;
+  --state-done-bg: #e2ead7;
+  --state-back-bg: #e8e1cf;
+  --state-blocked-bg: #f5dad3;
+
+  /* —— 阴影 —— */
+  --shadow-near: 0 1px 2px rgba(45, 42, 38, 0.06);
+  --shadow-far: 0 4px 12px rgba(45, 42, 38, 0.08);
+  --shadow-inset: inset 0 1px 2px rgba(45, 42, 38, 0.06);
+  --shadow-focus: 0 0 0 3px rgba(196, 120, 84, 0.25);
+}
+
+:root[data-theme="dark"] {
+  --bg-canvas: #1f1d1a;
+  --bg-surface: #2a2722;
+  --bg-surface-elevated: #353128;
+  --bg-inset: #15130f;
+  --bg-overlay: rgba(0, 0, 0, 0.65);
+
+  --text-primary: #f5f1e8;
+  --text-secondary: #c8bfb0;
+  --text-muted: #8a8275;
+  --text-inverse: #1f1d1a;
+  --text-link: #e09b6e;
+
+  --border-default: #3d3933;
+  --border-strong: #5a5448;
+  --border-subtle: #2d2a26;
+  --border-focus: #d4895e;
+
+  --color-primary: #d4895e;
+  --color-primary-hover: #e09b6e;
+  --color-primary-active: #c47854;
+  --color-primary-bg: #3d2d20;
+  --color-primary-fg: #1f1d1a;
+
+  --color-accent: #8da878;
+  --color-accent-hover: #a0bb8a;
+  --color-accent-bg: #2d3525;
+  --color-accent-fg: #1f1d1a;
+
+  --color-warning: #e0b667;
+  --color-warning-bg: #3d3320;
+  --color-warning-fg: #1f1d1a;
+
+  --color-danger: #d97a6a;
+  --color-danger-hover: #e8917f;
+  --color-danger-bg: #3d2520;
+  --color-danger-fg: #1f1d1a;
+
+  --color-info: #8da3b8;
+  --color-info-bg: #252d35;
+  --color-info-fg: #1f1d1a;
+
+  --state-todo-bg: #2a2722;
+  --state-doing-bg: #3d2d20;
+  --state-done-bg: #2d3525;
+  --state-back-bg: #252220;
+  --state-blocked-bg: #3d2520;
+
+  --shadow-near: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-far: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-inset: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-focus: 0 0 0 3px rgba(212, 137, 94, 0.35);
+}
+
+:root {
+  /* —— 间距（8px 网格） —— */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --space-9: 96px;
+
+  /* —— 字号 —— */
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-2xl: 28px;
+  --text-3xl: 36px;
+
+  --line-height-xs: 16px;
+  --line-height-sm: 18px;
+  --line-height-base: 22px;
+  --line-height-md: 24px;
+  --line-height-lg: 28px;
+  --line-height-xl: 32px;
+  --line-height-2xl: 36px;
+  --line-height-3xl: 44px;
+
+  /* —— 字重 —— */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  /* —— 字体 —— */
+  --font-serif: "Source Han Serif SC", "Songti SC", "Noto Serif CJK SC", Georgia, serif;
+  --font-sans: "Inter", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, "PingFang SC", monospace;
+
+  /* —— 圆角 —— */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 9999px;
+
+  /* —— 动画 —— */
+  --duration-fast: 120ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* —— z-index —— */
+  --z-base: 0;
+  --z-sticky: 100;
+  --z-dropdown: 1000;
+  --z-tooltip: 1100;
+  --z-modal: 1200;
+  --z-toast: 1300;
+  --z-drag: 9999;
+
+  /* —— 尺寸 —— */
+  --size-icon-sm: 14px;
+  --size-icon-md: 18px;
+  --size-icon-lg: 24px;
+  --size-control-sm: 28px;
+  --size-control-md: 36px;
+  --size-control-lg: 44px;
+  --size-card-min: 240px;
+  --size-card-max: 320px;
+  --size-sidebar-width: 220px;
+  --size-tab-height: 40px;
+  --size-statusbar-height: 28px;
+  --size-kanban-column-min: 260px;
+}
