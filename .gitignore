@@ -1,0 +1,35 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+*.out
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Project-specific
+.kron/
+KRON/.kron-context/
+kron-internal/
+
+# Frontend (will be reintroduced when GUI phase starts)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Rust legacy (will be cleaned from archive branch if needed)
+# Uncomment if rebuilding Rust side:
+# src-tauri/target/
+# target/
