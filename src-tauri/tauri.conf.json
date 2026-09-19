@@ -4,7 +4,6 @@
   "version": "0.1.0",
   "identifier": "com.kron.gui",
   "build": {
-    "devtools": true,
     "beforeDevCommand": "npm --prefix E:/works/Kron/frontend run dev",
     "devUrl": "http://localhost:5173",
     "beforeBuildCommand": "npm --prefix E:/works/Kron/frontend run build",

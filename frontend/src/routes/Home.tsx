@@ -13,19 +13,15 @@ import { toggleTheme } from '../stores/theme';
 export function Home() {
   const [greeting, setGreeting] = createSignal<Greeting | null>(null);
   const [projects, setProjects] = createSignal<ProjectMeta[]>([]);
-  const [error, setError] = createSignal<string | null>(null);
 
   onMount(async () => {
-    try {
-      const [g, ps] = await Promise.all([
-        ipc.kronGreet('Solid frontend'),
-        ipc.kronProjectList(),
-      ]);
-      setGreeting(g);
-      setProjects(ps);
-    } catch (e) {
-      setError(String(e));
-    }
+    // Fire both IPC calls independently — one failing doesn't kill the other.
+    ipc.kronGreet('Solid frontend').then(setGreeting).catch((e) => {
+      console.warn('[Kron IPC] kron_greet failed:', e);
+    });
+    ipc.kronProjectList().then(setProjects).catch((e) => {
+      console.warn('[Kron IPC] kron_project_list failed:', e);
+    });
   });
 
   return (
@@ -84,23 +80,7 @@ export function Home() {
         </button>
       </div>
 
-      {/* IPC smoke-test output */}
-      {error() && (
-        <div
-          style={{
-            background: 'var(--color-danger-bg)',
-            color: 'var(--color-danger)',
-            padding: 'var(--space-3) var(--space-4)',
-            'border-radius': 'var(--radius-md)',
-            'margin-bottom': 'var(--space-5)',
-            'font-family': 'var(--font-mono)',
-            'font-size': 'var(--text-sm)',
-          }}
-        >
-          IPC 错误: {error()}
-        </div>
-      )}
-
+      {/* IPC-connected greeting card */}
       {greeting() && (
         <section
           style={{

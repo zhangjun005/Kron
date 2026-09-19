@@ -32,7 +32,3 @@ pub async fn kron_greet(name: String) -> Result<Greeting, String> {
         timestamp: chrono::Utc::now().to_rfc3339(),
     })
 }
-
-// Re-export so `lib.rs` can find the `ProjectMeta` type via this module.
-#[allow(unused_imports)]
-use crate::ipc_types::ProjectMeta as _Reexport;
