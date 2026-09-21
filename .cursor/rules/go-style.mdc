@@ -1,0 +1,50 @@
+---
+description: Go coding rules for Kron — type safety (no any/interface{}), idiomatic error handling with errors.Is/As, project layout, godoc-style comments. Auto-loads when editing .go files.
+globs: **/*.go
+alwaysApply: false
+---
+
+# Go Style (Kron)
+
+Mirror of `.cursor/skills/go-style/SKILL.md`. Cursor loads this rule when any `.go` file is open.
+
+## Hard rules
+
+- **No `any` / `interface{}`** in function signatures. Use generics or concrete types. Allowed only for `encoding/json` genuinely free-form data.
+- **No panic** in library code. CLI `main()` may panic only on programmer errors.
+- **No type assertion without comma-ok**: `v, ok := x.(T)`.
+- **No reflection** unless documented with `// why` comment.
+- **No `time.Sleep`** in production code.
+- **No `==` / `!=` for errors**: always `errors.Is` / `errors.As`.
+
+## Error handling
+
+Always wrap with operation context:
+
+```go
+data, err := os.ReadFile(path)
+if err != nil {
+    return fmt.Errorf("reading task file %s: %w", path, err)
+}
+```
+
+## Project layout
+
+- `cmd/kron/main.go` is wiring only — parse flags, dispatch, exit.
+- Business logic in `internal/<package>/`.
+- No circular imports between `internal/*` packages.
+
+## Naming
+
+- Package: lowercase, single word (`store`, `model`).
+- Acronyms: HTTP, JSON, URL (not Http, Json, Url).
+- Constants: `MaxTasksPerFile`, not `MAX_TASKS_PER_FILE`.
+- File: lowercase, `task_store.go`, `task_test.go` colocated.
+
+## Comments
+
+- Package comment on every package.
+- Exported identifiers: godoc comment starting with the identifier name.
+- Inline comments explain *why*, not *what*.
+
+For side-by-side good/bad examples, see `.cursor/skills/go-style/examples.md`.
