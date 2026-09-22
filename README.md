@@ -1,107 +1,88 @@
 # Kron
 
-> Git-native task tracker for AI-assisted development.
+> 基于 Git 的 AI 辅助开发**意图管理**系统。
 
-Kron turns your Git repository's task data into **plain Markdown files** that AI coding agents (Cursor, Claude Code, Aider) can read and write directly — no API server, no daemon, no proprietary format. You talk to it; your AI talks to it; the diff is just `git diff`.
+Kron 把代码设计意图（Design Intent）存为**纯 Markdown 文件，放在你的仓库里**——无需 API 服务、无需守护进程、无需私有格式。AI 编程助手可以直接读写它们。一切差异就是 `git diff`。
 
 ---
 
-## The problem
+## 痛点
 
-AI coding agents work best when they have a clear sense of what needs to be done. Today, you write that down in chat: paste TODOs, copy task text, re-explain context every session. It's friction.
+AI 编程助手在清楚"为什么这么做、权衡了什么、放弃了什么"时表现最好。但现状是：
 
-Task trackers (Jira, Linear, GitHub Projects) live on the network — invisible to the agent. You can't `cat tasks.md`, you can't commit them, you can't diff them against last week.
+- 设计决策只存在于会议纪要、Slack 消息流或某人的脑子里；六个月后没人记得当时为什么拒绝方案 B。
+- 代码里的 `// FIXME` / `// TODO` 只能描述"要做什么"，无法承载"为什么这样做"。
+- 接手者（包括下一个 AI Agent）只能对着代码反推意图，推错了就埋雷。
 
-## What Kron is
+长期下来就产生了 **Intent Debt**：意图丢失、假设漂移、权衡失效。
 
-A task tracker that stores everything as **Markdown files inside your repo**:
+## Kron 是什么
+
+一个把意图沉淀为**仓库内 Markdown 文件**的系统：
 
 ```
 .kron/
-├── tasks/                     # one .md per task
-│   ├── 2026-09-19-001-init-go-mod.md
-│   ├── 2026-09-19-002-storage-schema.md
+├── intents/                   # 每个意图一个 .md（核心）
+│   ├── 2026-09-19-001-storage-format.md
+│   ├── 2026-09-19-002-id-scheme.md
 │   └── ...
-├── projects.md                # project registry (optional)
-└── config.toml                # kron config (optional)
+└── config.toml                # Kron 配置（可选）
 ```
 
-Each task file is a Markdown document with a small YAML frontmatter block:
+每个意图文件是一份 Markdown 文档，带一个轻量的 YAML frontmatter：
 
 ```markdown
 ---
-id: 2026-09-19-001
-status: open
-priority: high
-labels: [storage, schema]
-created: 2026-09-19T22:30:00Z
+symbol: "auth.RefreshToken"
+created_by: "@zhangjun005"
+updated_at: "2026-09-19T22:30:00Z"
 ---
 
-# Initialize Go module + directory skeleton
+# 存储格式选型
 
-## Why
-- [design doc](./dev-docs/design/01-storage-format.md) needs a real Go project to live in
-- decision: Go (clarity over completeness for a course-scale codebase)
+> 选 Markdown + YAML frontmatter，零依赖、零迁移成本。
 
-## Done when
-- [ ] `go mod init github.com/zhangjun005/kron`
-- [ ] directory layout decided: `cmd/kron/`, `internal/model/`, `internal/store/`
+## 为什么
+存储需要同时被人和 AI 编辑。选 Markdown + YAML frontmatter 的理由：
+- 人类可直接 `git diff` 阅读，无需学新工具
+- AI 可直接 prompt-context 读取，无需解析二进制
+
+## 权衡
+- **放弃了**：原生 SQLite 索引查询能力 —— 换来了零依赖、零迁移成本
+- **代价**：大规模条目下需要全文搜索，不适合 >1万条 的仓库
+
+## 边界假设
+- 假设仓库规模在个人 / 小团队级别（<1k 条）
+- 假设意图条目不会被频繁跨文件交叉引用（重写场景少见）
 ```
 
-That's it. **The agent reads the same file you read.**
+代码侧用极轻量锚点反向引用：
 
-## What Kron does NOT do
-
-- No background daemon. No file watcher. No sync engine.
-- No dual-source persistence. No conflict resolution mtime+hash state machine.
-- No proprietary format. The Markdown is the API.
-- No electron app. (A Tauri GUI may come later, layered on top — never required.)
-
-If a contributor or an AI can edit a Markdown file with confidence, that file is the truth.
-
-## Status
-
-🚧 **Go rewrite in progress.** The Rust/Tauri prototype is archived at branch [`archive/rust-v0.1`](../../tree/archive/rust-v0.1) (tag: `v0.1-rust-legacy`) for reference — it validated the thesis but accumulated design debt (see commit history).
-
-## Roadmap (rough)
-
-| Phase | What | State |
-|-------|------|-------|
-| 0 | Design: storage format & CLI surface | ⏳ drafting |
-| 1 | Go skeleton: `go mod init` + directory layout | ⏳ next |
-| 2 | Core CLI: `kron add`, `kron ls`, `kron done`, `kron show` | ⏳ |
-| 3 | Storage layer: read/write task .md files | ⏳ |
-| 4 | AI integration: `--for-ai` mode (concatenate tasks as one block) | ⏳ |
-| 5 | (Optional) Tauri GUI over HTTP API | ⏳ |
-
-## CLI preview (target)
-
-```bash
-# initialize .kron/ in current git repo
-kron init
-
-# add a new task — opens $EDITOR if interactive, else reads stdin
-kron add
-
-# list open tasks (Markdown table, default)
-kron ls
-
-# show full content of one task
-kron show 2026-09-19-001
-
-# mark a task done
-kron done 2026-09-19-001
-
-# emit everything as a single concatenated block — paste into Cursor chat
-kron ls --for-ai
+```go
+// @kron:intent 2026-09-19-001-storage-format
+func ParseFrontmatter(raw []byte) (map[string]any, string, error) { ... }
 ```
 
-All of the above has a `--json` mode for scripting, and a `--for-ai` mode that emits a single human-readable block.
+就这样。**AI 读的文件和你读的一样。**
 
-## Contributing
+## Kron 不做什么
 
-Decisions about format and CLI shape live in [`dev-docs/design/`](./dev-docs/design/). Read those before proposing changes — the format is what makes Kron worth using, and changing it costs users nothing because they own the files.
+- 无后台守护进程、无文件监听、无同步引擎。
+- 无双源持久化、无 mtime+hash 状态机冲突处理。
+- 无私有格式。Markdown 本身就是 API。
+- **不是**任务追踪器。任务只是意图落地时的派生钩子，不是独立实体。
+- 无 Electron 应用。（未来可能基于 Tauri 做 GUI，但非必须。）
+
+只要贡献者或 AI 能自信地编辑 Markdown 文件，那文件就是真相。
+
+## 状态
+
+🚧 **重做中（Go）**。
+
+## 参与贡献
+
+格式和 CLI 设计决策在 [`docs/abstractDesign/`](./docs/abstractDesign/)。提 PR 前先读这些——格式是 Kron 赖以生存的东西，改动会直接影响到用户，因为他们拥有这些文件。
 
 ## License
 
-TBD.
+MIT.

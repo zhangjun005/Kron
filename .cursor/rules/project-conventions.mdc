@@ -46,7 +46,7 @@ docs/            ← design notes
 - Renaming or moving packages
 - Reflection or `go generate` (must have a `// why` comment)
 - Force-pushes, history rewrites on shared branches
-- Changing the `.kron/tasks/*.md` frontmatter schema
+- Changing the `.kron/intents/*.md` frontmatter schema
 
 ## Skills (auto-loaded per language)
 

@@ -33,7 +33,7 @@ Every error must be wrapped at the point of origin:
 // ✅ wrap with operation context
 data, err := os.ReadFile(path)
 if err != nil {
-    return nil, fmt.Errorf("reading task file %s: %w", path, err)
+    return nil, fmt.Errorf("reading intent file %s: %w", path, err)
 }
 
 // ❌ bare return — caller has no idea what failed
@@ -46,19 +46,19 @@ if err != nil {
 Define sentinel errors for known failure modes:
 
 ```go
-var ErrTaskNotFound = errors.New("task not found")
+var ErrIntentNotFound = errors.New("intent not found")
 ```
 
 Discriminate with `errors.Is` / `errors.As`, never `==`:
 
 ```go
 // ✅
-if errors.Is(err, ErrTaskNotFound) { ... }
+if errors.Is(err, ErrIntentNotFound) { ... }
 var pathErr *fs.PathError
 if errors.As(err, &pathErr) { ... }
 
 // ❌
-if err == ErrTaskNotFound { ... }
+if err == ErrIntentNotFound { ... }
 ```
 
 ## Type safety — prefer the specific over the general
@@ -83,19 +83,19 @@ Pointer vs value receivers — pick one per type, stay consistent:
 | What | Rule | Example |
 |------|------|---------|
 | Package | lowercase, one word, no underscores | `store`, `model` |
-| Exported | PascalCase | `LoadTask`, `TaskStore` |
+| Exported | PascalCase | `LoadIntent`, `IntentStore` |
 | Unexported | camelCase | `parseFrontmatter` |
 | Acronyms | all caps | `HTTPClient`, `ParseJSON` |
-| Constants | PascalCase | `MaxTasksPerFile = 1000` |
-| File | lowercase, `_` for multi-word | `task_store.go` |
+| Constants | PascalCase | `MaxIntentsPerFile = 1000` |
+| File | lowercase, `_` for multi-word | `intent_store.go` |
 
-Never prefix an interface with `I` (no `ITaskStore`). Name it what it does: `TaskReader`, `Store`.
+Never prefix an interface with `I` (no `IIntentStore`). Name it what it does: `IntentReader`, `Store`.
 
 ## Project layout
 
 ```
 cmd/kron/        ← thin wiring only: parse flags, dispatch, exit
-internal/model/  ← domain types (Task, Project, Config)
+internal/model/  ← domain types (Intent, Config)
 internal/store/  ← file I/O, frontmatter parsing, YAML read/write
 internal/parser/ ← CLI argument parsing, markdown body extraction
 internal/cli/    ← cobra command implementations
@@ -110,9 +110,9 @@ No circular imports between `internal/*` packages.
 Every exported identifier needs a godoc comment. Format:
 
 ```go
-// LoadTask reads and parses a task file from .kron/tasks/.
-// Returns ErrTaskNotFound if the file does not exist.
-func LoadTask(id string) (*Task, error) { ... }
+// LoadIntent reads and parses an intent file from .kron/intents/.
+// Returns ErrIntentNotFound if the file does not exist.
+func LoadIntent(id string) (*Intent, error) { ... }
 ```
 
 Rules:
@@ -142,13 +142,13 @@ go fix ./internal/store
 Format: `<scope>: <imperative summary>`
 
 ```
-feat(store): add frontmatter parser for task files
+feat(store): add frontmatter parser for intent files
 fix(cli): handle missing .kron/ directory on kron ls
 docs: clarify storage format in README
 chore: bump github.com/spf13/cobra to 1.8.0
 ```
 
-Body explains *why*, not *what*. Reference design docs: `docs/design/XX-name.md`.
+Body explains *why*, not *what*. Reference design docs: `docs/abstractDesign/XX-name.md`.
 
 ## Things that need a `// why` comment
 
@@ -163,12 +163,12 @@ Body explains *why*, not *what*. Reference design docs: `docs/design/XX-name.md`
 
 ```go
 // ❌ Stutter: package name repeats in exported symbol
-package taskstore
-func (s *TaskStore) LoadTask(...)  // callers: taskstore.LoadTask
+package intentstore
+func (s *IntentStore) LoadIntent(...)  // callers: intentstore.LoadIntent
 
 // ✅ Clean: package is the noun, symbol says the verb
 package store
-func (s *Store) LoadTask(...)
+func (s *Store) LoadIntent(...)
 
 // ❌ Mixed-case acronym
 func parseJson(b []byte)  // ✅ HTTP, JSON, URL — all caps

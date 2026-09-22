@@ -41,22 +41,22 @@ At every trust boundary (file input, network response, user input), validate wit
 ```ts
 // ✅
 import { z } from 'zod'
-const TaskSchema = z.object({
-  id: z.string(),
-  status: z.enum(['open', 'done']),
-  priority: z.enum(['low', 'medium', 'high']),
+const IntentSchema = z.object({
+  symbol: z.string().or(z.array(z.string())),
+  created_by: z.string(),
+  updated_at: z.string(),
 })
-type Task = z.infer<typeof TaskSchema>
+type Intent = z.infer<typeof IntentSchema>
 
-async function loadTasks(): Promise<Task[]> {
-  const res = await fetch('/api/tasks')
+async function loadIntents(): Promise<Intent[]> {
+  const res = await fetch('/api/intents')
   const data: unknown = await res.json()
-  return z.array(TaskSchema).parse(data)  // throws on invalid shape
+  return z.array(IntentSchema).parse(data)  // throws on invalid shape
 }
 
 // ❌ any leaks all the way through
-async function loadTasks(): Promise<any[]> {
-  const res = await fetch('/api/tasks')
+async function loadIntents(): Promise<any[]> {
+  const res = await fetch('/api/intents')
   return res.json()
 }
 ```
@@ -77,12 +77,12 @@ function handle<T>(r: Result<T>) {
 }
 
 // ✅ Branded type — prevents mixing unrelated string IDs
-type TaskId = string & { readonly __brand: 'TaskId' }
+type IntentId = string & { readonly __brand: 'IntentId' }
 type ProjectId = string & { readonly __brand: 'ProjectId' }
 
-function loadTask(id: TaskId): Task { ... }
-// loadTask("abc" as TaskId)  // OK — intentional
-// loadTask(projectId)        // ❌ type error — ProjectId ≠ TaskId
+function loadIntent(id: IntentId): Intent { ... }
+// loadIntent("abc" as IntentId)  // OK — intentional
+// loadIntent(projectId)          // ❌ type error — ProjectId ≠ IntentId
 ```
 
 ## Error handling
@@ -109,10 +109,10 @@ try {
 Typed errors over generic `Error`:
 
 ```ts
-class TaskNotFoundError extends Error {
-  readonly code = 'TASK_NOT_FOUND'
-  constructor(readonly taskId: string) {
-    super(`task not found: ${taskId}`)
+class IntentNotFoundError extends Error {
+  readonly code = 'INTENT_NOT_FOUND'
+  constructor(readonly intentId: string) {
+    super(`intent not found: ${intentId}`)
   }
 }
 ```
@@ -144,12 +144,12 @@ If you encounter a build error from one of these settings, fix the code — do n
 
 | What | Rule | Example |
 |------|------|---------|
-| File | kebab-case | `task-store.ts`, `parse-frontmatter.ts` |
-| Class / Type / Interface | PascalCase, no `I` prefix | `TaskStore`, `TaskFrontmatter` |
-| Function / variable | camelCase | `loadTask`, `taskContent` |
+| File | kebab-case | `intent-store.ts`, `parse-frontmatter.ts` |
+| Class / Type / Interface | PascalCase, no `I` prefix | `IntentStore`, `IntentFrontmatter` |
+| Function / variable | camelCase | `loadIntent`, `intentContent` |
 | Boolean | `is` / `has` / `can` prefix | `isOpen`, `hasChildren` |
-| Constant | UPPER_SNAKE | `MAX_TASKS_PER_FILE` |
-| React component | PascalCase, file matches | `TaskList.tsx` |
+| Constant | UPPER_SNAKE | `MAX_INTENTS_PER_FILE` |
+| React component | PascalCase, file matches | `IntentList.tsx` |
 
 ## File organization
 
@@ -169,7 +169,7 @@ Imports ordered:
 3. Internal aliases (`@/types`, `@/lib`)
 4. Relative imports
 
-Use `import type { Task } from './types'` for type-only imports.
+Use `import type { Intent } from './types'` for type-only imports.
 
 ## Comments
 
@@ -182,13 +182,13 @@ Use `import type { Task } from './types'` for type-only imports.
 
 ```ts
 // ❌ Non-null ! on find()
-const task = tasks.find(t => t.id === id)!
-console.log(task.title)  // runtime crash if not found
+const intent = intents.find(i => i.symbol === id)!
+console.log(intent.symbol)  // runtime crash if not found
 
 // ✅
-const task = tasks.find(t => t.id === id)
-if (!task) throw new TaskNotFoundError(id)
-console.log(task.title)
+const intent = intents.find(i => i.symbol === id)
+if (!intent) throw new IntentNotFoundError(id)
+console.log(intent.symbol)
 
 // ❌ == instead of ===
 if (status == 'open') { ... }
@@ -203,12 +203,12 @@ if (obj.hasOwnProperty('id')) { ... }
 if (Object.hasOwn(obj, 'id')) { ... }  // Node 16.9+
 
 // ❌ Type assertion for shape validation
-const task = raw as Task
+const intent = raw as Intent
 
 // ✅ satisfies keeps narrow inferred type while validating
-const task = TaskSchema.parse(raw)  // zod
+const intent = IntentSchema.parse(raw)  // zod
 // or
-const task = raw satisfies Task  // built-in
+const intent = raw satisfies Intent  // built-in
 ```
 
 ## What this skill doesn't cover

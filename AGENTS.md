@@ -5,7 +5,7 @@
 
 ## What this project is
 
-Kron is a Git-native task tracker for AI-assisted development. It stores tasks as Markdown files inside the repository so AI agents and humans can read/write them directly via `git diff`. See [README.md](README.md) for the full vision.
+Kron is a Git-native intent management system for AI-assisted development. It stores design intents as Markdown files inside the repository so AI agents and humans can read/write them directly via `git diff`. See [README.md](README.md) for the full vision.
 
 **Current phase**: Go rewrite (clean slate — Rust/Tauri legacy is in the archive branch). Single binary CLI, no GUI yet.
 
@@ -29,13 +29,17 @@ kron/
 ├── cmd/
 │   └── kron/              ← CLI entry, thin wiring only
 ├── internal/
-│   ├── model/             ← domain types (Task, Project)
+│   ├── model/             ← domain types (Intent, Config)
 │   ├── store/             ← file I/O, frontmatter parsing
 │   ├── parser/            ← markdown/CLI argument parsing
 │   └── cli/               ← cobra command implementations
-├── docs/                  ← design notes and requirements
+├── docs/                  ← vision & design abstractions
 │   ├── article.md
-│   └── requirements.md
+│   ├── business.md
+│   ├── requirements.md
+│   └── abstractDesign/
+│       ├── intent-structure.md
+│       └── tech-stack.md
 ├── .cursor/
 │   ├── skills/            ← agent skills (loaded by Cursor)
 │   └── rules/             ← Cursor rule format (.mdc)
@@ -92,20 +96,32 @@ These are non-negotiable. The rules cover:
 
 ## Storage format reminder
 
-`.kron/tasks/*.md` files use this frontmatter shape (don't change without migration plan):
+`.kron/intents/*.md` files use this frontmatter shape (don't change without migration plan):
 
 ```yaml
 ---
-id: 2026-09-19-001-init-go-mod
-status: open
-priority: high
-created: 2026-09-19T10:00:00Z
-tags: [backend, cli]
+symbol: "auth.RefreshToken"
+created_by: "@zhangjun005"
+updated_at: "2026-09-22T10:00:00Z"
+# optional for multi-collaborator projects:
+# reviewers: ["@alice", "@bob"]
 ---
 
-# Task title
+# Intent title
 
-Markdown body with the actual task description.
+> One-line summary.
+
+## Why
+...
+
+## Trade-offs
+...
+
+## Invariants / Assumptions
+...
 ```
+
+Status lifecycle (managed via `status` field when needed):
+- `draft` → `active` → `superseded`
 
 Changing this schema breaks every existing user. Coordinate before changing.
