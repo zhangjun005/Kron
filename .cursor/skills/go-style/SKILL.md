@@ -94,14 +94,21 @@ Never prefix an interface with `I` (no `IIntentStore`). Name it what it does: `I
 ## Project layout
 
 ```
-cmd/kron/        ← thin wiring only: parse flags, dispatch, exit
-internal/model/  ← domain types (Intent, Config)
-internal/store/  ← file I/O, frontmatter parsing, YAML read/write
-internal/parser/ ← CLI argument parsing, markdown body extraction
-internal/cli/    ← cobra command implementations
+cmd/kron/
+├── main.go      ← thin wiring: dispatch subcommands, no business logic
+├── cli/         ← access layer: cobra commands (kron init / add / lint)
+└── serve-mcp/   ← access layer: MCP stdio server (planned)
+
+internal/        ← bottom layer packages only
+├── model/       ← domain types (Intent, Config), zero external deps
+├── store/       ← file I/O, YAML frontmatter read/write
+└── parser/      ← CLI argument parsing, markdown body extraction
 ```
 
-Business logic goes in `internal/`. If you find a `for` loop or an `if err != nil` in `cmd/kron/main.go`, move it to `internal/`.
+Business logic goes in `internal/` (bottom layer) or in access-layer subcommands under
+`cmd/kron/<sub>/`. `internal/` MUST NOT import any package under `cmd/kron/`.
+Access-layer subcommands under `cmd/kron/<sub>/` MUST NOT import each other. If two
+access layers need to share behavior, lift the shared code into `internal/` first.
 
 No circular imports between `internal/*` packages.
 
@@ -176,6 +183,21 @@ func parseJson(b []byte)  // ✅ HTTP, JSON, URL — all caps
 // ❌ Business logic in cmd/
 // ✅ cmd/kron/main.go: if err := cli.Execute(); err != nil { os.Exit(1) }
 ```
+
+## Pre-implementation discussion (apply before writing any code)
+
+Before writing code for a new exported function, type, or package, **propose the approach as a short written plan and wait for approval**. This is not optional.
+
+A plan should cover:
+- What the code does (one sentence)
+- What types and functions are being added, and why their shapes are chosen that way
+- Where it lives (`internal/model/`, `internal/store/`, etc.) and why
+- How it is tested
+- What the error model looks like (sentinel errors, wrapped errors)
+
+When the plan is simple (e.g., adding one test, adding a trivial helper), a one-sentence confirmation in chat is enough. When it touches a new type, changes a public API, or adds a new file, write a full plan.
+
+> Rationale: architectural decisions compound. A wrong type shape or function name in `internal/model` forces breaking changes across every caller. Catching it before writing code costs 2 minutes of chat; catching it after costs an hour of migration.
 
 ## What this skill doesn't cover
 

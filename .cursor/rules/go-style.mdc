@@ -33,7 +33,9 @@ Use `errors.Is` / `errors.As` — never `==`.
 ## Project layout
 
 - `cmd/kron/main.go` = thin wiring only.
-- Business logic in `internal/model/`, `internal/store/`, `internal/parser/`, `internal/cli/`.
+- Business logic in `internal/model/`, `internal/store/`, `internal/parser/`, and access-layer subcommands (`cmd/kron/<sub>/` like `cmd/kron/cli`, `cmd/kron/serve-mcp`).
+- `internal/` MUST NOT import any package under `cmd/kron/`.
+- Access-layer subcommands under `cmd/kron/<sub>/` MUST NOT import each other.
 - No circular imports between `internal/*` packages.
 
 ## Naming

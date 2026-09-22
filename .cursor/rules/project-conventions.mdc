@@ -1,12 +1,12 @@
 ---
-description: Project-wide agent conventions for Kron — tech stack, repo layout, workflow rules, and links to coding skills. Mirrors AGENTS.md.
+description: Project-wide agent conventions for Kron — tech stack, repo layout, workflow rules, and links to coding skills. Mirrors AGENTS.md and architecture.md.
 globs: **/*
 alwaysApply: true
 ---
 
 # Kron Project Conventions
 
-Cursor-native companion to [AGENTS.md](../../AGENTS.md). Read both before writing code.
+Cursor-native companion to [AGENTS.md](../../AGENTS.md) and [architecture.md](../../docs/abstractDesign/architecture.md). Read all three before writing code. **architecture.md is the architectural source of truth**; this file and AGENTS.md are working-conventions mirrors.
 
 ## Tech stack (locked)
 
@@ -20,24 +20,41 @@ Cursor-native companion to [AGENTS.md](../../AGENTS.md). Read both before writin
 ## Repo layout
 
 ```
-cmd/kron/        ← thin CLI entry, wiring only
-internal/model/  ← domain types
-internal/store/  ← file I/O
-internal/parser/ ← input parsing
-internal/cli/    ← cobra command implementations
-docs/            ← design notes
-.cursor/skills/  ← detailed style rules (auto-loaded)
-.cursor/rules/   ← Cursor-native rule format (this file)
+cmd/kron/        ← thin CLI entry; dispatches to subcommands
+├── main.go      ← wiring only
+├── cli/         ← cobra command implementations (kron init / add / lint)
+└── serve-mcp/   ← MCP stdio server (planned)
+
+internal/        ← bottom-layer packages only, no access-layer code
+├── model/
+├── store/
+└── parser/
+
+docs/             ← design notes
+.cursor/skills/   ← detailed style rules (auto-loaded)
+.cursor/rules/    ← Cursor-native rule format (this file)
 ```
 
-**Business logic goes in `internal/`. Never in `cmd/`.**
+**Business logic goes in `internal/` (bottom layer) or in access-layer subcommands under `cmd/kron/<sub>/`. `internal/` MUST NOT import `cmd/kron/`. Access-layer subcommands MUST NOT import each other.**
+
+## Architecture iron rules (don't violate)
+
+Source: `docs/abstractDesign/architecture.md` §〇. Brief:
+
+1. **Core decoupled from access layer** — `internal/store` / `parser` / `model` do not know whether the caller is CLI, MCP, LSP, IDE, or GUI.
+2. **No cross-access-layer calls** — CLI / MCP / LSP / IDE / GUI must not import or call each other; shared logic is sunk into `internal/`.
+3. **Caller identity via `context.Context`** — every store/parser fn takes `ctx context.Context` first; access layer injects caller key.
+4. **One-way deps** — `cmd → cli → {parser, store} → model`; no cycles; `model` has zero external imports. `internal/**` never imports `cmd/kron/**`.
+5. **CI lint is the only gate** — no runtime implicit state.
+6. **CLI minimal subset** — only `init` / `add` / `lint` / `serve-mcp`. `list` / `get` / `update` / `delete` / `restore` are MCP-only.
 
 ## Workflow
 
 1. Read `docs/article.md` and `docs/requirements.md` before coding.
-2. Verify the relevant skill (`go-style` or `ts-style`) is loaded.
-3. Write tests for any new exported function in the same change.
-4. Run before committing: `go vet ./...`, `gofmt -l .`, `go test ./...`.
+2. Read `docs/abstractDesign/architecture.md` before changing package boundaries or adding commands.
+3. Verify the relevant skill (`go-style` or `ts-style`) is loaded.
+4. Write tests for any new exported function in the same change.
+5. Run before committing: `go vet ./...`, `gofmt -l .`, `go test ./...`.
 
 ## Off-limits without explicit human approval
 
@@ -47,6 +64,9 @@ docs/            ← design notes
 - Reflection or `go generate` (must have a `// why` comment)
 - Force-pushes, history rewrites on shared branches
 - Changing the `.kron/intents/*.md` frontmatter schema
+- Adding CLI subcommands beyond `init` / `add` / `lint` / `serve-mcp`
+- Adding `config.toml` fields beyond `intents_dir`
+- Implementing `serve-lsp`, IDE plugin, GUI, hard-delete / GC (all Phase 2)
 
 ## Skills (auto-loaded per language)
 
