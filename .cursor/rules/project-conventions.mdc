@@ -1,12 +1,12 @@
 ---
-description: Project-wide agent conventions for Kron — tech stack, repo layout, workflow rules, and links to detailed coding skills. Mirrors AGENTS.md.
+description: Project-wide agent conventions for Kron — tech stack, repo layout, workflow rules, and links to coding skills. Mirrors AGENTS.md.
 globs: **/*
 alwaysApply: true
 ---
 
 # Kron Project Conventions
 
-This is the Cursor-native companion to [AGENTS.md](../../AGENTS.md). Read both before writing code.
+Cursor-native companion to [AGENTS.md](../../AGENTS.md). Read both before writing code.
 
 ## Tech stack (locked)
 
@@ -15,7 +15,7 @@ This is the Cursor-native companion to [AGENTS.md](../../AGENTS.md). Read both b
 - TOML for config (`BurntSushi/toml`)
 - YAML for frontmatter (`gopkg.in/yaml.v3`)
 - testify for test assertions
-- TypeScript only when GUI phase begins (excluded from `.gitignore` until then)
+- TypeScript only when GUI phase begins
 
 ## Repo layout
 
@@ -50,7 +50,7 @@ docs/            ← design notes
 
 ## Skills (auto-loaded per language)
 
-- `go-style` → see `.cursor/skills/go-style/SKILL.md`
-- `ts-style` → see `.cursor/skills/ts-style/SKILL.md`
+- `go-style` → see [SKILL.md](../skills/go-style/SKILL.md)
+- `ts-style` → see [SKILL.md](../skills/ts-style/SKILL.md)
 
 When in doubt: pick the more conservative / explicit option. Ask before adding deps or changing schemas.

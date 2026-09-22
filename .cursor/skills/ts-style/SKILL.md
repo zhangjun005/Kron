@@ -1,151 +1,219 @@
 ---
 name: ts-style
-description: Enforces TypeScript coding standards for the Kron project — strict type safety, no `any` except at trust boundaries, idiomatic error handling, and project-specific conventions. Use when writing, editing, or reviewing TypeScript or TSX files in this repository.
+description: >
+  Enforce TypeScript coding standards in Kron. Rules: no any except at three trust boundaries, zod at validation boundaries, no non-null ! assertions, strict tsconfig. Use when writing or reviewing TS/TSX code in this repo.
 ---
 
-# TypeScript Style — Kron Project
+# ts-style
 
-Rules that every `.ts` / `.tsx` file in this repo must follow. Apply automatically when generating or modifying TypeScript code.
+This skill is the authoritative source of truth for TypeScript code in Kron. Apply it when generating, editing, or reviewing `.ts` / `.tsx` files.
 
-## 1. Type safety
+## Key reference
 
-### `any` is forbidden except at three explicit trust boundaries
-- Parsing untrusted JSON / YAML from a file or network
-- Third-party library interop where types are missing or wrong (must have `// FIXME: <library>` comment)
-- Test fixtures and assertions
+- **Google TypeScript Style Guide**: https://google.github.io/styleguide/tsguide.html
+- **TypeScript strict mode best practices (2026)**: TypeScript 6.0 (March 2026) made `strict: true` the compiler default — it is no longer an aspiration, it is the baseline.
 
-Every other use of `any` must be replaced with:
-- A concrete type
-- `unknown` (paired with a type guard)
-- A generic `T`
-- A discriminated union
+Core principles: **Safety > Clarity > Simplicity > Maintainability**.
 
-### Prefer `unknown` over `any` for unknown shapes
+## Hard rules — violate these and the code is wrong
+
+- **No `any`** except at three explicit trust boundaries (see below). Every other use → `unknown` + guard, generic `T`, concrete type, or discriminated union.
+- **No `as Type` for narrowing.** Use a type guard or `zod.parse()`. `as const` is fine; `satisfies` is preferred over `as` for shape validation.
+- **No non-null `!` assertion** on optional values. Narrow with a guard or explicit throw.
+- **No `==` / `!=`.** Always `===` / `!==`.
+- **No empty `catch {}`.** Discriminate the error or re-throw.
+- **No `eval`** or `Function()` constructor.
+
+## The three allowed `any` boundaries
+
+`any` is permitted only in these specific situations:
+
+1. **Parsing untrusted JSON / YAML** from a file or network (before validation).
+2. **Third-party library interop** where the library has no types or wrong types — add `// FIXME: <library> missing types` comment.
+3. **Test fixtures and assertions** — explicit `as any` in a `describe` block is fine.
+
+Every other `any` use is a failure.
+
+## Runtime validation with zod
+
+At every trust boundary (file input, network response, user input), validate with zod. The inferred type is the source of truth:
 
 ```ts
-// ✅ unknown forces a type guard
-function parseTask(input: unknown): Task {
-  if (!isTask(input)) throw new Error("invalid task")
-  return input
+// ✅
+import { z } from 'zod'
+const TaskSchema = z.object({
+  id: z.string(),
+  status: z.enum(['open', 'done']),
+  priority: z.enum(['low', 'medium', 'high']),
+})
+type Task = z.infer<typeof TaskSchema>
+
+async function loadTasks(): Promise<Task[]> {
+  const res = await fetch('/api/tasks')
+  const data: unknown = await res.json()
+  return z.array(TaskSchema).parse(data)  // throws on invalid shape
 }
 
-// ❌ any silently bypasses type checking
-function parseTask(input: any): Task {
-  return input as Task
+// ❌ any leaks all the way through
+async function loadTasks(): Promise<any[]> {
+  const res = await fetch('/api/tasks')
+  return res.json()
 }
 ```
 
-### Type guards: write your own, or use `zod`
+## Discriminated unions and branded types
 
-- For runtime-validated boundaries (user input, file contents, network responses), use `zod` schemas. The inferred type is the source of truth.
-- For internal narrowing, write a small `function isX(x: unknown): x is X`.
+Prefer these over optional fields and loose types:
 
-### `as` is a code smell
+```ts
+// ✅ Discriminated union — exhaustively narrowed
+type Result<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: string }
 
-- `as Type` for **casting** is only allowed when the type narrowing cannot be expressed in the language (rare). Prefer a guard.
-- `as const` is encouraged for literals and tuples.
+function handle<T>(r: Result<T>) {
+  if (r.ok) return r.data
+  return r.error
+}
 
-### Avoid non-null assertions `!`
+// ✅ Branded type — prevents mixing unrelated string IDs
+type TaskId = string & { readonly __brand: 'TaskId' }
+type ProjectId = string & { readonly __brand: 'ProjectId' }
 
-- `x!.foo` is almost always wrong. Either narrow with a guard or check explicitly:
-  ```ts
-  // ❌
-  const task = tasks.find(t => t.id === id)!
-  // ✅
-  const task = tasks.find(t => t.id === id)
-  if (!task) throw new Error(`task ${id} not found`)
-  ```
+function loadTask(id: TaskId): Task { ... }
+// loadTask("abc" as TaskId)  // OK — intentional
+// loadTask(projectId)        // ❌ type error — ProjectId ≠ TaskId
+```
 
-## 2. Error handling
+## Error handling
 
-### Never swallow errors silently
+Never swallow errors silently:
+
 ```ts
 // ❌
-try { await fs.promises.writeFile(p, data) } catch {}
-
-// ✅
 try {
-  await fs.promises.writeFile(p, data)
+  await fs.promises.writeFile(path, data)
+} catch {}
+
+// ✅ — discriminate and handle or re-throw
+try {
+  await fs.promises.writeFile(path, data)
 } catch (err) {
-  if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+  if ((err as NodeJS.ErrnoException).code === 'EACCES') {
+    throw new Error(`permission denied: ${path}`)
+  }
+  throw err
 }
 ```
 
-### Typed errors over generic `Error`
-- Define error classes when callers need to discriminate: `class TaskNotFoundError extends Error { code = 'TASK_NOT_FOUND' as const }`.
-- For async boundaries, propagate via `Promise.reject` or `throw`.
+Typed errors over generic `Error`:
 
-## 3. Naming
-
-| Element | Convention | Example |
-|---------|-----------|---------|
-| File | kebab-case | `task-store.ts`, `parse-frontmatter.ts` |
-| Class / Type | PascalCase | `TaskStore`, `TaskFrontmatter` |
-| Function / variable | camelCase | `loadTask`, `taskContent` |
-| Constant | UPPER_SNAKE | `MAX_TASKS_PER_FILE` |
-| React component | PascalCase, file matches name | `TaskList.tsx` |
-| Interface | no `I` prefix | `Task`, not `ITask` |
-| Boolean | `is`/`has`/`can` prefix | `isOpen`, `hasChildren` |
-
-## 4. File organization
-
-- One exported symbol per file when reasonable; helper exports go in the same file.
-- `index.ts` re-exports the public surface only.
-- Imports ordered: built-ins → external → internal (`@/...`) → relative.
-- Use `type` import for type-only imports: `import type { Task } from './model'`.
-
-## 5. Project layout (TypeScript subprojects)
-
-```
-kron-frontend/           ← any UI work lives here
-├── src/
-│   ├── components/
-│   ├── lib/
-│   ├── api/             ← thin client over Go HTTP API
-│   └── main.tsx
-├── tsconfig.json        ← strict: true, noUncheckedIndexedAccess: true
-├── package.json
-└── vite.config.ts       ← or next.config, etc.
-```
-
-### `tsconfig.json` must have:
-```jsonc
-{
-  "compilerOptions": {
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true,
-    "exactOptionalPropertyTypes": true,
-    "noFallthroughCasesInSwitch": true
+```ts
+class TaskNotFoundError extends Error {
+  readonly code = 'TASK_NOT_FOUND'
+  constructor(readonly taskId: string) {
+    super(`task not found: ${taskId}`)
   }
 }
 ```
 
-## 6. Comments and JSDoc
+## tsconfig — non-negotiable
 
-- JSDoc on every exported function or type (mirrors Go's godoc requirement).
-- Inline comments explain **why**, not what.
-- `// FIXME:` for known issues, `// TODO:` for planned work, both with author and date when relevant.
+TypeScript 6.0 (March 2026) made `strict: true` the compiler default, but these two high-impact flags are **not** in `strict` and must be explicitly set:
 
-## 7. Commit messages
-
-Same format as Go:
+```jsonc
+{
+  "compilerOptions": {
+    "strict": true,                      // compiler default since TS 6.0, explicit is fine
+    "noUncheckedIndexedAccess": true,     // MUST — adds undefined to every index access
+    "exactOptionalPropertyTypes": true,   // MUST — distinguishes absent vs undefined
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "useUnknownInCatchVariables": true,  // catch (e: unknown), not e: any
+    "verbatimModuleSyntax": true,         // explicit import/export, no rewrites
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "skipLibCheck": true
+  }
+}
 ```
-<scope>: <imperative summary>
+
+If you encounter a build error from one of these settings, fix the code — do not change the tsconfig to silence it.
+
+## Naming
+
+| What | Rule | Example |
+|------|------|---------|
+| File | kebab-case | `task-store.ts`, `parse-frontmatter.ts` |
+| Class / Type / Interface | PascalCase, no `I` prefix | `TaskStore`, `TaskFrontmatter` |
+| Function / variable | camelCase | `loadTask`, `taskContent` |
+| Boolean | `is` / `has` / `can` prefix | `isOpen`, `hasChildren` |
+| Constant | UPPER_SNAKE | `MAX_TASKS_PER_FILE` |
+| React component | PascalCase, file matches | `TaskList.tsx` |
+
+## File organization
+
+```
+src/
+  components/     ← React components
+  lib/            ← Pure utility functions, shared logic
+  api/            ← Thin HTTP client over the Go backend
+  types/          ← Shared domain types and zod schemas
+  main.tsx        ← Entry point
+index.ts          ← Re-exports public surface only; no implementation
 ```
 
-- `feat(api): add client for kron task CRUD`
-- `fix(ui): clamp long task titles in TaskList`
-- `chore: bump typescript to 5.6`
+Imports ordered:
+1. Node built-ins (`node:fs`, `node:path`)
+2. External packages (`react`, `zod`)
+3. Internal aliases (`@/types`, `@/lib`)
+4. Relative imports
 
-## 8. Forbidden patterns
+Use `import type { Task } from './types'` for type-only imports.
 
-- `as any` casts — always `unknown` + guard
-- Non-null `!` assertions on optional values
-- `eval`, `Function()` constructor
-- `Object.prototype.hasOwnProperty.call` is fine; `obj.hasOwnProperty(...)` is not (unsafe)
-- `==` and `!=` — always `===` / `!==`
+## Comments
 
-## Examples
+- JSDoc on every exported function and type.
+- Inline comments explain *why*, not *what*.
+- `// FIXME: <desc>` for known issues with a ticket/issue URL if available.
+- `// TODO: <desc>` for planned work.
 
-For side-by-side good/bad examples covering all rules above, see [examples.md](examples.md).
+## Anti-patterns
+
+```ts
+// ❌ Non-null ! on find()
+const task = tasks.find(t => t.id === id)!
+console.log(task.title)  // runtime crash if not found
+
+// ✅
+const task = tasks.find(t => t.id === id)
+if (!task) throw new TaskNotFoundError(id)
+console.log(task.title)
+
+// ❌ == instead of ===
+if (status == 'open') { ... }
+
+// ✅
+if (status === 'open') { ... }
+
+// ❌ hasOwnProperty on object
+if (obj.hasOwnProperty('id')) { ... }
+
+// ✅
+if (Object.hasOwn(obj, 'id')) { ... }  // Node 16.9+
+
+// ❌ Type assertion for shape validation
+const task = raw as Task
+
+// ✅ satisfies keeps narrow inferred type while validating
+const task = TaskSchema.parse(raw)  // zod
+// or
+const task = raw satisfies Task  // built-in
+```
+
+## What this skill doesn't cover
+
+- Frontend framework choice (React, Vue, Svelte) — document when the UI phase starts.
+- CSS / styling approach — not yet decided.
+- State management (Zustand, Jotai, etc.) — defer until UI phase.
+- API client implementation details beyond "thin HTTP wrapper over Go backend".

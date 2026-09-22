@@ -1,54 +1,66 @@
 ---
-description: TypeScript coding rules for Kron — no any except at three trust boundaries, zod for runtime validation, no non-null assertions, strict tsconfig. Auto-loads when editing .ts/.tsx files.
+description: TypeScript coding rules for Kron — no any except at three trust boundaries, zod at validation boundaries, no ! assertions, strict tsconfig. Loads when editing .ts/.tsx files.
 globs: **/*.{ts,tsx}
 alwaysApply: false
 ---
 
-# TypeScript Style (Kron)
+# ts-style (Kron)
 
-Mirror of `.cursor/skills/ts-style/SKILL.md`. Cursor loads this rule when any `.ts` or `.tsx` file is open.
+Mirror of `.cursor/skills/ts-style/SKILL.md`. Auto-loads when a `.ts` or `.tsx` file is open.
 
-## Hard rules
+## Hard rules (non-negotiable)
 
-- **`any` is forbidden** except at three trust boundaries (documented in SKILL.md): untrusted JSON/YAML parsing, third-party interop with `// FIXME`, test fixtures. Every other use → `unknown` + guard, generic, concrete type, or discriminated union.
-- **No `as` casts** for narrowing. Use a type guard or `zod.parse()`. `as const` is encouraged.
-- **No non-null `!` assertions** on optionals. Narrow with `if (!x) throw ...`.
-- **No `==` / `!=`** — always `===` / `!==`.
-- **No empty `catch {}`** — discriminate or re-throw.
-- **No `eval`** / `Function()` constructor.
+- No `any` — except at three trust boundaries (untrusted JSON parsing, third-party interop with `// FIXME`, test fixtures). Every other use → `unknown` + guard, generic, or concrete type.
+- No `as Type` for narrowing — use a type guard or `zod.parse()`. `satisfies` preferred over `as` for shape validation.
+- No non-null `!` assertion — narrow with a guard or throw.
+- No `==` / `!=` — always `===` / `!==`.
+- No empty `catch {}` — discriminate or re-throw.
+- No `eval` / `Function()`.
 
 ## Runtime validation
 
-Use `zod` at every trust boundary (file input, network response, user input). The inferred type is the source of truth:
+Use zod at every trust boundary. The inferred type is the source of truth:
 
 ```ts
-const TaskSchema = z.object({
-  id: z.string(),
-  status: z.enum(['open', 'done']),
-})
+const TaskSchema = z.object({ id: z.string(), status: z.enum(['open', 'done']) })
 type Task = z.infer<typeof TaskSchema>
+
+async function loadTasks(): Promise<Task[]> {
+  const data: unknown = await (await fetch('/api/tasks')).json()
+  return z.array(TaskSchema).parse(data)
+}
+```
+
+Prefer discriminated unions and branded types over loose optionals.
+
+## tsconfig (non-negotiable)
+
+`strict: true` is the TS 6.0 compiler default — but these two high-impact flags must still be explicitly set:
+
+```jsonc
+{
+  "strict": true,
+  "noUncheckedIndexedAccess": true,     // MUST
+  "exactOptionalPropertyTypes": true,    // MUST
+  "noImplicitOverride": true,
+  "noFallthroughCasesInSwitch": true,
+  "useUnknownInCatchVariables": true,
+  "verbatimModuleSyntax": true,
+  "forceConsistentCasingInFileNames": true,
+  "isolatedModules": true,
+  "skipLibCheck": true
+}
 ```
 
 ## Naming
 
 - Files: kebab-case (`task-store.ts`).
-- No `I` prefix on interfaces — `Task`, not `ITask`.
+- No `I` prefix on interfaces.
 - Booleans: `is`/`has`/`can` prefix.
-- Constants: `UPPER_SNAKE`.
-- React components: PascalCase, file matches component name.
+- React components: PascalCase, file matches name.
 
-## tsconfig (must have)
+## Anti-patterns
 
-```jsonc
-{
-  "compilerOptions": {
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true,
-    "exactOptionalPropertyTypes": true,
-    "noFallthroughCasesInSwitch": true
-  }
-}
-```
-
-For side-by-side good/bad examples, see `.cursor/skills/ts-style/examples.md`.
+- `tasks.find(t => t.id === id)!` → `if (!task) throw new Error(...)`
+- `status == 'open'` → `status === 'open'`
+- `obj.hasOwnProperty(...)` → `Object.hasOwn(obj, ...)`
