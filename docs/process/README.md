@@ -8,6 +8,7 @@
 
 | 文件 | 触发条件 |
 |---|---|
+| [`ci-enforcement.md`](./ci-enforcement.md) | 想加 CI 检查 / 想了解现有规则的覆盖盲区 |
 | [`cli-flag.md`](./cli-flag.md) | 想给现有 CLI 命令加新 flag |
 | [`internal-pkg.md`](./internal-pkg.md) | 想新建 `internal/<name>/` 子包 |
 | [`lint-rule.md`](./lint-rule.md) | 想给 `kron lint` 增加新检查规则 |

@@ -35,6 +35,12 @@ architecture.md（真理）
 ## 如何使用
 
 - **写代码前**：先查本目录，找对应函数的签名示例
-- **新增 lint 规则**：先读 [`process/lint-rule.md`](../process/lint-rule.md)
-- **新增 CLI flag**：先读 [`process/cli-flag.md`](../process/cli-flag.md)
-- **改 frontmatter schema**：先读 [`process/migrate.md`](../process/migrate.md)
+- **理解所有文档的角色与关系**：先读 [`abstractDesign/docs-map.md`](../abstractDesign/docs-map.md)
+
+## 引用规则
+
+本目录下的文件**只**做**信息检索引用**（在"如何使用"或脚注里给读者指路）和**真理引用**（引用 `architecture.md` / `intent-structure.md` 作为论据）。
+
+**不**在正文中把 `process/` 文件作为论据（即不能用"按 process/foo.md 第 X 节规定……"这种措辞）。
+
+> **执行触发**：当本目录的某个实施细节需要"什么时候做"的流程决策时（例：什么时候该加 CLI flag、什么时候该改 schema），说明这个细节应该移到 `process/` 下，而不是反过来引用。

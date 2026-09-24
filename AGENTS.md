@@ -41,17 +41,20 @@ kron/
 │   ├── abstractDesign/
 │   │   ├── intent-structure.md
 │   │   ├── tech-stack.md
-│   │   └── architecture.md   ← ARCHITECTURE TRUTH
-│   ├── implementation/        ←实施建议（API signatures, tool contracts, flows）
+│   │   ├── architecture.md   ← ARCHITECTURE TRUTH
+│   │   └── docs-map.md       ← 文档关系图谱
+│   ├── implementation/        ← 实施建议（API signatures, tool contracts, flows）
 │   │   ├── README.md
 │   │   ├── api-surface.md
 │   │   ├── cli.md
 │   │   ├── domain-model.md
 │   │   ├── error-catalog.md
+│   │   ├── ide-interaction.md
 │   │   ├── mcp.md
 │   │   └── testing.md
 │   └── process/              ← 实施流程（decision trees, checklists）
 │       ├── README.md
+│       ├── ci-enforcement.md
 │       ├── cli-flag.md
 │       ├── internal-pkg.md
 │       ├── lint-rule.md
@@ -128,6 +131,7 @@ CLI explicitly does NOT implement `list` / `get` / `update` / `delete` / `restor
 1. Read `docs/article.md` to understand the project vision.
 2. Check `docs/requirements.md` for the current phase's requirements.
 3. Find the relevant doc:
+   - **"How do all docs relate to each other?"** → `docs/abstractDesign/docs-map.md`
    - **"Why is it designed this way?"** → `docs/abstractDesign/architecture.md`
    - **"What is an intent .md file supposed to look like?"** → `docs/abstractDesign/intent-structure.md`
    - **"What is the function signature / tool contract?"** → `docs/implementation/api-surface.md` or `docs/implementation/mcp.md`
