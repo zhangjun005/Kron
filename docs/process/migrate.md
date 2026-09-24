@@ -19,6 +19,21 @@
 
 ---
 
+## 0 多文件同步约束（必读）
+
+frontmatter schema 涉及**三个文件层**——一次变更必须**全部同步**：
+
+| 层级 | 文件 | 内容 |
+|---|---|---|
+| **事实层** | `docs/abstractDesign/intent-structure.md` | 数据格式真理（YAML 字段语义、约束） |
+| **实施层（领域）** | `docs/implementation/domain-model.md` | Go `Frontmatter` struct 字段定义 |
+| **协作层** | `AGENTS.md` | `Storage format reminder` 段落（新人 onboarding 入口） |
+
+> **三文件同步原则**：实施层必须跟随事实层，事实层是真理源。
+> 任何一个文件的修改**必须**伴随另外两个文件的修改；否则会出现"事实层说字段 X 是 string，实施层 Go struct 是 []string"的不一致。
+
+---
+
 ## 2 迁移流程（6 步）
 
 ### Step 1 — 提出变更（RFC 阶段）
@@ -69,12 +84,14 @@ Affected intents: N files
 RFC: docs/rfc/<YYYY-MM-DD-title>.md"
 ```
 
-### Step 6 — 同步文档
+### Step 6 — 同步文档（必做，参见 §0 三文件同步约束）
 
-- 更新 `docs/abstractDesign/intent-structure.md` 的 frontmatter schema
-- 更新 `docs/implementation/domain-model.md` 的 `Frontmatter` 结构
-- 更新 `AGENTS.md` 的 storage format reminder
+- 更新 `docs/abstractDesign/intent-structure.md` 的 frontmatter schema（事实层）
+- 更新 `docs/implementation/domain-model.md` 的 `Frontmatter` struct（实施层）
+- 更新 `AGENTS.md` 的 storage format reminder（协作层）
 - PR 描述里包含迁移命令
+
+> 三个文件的修改**必须**在同一个 commit / 同一个 PR 内完成；任何不一致都会导致 lint 失败或行为漂移。
 
 ---
 

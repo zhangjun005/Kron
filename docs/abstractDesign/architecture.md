@@ -130,9 +130,9 @@ Kron 的核心是**数据格式 + 协议**，不是一个二进制。同一份�
 
 ### 1.1 CLI 最小集
 
-| 命令 | 用途 |
+| 命令 | 职责 |
 |---|---|
-| `kron init` | 创建 `.kron/intents/` + `config.toml` |
+| `kron init` | 初始化 Kron 工作区 |
 | `kron add <slug>` | 脚手架新意图文件 |
 | `kron lint` | CI 门禁：锚点悬空 + frontmatter 校验 |
 | `kron serve-mcp` | 启动 MCP stdio server |
@@ -142,15 +142,15 @@ Kron 的核心是**数据格式 + 协议**，不是一个二进制。同一份�
 
 ### 1.2 MCP 工具集
 
-| 类别 | 工具 |
-|---|---|
-| 初始化 | `kron_init` |
-| 增 | `kron_add` |
-| 查 | `kron_list`、`kron_get` |
-| 改 | `kron_update` |
-| 删（软） | `kron_delete` |
-| 恢复 | `kron_restore` |
-| 校验 | `kron_lint` |
+| 类别 | 工具 | 职责 |
+|---|---|---|
+| 初始化 | `kron_init` | 提供一次性工作区建立能力 |
+| 增 | `kron_add` | 提供意图文件脚手架能力 |
+| 查 | `kron_list`、`kron_get` | 提供意图列表与详情查询能力 |
+| 改 | `kron_update` | 提供意图内容更新能力 |
+| 删（软） | `kron_delete` | 提供可恢复的软删除能力 |
+| 恢复 | `kron_restore` | 提供从软删除状态还原的能力 |
+| 校验 | `kron_lint` | 提供锚点与 frontmatter 校验能力 |
 
 完整工具契约（入参/出参/错误码）：见 [`docs/implementation/mcp.md`](../implementation/mcp.md)。
 
@@ -347,4 +347,3 @@ func (s *Store) WriteIntent(caller string, slug string, intent *model.Intent) er
 | [`docs/implementation/`](../implementation/) | 实施建议；所有具体 API 签名、工具契约、流程图在此 |
 | [`docs/process/`](../process/) | 实施流程；新增 flag / lint 规则 / internal 包 / frontmatter 迁移的决策树 |
 | `AGENTS.md` / `.cursor/rules/*` | 本文档的镜像；本文档更新后回写同步 |
-| [`docs/architecture-structure.md`](../architecture-structure.md) | 简版参考；目录树 + 依赖图，完整论证见 §〇·五 |

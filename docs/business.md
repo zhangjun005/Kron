@@ -70,16 +70,8 @@
 三种对外入口：
 
 - **MCP**：给 AI Agent 提供意图的检索与校验能力（参考 `requirements.md` §3）
-- **LSP**：给编辑器提供 Hover 悬停预览 + `Ctrl+单击` 跳转，覆盖代码 / Markdown / 目录上下文（参考 `requirements.md` §5）
+- **LSP**：给编辑器提供 Hover 悬停预览 + `Ctrl+单击` 跳转（Phase 2 占位，见 [`implementation/ide-interaction.md`](../implementation/ide-interaction.md)）
 - **GUI**：提供意图树浏览与关系图可视化（Phase 2，非 v1 必需）
-
-IDE 交互建议统一为以下三路：
-
-| 触发位置 | 元素形式 | Hover | Ctrl+单击 |
-|---|---|---|---|
-| 源码 | `// @kron:intent jwt-sliding-window` | 弹出意图摘要 | 跳转打开对应 `.md` |
-| 意图 MD（横向） | `[@token-bucket](../rate-limit/token-bucket.md)` | 弹出被依赖意图摘要 | 跳转打开目标 `.md` |
-| 意图 MD（纵向父级） | `[@auth](README.md)` 或自动推导 | 弹出父模块背景与范围边界 | 跳转打开父级 README.md |
 
 **为什么需要这件事：**
 AI 需要在写代码前后取意图（LSP hover 让人类就地核验），GUI 提供结构化浏览。意图不消费，就只是另一个没人看的文档。

@@ -13,6 +13,7 @@
 | [`cli.md`](./cli.md) | CLI 命令实现参考（init / add / lint / soft-delete） |
 | [`domain-model.md`](./domain-model.md) | 领域模型结构体（Intent / Frontmatter / Status / Anchor / Config） |
 | [`error-catalog.md`](./error-catalog.md) | 错误 sentinel 清单 + 包装规则 + 退出码对照 |
+| [`ide-interaction.md`](./ide-interaction.md) | IDE / LSP 三路交互（Phase 2 占位） |
 | [`mcp.md`](./mcp.md) | MCP 工具契约（8 工具入参/出参）+ GUI API 边界（Phase 2） |
 | [`testing.md`](./testing.md) | 分层测试策略 + fixture 管理 + CI 门禁 |
 
