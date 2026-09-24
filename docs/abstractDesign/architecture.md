@@ -1,8 +1,9 @@
 # 架构设计（Architecture）
 
-> 本文档是 Kron v1 的架构真理源。`AGENTS.md` 与 `.cursor/rules/*` 是它的镜像。
-> 风格沿用 [`intent-structure.md`](./intent-structure.md)：铁律 + 字段表 + 示例。
-> 措辞保持建议性，不锁死实现细节。
+> 本文档是 Kron v1 的**架构真理源**。`AGENTS.md` 与 `.cursor/rules/*` 是它的镜像。
+>
+> **实施建议**（具体 API 签名、工具契约、流程图）移至 [`docs/implementation/`](../implementation/)
+> 和 [`docs/process/`](../process/)。如有冲突，以本文档为准。
 
 ---
 
@@ -129,21 +130,17 @@ Kron 的核心是**数据格式 + 协议**，不是一个二进制。同一份�
 
 ### 1.1 CLI 最小集
 
-MCP / IDE / GUI 覆盖查询、浏览、编辑场景后，CLI 只留"终端独有的"命令：
+| 命令 | 用途 |
+|---|---|
+| `kron init` | 创建 `.kron/intents/` + `config.toml` |
+| `kron add <slug>` | 脚手架新意图文件 |
+| `kron lint` | CI 门禁：锚点悬空 + frontmatter 校验 |
+| `kron serve-mcp` | 启动 MCP stdio server |
 
-| 命令 | 用途 | 不放给 MCP / GUI 的原因 |
-|---|---|---|
-| `kron init` | 创建 `.kron/intents/` 目录、初始化 `config.toml` | — |
-| `kron add <slug>` | 起草新意图文件（写入 `.kron/intents/<slug>.md`） | — |
-| `kron lint` | CI 门禁：扫描锚点悬空、frontmatter 校验 | 必须可被 GitHub Actions 直接调用 |
-| `kron serve-mcp` | 启动 MCP stdio server（v1 交付） | — |
+完整实现参考：见 [`docs/implementation/cli.md`](../implementation/cli.md)。  
+不在 CLI 中实现：`list` / `get` / `update` / `delete` / `restore`——由 MCP 工具集覆盖。
 
-> **不在 CLI 中实现**：`list`、`get`、`update`、`delete`、`restore`——由 MCP 工具集（§5.4.1）覆盖。
-> CLI 是 MCP 工具集的**最小超集**：只留人在终端直接敲命令时真正用得上的子集。
-
-### 1.2 MCP 工具集（覆盖增删改查 + 校验 + 软删除恢复）
-
-MCP 工具集覆盖意图**完整生命周期**：
+### 1.2 MCP 工具集
 
 | 类别 | 工具 |
 |---|---|
@@ -155,8 +152,7 @@ MCP 工具集覆盖意图**完整生命周期**：
 | 恢复 | `kron_restore` |
 | 校验 | `kron_lint` |
 
-完整入参 / 出参定义见 §5.4.1。AI Agent 通过这套工具标准化访问 Kron，
-人类用户在终端用 CLI 子集，GUI 用同一套底层函数（§5.4.2）。
+完整工具契约（入参/出参/错误码）：见 [`docs/implementation/mcp.md`](../implementation/mcp.md)。
 
 ---
 
@@ -246,92 +242,19 @@ func (s *Store) WriteIntent(caller string, slug string, intent *model.Intent) er
 
 ---
 
-## 三、领域模型骨架
+## 三、领域模型
 
-### 3.1 `Intent`
+见 [`docs/implementation/domain-model.md`](../implementation/domain-model.md)。
 
-```go
-// Intent is one design intent, persisted as .kron/intents/<slug>.md.
-type Intent struct {
-    Slug        string      // 文件相对路径（相对 .kron/intents/），不含 .md，例如 "auth/jwt-sliding-window"
-    Frontmatter Frontmatter
-    Body        string      // Markdown 正文（不含 frontmatter）
-    SourcePath  string      // 磁盘绝对路径，加载/解析时由 store 层注入，**不**参与落盘序列化
-}
-```
-
-### 3.2 `Frontmatter`
-
-```go
-type Frontmatter struct {
-    Symbol    []string `yaml:"symbol,omitempty"`     // 关联代码符号列表
-    CreatedBy string   `yaml:"created_by"`          // "@user" 或 "agent:<model>"
-    UpdatedAt string   `yaml:"updated_at"`          // ISO 8601
-    Reviewers []string `yaml:"reviewers,omitempty"` // 可选
-    Status    Status   `yaml:"status,omitempty"`    // draft / active / superseded
-}
-```
-
-### 3.3 `Status` 枚举
-
-```go
-type Status string
-
-const (
-    StatusDraft      Status = "draft"
-    StatusActive     Status = "active"
-    StatusSuperseded Status = "superseded"
-)
-```
-
-**完全可选，不填 = 不参与生命周期管理**（参见 `intent-structure.md` §三）。
-
-### 3.4 `Anchor`
-
-```go
-// Anchor is a parsed // @kron:intent <slug> annotation.
-type Anchor struct {
-    Slug       string  // 意图路径，不含 .md
-    FilePath   string  // 锚点所在源文件路径
-    LineNumber int     // 锚点所在行（1-indexed）
-}
-```
-
-### 3.5 `Config`
-
-```go
-type Config struct {
-    IntentsDir string `toml:"intents_dir"` // 默认 ".kron/intents"
-}
-```
-
-配置文件位于 `.kron/config.toml`，**缺失即用默认值**，不存在即不报错。
-
-> **v1 不增加任何配置字段**。`default_reviewer` / `lint_rules` / 其他扩展一律推迟——
-> 99% 的用户不会改 `intents_dir`，零配置可用（Zero-config）才是高级的极简。
+包含：`Intent` / `Frontmatter` / `Status` / `Anchor` / `Config` 结构体定义与字段语义。
 
 ---
 
 ## 四、错误模型
 
-### 4.1 Sentinel 错误清单
+见 [`docs/implementation/error-catalog.md`](../implementation/error-catalog.md)。
 
-```go
-var (
-    ErrIntentNotFound      = errors.New("intent not found")
-    ErrIntentExists        = errors.New("intent already exists")
-    ErrAnchorDangling      = errors.New("anchor points to non-existent intent")
-    ErrFrontmatterInvalid  = errors.New("frontmatter is invalid")
-    ErrSlugInvalid         = errors.New("intent slug is invalid")
-    ErrConfigInvalid       = errors.New("config file is invalid")
-)
-```
-
-### 4.2 包装与判别
-
-- 所有错误用 `fmt.Errorf("...: %w", err)` 包装，附带操作上下文
-- 调用方用 `errors.Is(err, store.ErrIntentNotFound)` 判别
-- 永不 `==` 比较错误
+包含：sentinel 错误清单（`ErrIntentNotFound` 等）、包装规则、CLI 退出码与 MCP JSON-RPC 错误码对照。
 
 ---
 
@@ -339,172 +262,81 @@ var (
 
 ### 5.1 `kron init`
 
-```
-探测 .kron/ 是否存在
-  ├─ 存在 → 提示已初始化，退出
-  └─ 不存在 → mkdir .kron/intents/ + 写 config.toml（默认值）
-```
-
-实现位于 `cmd/kron/cli/init.go`，调用 `store.EnsureKronDir(ctx, cfg)`。
+见 [`docs/implementation/cli.md`](../implementation/cli.md)。
 
 ### 5.2 `kron add <slug>`
 
-```
-接收第一个位置参数 args[0] 作为 slug
-  ├─ 缺失或多余参数 → 返回 ErrSlugInvalid
-  └─ 存在 →
-      正则校验 slug：^[a-z0-9]+(-[a-z0-9]+)*(/[a-z0-9]+(-[a-z0-9]+)*)*$
-        ├─ 不匹配 → 返回 ErrSlugInvalid
-        └─ 匹配 →
-            检查 .kron/intents/<slug>.md 是否已存在
-              ├─ 存在 → 返回 ErrIntentExists
-              └─ 不存在 →
-                  构造模板 frontmatter（created_by 来自 git config user.name）
-                  写入文件
-```
+见 [`docs/implementation/cli.md`](../implementation/cli.md)。
 
-实现位于 `cmd/kron/cli/add.go`，调用 `store.WriteIntent(ctx, slug, &intent)`。
+### 5.2.1 软删除与恢复
 
-> **v1 不支持 stdin / 外部模板**。`kron add` 的职责是快速脚手架（Scaffold）——
-> 写入默认骨架后，开发者或 AI 直接打开 `.md` 编辑。复杂输入拼接留给编辑器或 GUI。
-
-### 5.2.1 软删除与恢复（MCP 独占，CLI 不暴露）
-
-```
-kron_delete <slug>：
-  校验 .kron/intents/<slug>.md 存在
-    ├─ 不存在 → 返回 ErrIntentNotFound
-    └─ 存在 →
-        mkdir -p .kron/.trash/
-        移动文件：.kron/intents/<slug>.md → .kron/.trash/<slug>.md
-        返回 { ok: true, trashed_path: ".kron/.trash/<slug>.md" }
-
-kron_restore <slug>：
-  校验 .kron/.trash/<slug>.md 存在
-    ├─ 不存在 → 返回 ErrIntentNotFound
-    └─ 存在 →
-        移动文件：.kron/.trash/<slug>.md → .kron/intents/<slug>.md
-        返回 { ok: true, path: ".kron/intents/<slug>.md" }
-```
-
-实现位于 `internal/store/trash.go`，CLI **不**提供 `kron delete` / `kron restore` 子命令。
+见 [`docs/implementation/cli.md`](../implementation/cli.md) §5。
 
 ### 5.3 `kron lint`
 
-```
-默认从当前工作目录（CWD）开始递归扫描所有源码文件
-  跳过目录黑名单（return filepath.SkipDir）：
-    .git、.kron、node_modules、vendor、dist、bin、target、.idea、.vscode
-对每个源码文件 → parser.ScanAnchors → 收集 []Anchor
-对每个 Anchor → store.ResolveIntent(slug) → 校验文件存在
-  └─ 不存在 → 输出 [error] anchor dangling + 计入 errors
-遍历 .kron/intents/**/*.md → store.LoadAll → 校验 frontmatter 必需字段
-  └─ 缺失 → 输出 [error] frontmatter invalid + 计入 errors
-
-退出码语义：
-  0 = 通过（无错误）
-  1 = 有 lint 错误
-  2 = 内部失败（IO / 解析异常）
-输出格式支持 --reporter=text|json，便于 CI 集成。
-```
-
-> **v1 不暴露 `--path` 自定义扫描根**。全仓扫描 + 硬编码黑名单是 v1 的全部策略；
-> 真实需求出现时再加 flag。
+见 [`docs/implementation/cli.md`](../implementation/cli.md) §4。
 
 ### 5.4 MCP / LSP 复用边界
 
 | 复用层 | v1 是否交付 | 方式 |
 |---|---|---|
-| MCP server (`kron serve-mcp`) | ✅ v1 交付 | stdio JSON-RPC；`cmd/kron/serve-mcp/` 子命令做序列化，业务逻辑直接调 `internal/store` 与 `internal/parser` 包 |
-| LSP server | ❌ Phase 2 | LSP 协议过于笨重（文件同步、Position 偏移、生命周期、AST 解析），v1 不碰 |
-| IDE 插件 | ❌ Phase 2 | 宿主 LSP / MCP 进程；自身**不** import LSP/MCP 代码。锚点扫描/意图加载等业务逻辑**直接**调 `internal/parser` 与 `internal/store` |
-| GUI 客户端 | ❌ Phase 2 | 通过独立的 GUI API 边界访问（见 §5.4.2），不依赖 CLI 的 `--json` flag，不依赖任何其他访问层 |
+| MCP server | ✅ v1 交付 | stdio JSON-RPC；`cmd/kron/serve-mcp/` 做序列化，直接调 `internal/store` 与 `internal/parser` |
+| LSP server | ❌ Phase 2 | LSP 协议笨重（文件同步、Position 偏移、生命周期），v1 不碰 |
+| IDE 插件 | ❌ Phase 2 | 宿主 LSP / MCP 进程；业务逻辑**直接**调 `internal/parser` 与 `internal/store` |
+| GUI 客户端 | ❌ Phase 2 | 通过独立 GUI API 边界访问（见 [`docs/implementation/mcp.md`](../implementation/mcp.md)），不依赖 CLI `--json` flag |
 
-> **访问层之间禁止互相调用**（§〇 铁律 #3）。表中所有"复用"行的含义都是
-> "共享同一个 `internal/` 业务逻辑"，不是"这一层调另一层"。例如：IDE 插件**不** import
-> LSP server，而是与 LSP 各自独立 import `internal/parser` / `internal/store`。
+> **访问层之间禁止互相调用**（§〇 铁律 #3）。表中所有"复用"行的含义都是"共享同一个 `internal/` 业务逻辑"，不是"这一层调另一层"。
 
-#### 5.4.1 MCP 工具契约（v1）
+#### 5.4.1 MCP 工具契约
 
-| 工具 | 入参 | 出参 | 类别 |
-|---|---|---|---|
-| `kron_init` | 无 | `{ ok: bool, intents_dir: string }` | 初始化 |
-| `kron_add` | `slug` (string, required)<br>`symbol` (string, optional)<br>`why` (string, optional) | `{ ok: bool, path: string }` | **增** |
-| `kron_list` | `prefix` (string, optional) | `{ intents: IntentSummary[] }` | **查** |
-| `kron_get` | `slug` (string, required) | `{ intent: Intent }` | **查** |
-| `kron_update` | `slug` (string, required)<br>`symbol` (string, optional)<br>`body` (string, optional)<br>`status` (string, optional) | `{ ok: bool, path: string }` | **改** |
-| `kron_delete` | `slug` (string, required) | `{ ok: bool, trashed_path: string }` | **软删** |
-| `kron_restore` | `slug` (string, required) | `{ ok: bool, path: string }` | **恢复** |
-| `kron_lint` | 无 | `{ passed: bool, errors: string[] }` | **校验** |
-
-MCP 必须覆盖**增删改查 + 校验**完整意图生命周期。每个工具的底层都映射到同一个
-`internal/store` 或 `cmd/kron/cli` 函数，签名带 `ctx context.Context`，caller 由
-MCP server 注入为 `"mcp:<agent>"`。
-
-##### 软删除机制
-
-- **`kron_delete`** 不真正删除文件，而是把 `.kron/intents/<slug>.md` 移到 `.kron/.trash/<slug>.md`
-- `.kron/.trash/` 与 `.kron/intents/` 平级，是软删除的"暂存区"
-- **`kron_restore`** 把 `.kron/.trash/<slug>.md` 移回 `.kron/intents/<slug>.md`
-- 软删除给"误删"留出悔过窗口；硬删除（彻底删 `.trash/` 内容）留给用户手动 `git rm` 或后续 `kron gc` 子命令（v1 不实现）
-
-> CLI 子集是 MCP 工具集的**最小超集**：`kron init` / `kron add` / `kron lint`；
-> 其余 `list` / `get` / `update` / `delete` / `restore` 只在 MCP 暴露，CLI 不重复实现。
+见 [`docs/implementation/mcp.md`](../implementation/mcp.md)。
 
 #### 5.4.2 GUI API 边界（Phase 2 预留）
 
-GUI 不走 CLI 的 `--json` flag，而是通过**单独的 API 包**消费同一份 `internal/store` /
-`internal/parser`。Phase 2 实现时建议形态：
-
-- **HTTP server 子命令**（`kron serve-gui`）启动轻量 HTTP 服务，对外暴露 REST 端点
-- 端点对应 §5.4.1 的 MCP 工具集（`POST /intents` / `GET /intents` / `PATCH /intents/:slug` / `DELETE /intents/:slug` / `GET /lint`）
-- 共享同一个 `cmd/kron/cli` 函数库（与未来 `cmd/kron/serve-gui`），访问层之间通过 `internal/` 解耦
-
-> v1 不实现 `serve-gui`，但 `cmd/kron/cli` 的函数签名要为它留口（已经是 `ctx` 透传形态）。
+见 [`docs/implementation/mcp.md`](../implementation/mcp.md) §5。
 
 ---
 
 ## 六、测试策略
 
-| 层 | 策略 | 工具 |
-|---|---|---|
-| `model` | 纯单元 | `testing` + `testify/assert` |
-| `store` | tempdir 集成（`t.TempDir()`） | 同上 |
-| `parser` | 表驱动 | 同上 |
-| `cli` | cobra `cmd.Execute()` 端到端 | 同上 |
+见 [`docs/implementation/testing.md`](../implementation/testing.md)。
 
-- 测试 fixture 放在 `testdata/`（git 跟踪）
-- 集成测试覆盖完整 `kron init → add → lint` 闭环
-- 不引入 race detector 之外的额外测试框架
+包含：分层测试策略、fixture 管理、表驱动模板、集成测试闭环、CI 门禁命令。
 
 ---
 
 ## 七、不做的事（v1 范围外）
 
-- 守护进程、文件监听、状态机、双源同步
-- CLI `list` / `get` / `update` / `delete` / `restore`（由 MCP 工具集覆盖；CLI 不重复实现）
-- `parent` / `depends_on` 拓扑建模（目录 + 相对链接已足够）
-- 健康度诊断：过期 / 孤儿 / 冲突检测（`requirements.md` 未明确要求）
-- 导入迁移、`config.toml` 字段扩展（v1 仅 `intents_dir`）
-- `kron add` 的 stdin / 外部模板支持
-- `kron lint` 的 `--path` 自定义扫描根（全仓 + 黑名单足够）
-- `serve-lsp`、IDE 插件、GUI 客户端（明确推迟到 Phase 2）
-- AI 起草 → 入库的完整工作流（v1 后另议；MCP 已为它留接口）
+| 特性 | 原因 | 流程文档 |
+|---|---|---|
+| 守护进程、文件监听、状态机、双源同步 | v1 范围外 | — |
+| CLI `list` / `get` / `update` / `delete` / `restore` | 由 MCP 工具集覆盖 | — |
+| `parent` / `depends_on` 拓扑建模 | 目录 + 相对链接已足够 | — |
+| 健康度诊断（过期 / 孤儿 / 冲突检测） | `requirements.md` 未明确要求 | — |
+| 导入迁移、`config.toml` 字段扩展 | v1 仅 `intents_dir` | — |
+| `kron add` stdin / 外部模板支持 | 脚手架职责，复杂输入留给编辑器或 GUI | — |
+| `kron lint` `--path` 自定义扫描根 | 全仓 + 黑名单足够 | — |
+| `serve-lsp`、IDE 插件、GUI 客户端 | Phase 2 | — |
+| AI 起草 → 入库的完整工作流 | v1 后另议；MCP 已为它留接口 | — |
+| 新增 CLI flag | — | [`docs/process/cli-flag.md`](../process/cli-flag.md) |
+| 新增 lint 规则 | — | [`docs/process/lint-rule.md`](../process/lint-rule.md) |
+| 修改 frontmatter schema | — | [`docs/process/migrate.md`](../process/migrate.md) |
+| 新增 `internal/` 子包 | — | [`docs/process/internal-pkg.md`](../process/internal-pkg.md) |
 
 ---
 
 ## 八、演进方向（v1 不实现，接口要留）
 
-| 方向 | 留口方式 |
-|---|---|
-| AI 起草工作流 | MCP 工具集已覆盖完整生命周期；store 接口走 ctx，可携带 caller 身份 |
-| GUI 客户端 | 独立的 GUI API 边界（见 §5.4.2），不复用 CLI `--json` flag |
-| 健康度诊断 | `kron lint` 子命令可扩展 lint 规则集 |
-| 多编辑器 LSP 复用 | LSP server 与 CLI 解耦，可独立打包 |
+| 方向 | 留口方式 | 流程文档 |
+|---|---|---|
+| AI 起草工作流 | MCP 工具集已覆盖完整生命周期；store 接口走 ctx，可携带 caller 身份 | — |
+| GUI 客户端 | 独立的 GUI API 边界（见 [`docs/implementation/mcp.md`](../implementation/mcp.md)） | — |
+| 健康度诊断 | `kron lint` 子命令可扩展 lint 规则集 | [`docs/process/lint-rule.md`](../process/lint-rule.md) |
+| 多编辑器 LSP 复用 | LSP server 与 CLI 解耦，可独立打包 | — |
 
 ---
 
-## 与其他文档的关系
+## 九、与其他文档的关系
 
 | 文档 | 关系 |
 |---|---|
@@ -512,4 +344,7 @@ GUI 不走 CLI 的 `--json` flag，而是通过**单独的 API 包**消费同一
 | [`tech-stack.md`](./tech-stack.md) | 技术栈依据；本文档的包结构基于其选型 |
 | [`business.md`](../business.md) | 业务边界；本文档的"不做的事"对齐其"不做的事" |
 | [`requirements.md`](../requirements.md) | 需求事实来源；本文档不引入新需求，只落实其约束 |
+| [`docs/implementation/`](../implementation/) | 实施建议；所有具体 API 签名、工具契约、流程图在此 |
+| [`docs/process/`](../process/) | 实施流程；新增 flag / lint 规则 / internal 包 / frontmatter 迁移的决策树 |
 | `AGENTS.md` / `.cursor/rules/*` | 本文档的镜像；本文档更新后回写同步 |
+| [`docs/architecture-structure.md`](../architecture-structure.md) | 简版参考；目录树 + 依赖图，完整论证见 §〇·五 |

@@ -33,16 +33,29 @@ kron/
 ├── internal/
 │   ├── model/             ← domain types (Intent, Config)
 │   ├── store/             ← file I/O, frontmatter parsing
-│   ├── parser/            ← markdown/CLI argument parsing
-│   └── cli/               ← cobra command implementations
-├── docs/                  ← vision & design abstractions
+│   └── parser/            ← markdown/CLI argument parsing
+├── docs/
 │   ├── article.md
 │   ├── business.md
 │   ├── requirements.md
-│   └── abstractDesign/
-│       ├── intent-structure.md
-│       ├── tech-stack.md
-│       └── architecture.md   ← ARCHITECTURE TRUTH (mirrored here)
+│   ├── abstractDesign/
+│   │   ├── intent-structure.md
+│   │   ├── tech-stack.md
+│   │   └── architecture.md   ← ARCHITECTURE TRUTH
+│   ├── implementation/        ←实施建议（API signatures, tool contracts, flows）
+│   │   ├── README.md
+│   │   ├── api-surface.md
+│   │   ├── cli.md
+│   │   ├── domain-model.md
+│   │   ├── error-catalog.md
+│   │   ├── mcp.md
+│   │   └── testing.md
+│   └── process/              ← 实施流程（decision trees, checklists）
+│       ├── README.md
+│       ├── cli-flag.md
+│       ├── internal-pkg.md
+│       ├── lint-rule.md
+│       └── migrate.md
 ├── .cursor/
 │   ├── skills/            ← agent skills (loaded by Cursor)
 │   └── rules/             ← Cursor rule format (.mdc)
@@ -114,8 +127,13 @@ CLI explicitly does NOT implement `list` / `get` / `update` / `delete` / `restor
 
 1. Read `docs/article.md` to understand the project vision.
 2. Check `docs/requirements.md` for the current phase's requirements.
-3. Review the `internal/` package(s) you'll touch to learn existing conventions.
-4. Confirm the relevant skill (`go-style` or `ts-style`) is loaded — these auto-invoke, but verify.
+3. Find the relevant doc:
+   - **"Why is it designed this way?"** → `docs/abstractDesign/architecture.md`
+   - **"What is an intent .md file supposed to look like?"** → `docs/abstractDesign/intent-structure.md`
+   - **"What is the function signature / tool contract?"** → `docs/implementation/api-surface.md` or `docs/implementation/mcp.md`
+   - **"How do I add a CLI flag / lint rule / internal package?"** → `docs/process/`
+4. Review the `internal/` package(s) you'll touch to learn existing conventions.
+5. Confirm the relevant skill (`go-style` or `ts-style`) is loaded.
 
 ### When proposing changes
 
@@ -123,6 +141,7 @@ CLI explicitly does NOT implement `list` / `get` / `update` / `delete` / `restor
 - Include tests for any new exported function in the same commit.
 - If adding a dependency, justify it in the commit body.
 - Run `go vet ./...`, `gofmt -l .`, and `go test ./...` before committing.
+- For changes that have a process doc (new CLI flag, new lint rule, new `internal/` package, frontmatter schema change), follow the corresponding `docs/process/*.md` checklist before opening a PR.
 
 ### When in doubt
 
@@ -138,9 +157,12 @@ CLI explicitly does NOT implement `list` / `get` / `update` / `delete` / `restor
 - Force-pushing, rewriting history on shared branches.
 - Adding CLI subcommands beyond `init` / `add` / `lint` / `serve-mcp` — see architecture.md §1.1.
 - Adding config fields beyond `intents_dir` — see architecture.md §3.5 (zero-config).
-- Adding `--path` / stdin / external-template flags to existing commands without consulting architecture.md §5.
+- Adding `--path` / stdin / external-template flags to existing commands without consulting `docs/process/cli-flag.md`.
 - Implementing `serve-lsp`, IDE plugin, GUI, hard-delete / GC — these are Phase 2.
 - Adding `parent` / `depends_on` to frontmatter — directory + relative links cover it (see intent-structure.md).
+- Adding new lint rules without following `docs/process/lint-rule.md`.
+- Modifying frontmatter schema without following `docs/process/migrate.md`.
+- Adding new `internal/` packages without following `docs/process/internal-pkg.md`.
 
 ## Storage format reminder
 
