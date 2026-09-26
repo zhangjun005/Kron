@@ -343,6 +343,7 @@ func (s *Store) WriteIntent(caller string, slug string, intent *model.Intent) er
 | [`intent-structure.md`](./intent-structure.md) | 数据格式真理源；本文档引用其 frontmatter schema 与锚点语法 |
 | [`tech-stack.md`](./tech-stack.md) | 技术栈依据；本文档的包结构基于其选型 |
 | [`docs-map.md`](./docs-map.md) | 所有文档的角色分类与单向引用链；本文档是关系图的被引用者 |
+| [`how-it-works.md`](../how-it-works.md) | 实景示例（真实代码 + Kron 行为）；人类入口；本文档是引用者 |
 | [`business.md`](../business.md) | 业务边界；本文档的"不做的事"对齐其"不做的事" |
 | [`requirements.md`](../requirements.md) | 需求事实来源；本文档不引入新需求，只落实其约束 |
 | [`docs/implementation/`](../implementation/) | 实施建议；所有具体 API 签名、工具契约、流程图在此 |

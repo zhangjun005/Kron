@@ -43,6 +43,7 @@ kron/
 │   │   ├── tech-stack.md
 │   │   ├── architecture.md   ← ARCHITECTURE TRUTH
 │   │   └── docs-map.md       ← 文档关系图谱
+│   ├── how-it-works.md       ← 实景示例（人类入口）
 │   ├── implementation/        ← 实施建议（API signatures, tool contracts, flows）
 │   │   ├── README.md
 │   │   ├── api-surface.md
@@ -131,6 +132,7 @@ CLI explicitly does NOT implement `list` / `get` / `update` / `delete` / `restor
 1. Read `docs/article.md` to understand the project vision.
 2. Check `docs/requirements.md` for the current phase's requirements.
 3. Find the relevant doc:
+   - **"How does Kron actually work in a real repo?"** → `docs/how-it-works.md`（实景入口）
    - **"How do all docs relate to each other?"** → `docs/abstractDesign/docs-map.md`
    - **"Why is it designed this way?"** → `docs/abstractDesign/architecture.md`
    - **"What is an intent .md file supposed to look like?"** → `docs/abstractDesign/intent-structure.md`

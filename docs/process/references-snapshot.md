@@ -104,6 +104,19 @@
 - [`.cursor/skills/go-style/SKILL.md`](../../.cursor/skills/go-style/SKILL.md) → 引用（1 处）:
   - 通用建议：`docs/abstractDesign/XX-name.md`（模板说明）
 
+### 1.6 人类入口层
+
+- [`docs/how-it-works.md`](../how-it-works.md) → 引用（9 处）:
+  - [`README.md`](../../README.md) × 1
+  - [`architecture.md`](../abstractDesign/architecture.md) × 2
+  - [`intent-structure.md`](../abstractDesign/intent-structure.md)（间接，通过 model 引用）× 1
+  - [`model/intent.go`](../../internal/model/intent.go) × 1
+  - [`implementation/cli.md`](../implementation/cli.md) × 1
+  - [`implementation/mcp.md`](../implementation/mcp.md) × 1
+  - [`docs-map.md`](../abstractDesign/docs-map.md) × 1
+  - [`AGENTS.md`](../../AGENTS.md) × 1
+  - [`references-snapshot.md`](../process/references-snapshot.md) × 1
+
 ---
 
 ## 二、被引用次数排名（按"被引"看谁在中心）

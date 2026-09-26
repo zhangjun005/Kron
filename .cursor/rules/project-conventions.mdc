@@ -52,6 +52,7 @@ Source: `docs/abstractDesign/architecture.md` §〇. Brief:
 
 1. Read `docs/article.md` and `docs/requirements.md` before coding.
 2. Read `docs/abstractDesign/architecture.md` before changing package boundaries or adding commands.
+3. For a real-repo walkthrough of how Kron is used, see [`docs/how-it-works.md`](../../docs/how-it-works.md).
 3. Verify the relevant skill (`go-style` or `ts-style`) is loaded.
 4. Write tests for any new exported function in the same change.
 5. Run before committing: `go vet ./...`, `gofmt -l .`, `go test ./...`.
