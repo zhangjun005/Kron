@@ -13,6 +13,7 @@
 | [`internal-pkg.md`](./internal-pkg.md) | 想新建 `internal/<name>/` 子包 |
 | [`lint-rule.md`](./lint-rule.md) | 想给 `kron lint` 增加新检查规则 |
 | [`migrate.md`](./migrate.md) | 想修改 frontmatter schema |
+| [`references-snapshot.md`](./references-snapshot.md) | 想看当前 md 之间实际引用关系（快照而非规则） |
 
 ---
 

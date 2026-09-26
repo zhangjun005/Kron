@@ -86,8 +86,7 @@ See docs/process/internal-pkg.md"
 
 ### Step 3 — 集成
 
-- 在 `docs/implementation/architecture.md` 的 §〇·五·5 包分工表中加入新包行
-- 在 `docs/architecture-structure.md` 的目录树中加入新包
+- 在 `docs/abstractDesign/architecture.md` 的 §〇·五·5 包分工表中加入新包行
 - 更新 `AGENTS.md` 的目录结构
 
 ---
