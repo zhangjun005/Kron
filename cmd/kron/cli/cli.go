@@ -7,16 +7,16 @@
 //
 // Business logic is delegated to internal/store and internal/parser.
 // This file stays thin: parse flags, dispatch, wrap exit codes.
+//
+// Status (2026-09-27): stub — Execute() returns "not yet implemented".
+// Target commands: kron init / kron add / kron lint / kron serve-mcp.
 package cli
 
 import "fmt"
 
 // Execute runs the CLI root command and returns any error encountered.
+// Target: wire init / add / lint / serve-mcp.
 func Execute() error {
-	// TODO: wire cobra root command and subcommands:
-	//   kron init
-	//   kron add <slug>
-	//   kron lint
 	fmt.Println("kron: not yet implemented")
 	return fmt.Errorf("not implemented")
 }

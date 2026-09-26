@@ -104,13 +104,23 @@ go test ./...
 
 ---
 
-## 4 v1 已有的 CLI Flags
+## 4 CLI Flags 范畴
 
-| 命令 | Flag | 默认值 | 来源 |
-|---|---|---|---|
-| `kron lint` | `--reporter` | `text` | v1 实现 |
-| `kron lint` | `--reporter json` | — | v1 实现 |
-| `kron serve-mcp` | （无 flag） | — | v1 实现 |
+> 实景：当前仓库里 `cmd/kron/cli/` 是 stub（返回 "not yet implemented"），没有任何 flag 落地。  
+> 本节描述设计**范畴**——CLI flag 应当承担什么、不应当承担什么。实景以仓库代码为准。
+
+### 4.1 设计上允许的 flag 类别
+
+- `--reporter text|json`（在 `kron lint` 上）：给人 vs 给 CI 用的输出格式。
+- 其它 flag 都属于本表的 ❌ 范围。
+
+### 4.2 不允许的 flag 类别
+
+| 场景 | CLI flag | MCP 参数 |
+|---|---|---|
+| 初始化 | `kron init`（无 flag） | `kron_init`（无参数） |
+| 输出格式 | `kron lint --reporter json` | `kron_lint`（出参 `{ errors: string[] }` 是 JSON 本身） |
+| 文件过滤 | 不允许 | 不允许 |
 
 > **v1 范围外**：`--path`（自定义扫描根）、`--config`（自定义配置路径）、stdin 支持——见 architecture.md §7。
 

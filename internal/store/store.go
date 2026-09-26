@@ -6,4 +6,7 @@
 //
 // Errors are wrapped at the point of origin. Sentinel errors are defined
 // for known failure modes (e.g., ErrIntentNotFound).
+//
+// Status (2026-09-27): stub — no functions implemented yet. Wired through
+// cmd/kron/cli/ as the only consumer in v1.
 package store

@@ -166,6 +166,21 @@ Body explains *why*, not *what*. Reference design docs: `docs/abstractDesign/XX-
 - Global mutable state
 - `init()` functions that set environment variables
 
+## 模块完成状态的位置（不要在文档里冻结时间）
+
+- **完成状态写在代码文件顶部**，**不**写在 `docs/` 的 Markdown 表里。
+- 顶部注释硬约束：**不超过 5 行**、**不带表头、不带 emoji**、**不**写"v1 / Phase 2 / 已落地 / 待实现 / TODO"这种**冻结时间**的标签。形式参考：
+
+  ```go
+  // Package store handles file I/O and frontmatter parsing for Kron intent files.
+  // Status (2026-09-27): stub — no functions implemented yet. See cmd/kron/cli/.
+  package store
+  ```
+
+- 一行足够时用一行，三行封顶。**禁止**写成 "✅ 已实现 / ❌ 待实现" 这种**状态表**——一旦提交就被读者当成"事实"。
+- 修改完成状态时同步修改顶部注释；不修改时视为仍然准确。
+- Markdown 文档里的"未实现 / Phase X / 不在 v1 必需范围"也按相同标准：标"范畴"（"v1 不交付 IDE 插件"——设计约束）而不标"状态"（"IDE 插件未实现"——当前快照）。
+
 ## Anti-patterns
 
 ```go

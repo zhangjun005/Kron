@@ -14,7 +14,9 @@
 | **C 类：Body 语义** | Markdown body 内部结构不符规范 | 缺少 `## Why` / `## Trade-offs` 节 | `internal/parser` Markdown 解析 |
 | **D 类：锚点密度** | 源码文件中锚点过多/过少（可选） | 某文件 100 行无任何锚点 | `internal/parser` 扫描统计 |
 
-A 类和 B 类是 v1 已覆盖的核心规则；C / D 类是 v1 之后的扩展方向。
+A 类和 B 类是当前 lint 引擎要实现的核心规则；C / D 类是后续扩展方向（不在 v1 必需范围）。
+
+> 实景：当前 `cmd/kron/cli/cli.go` 返回 `not implemented`——上述 A/B 类尚无落地代码。
 
 ---
 

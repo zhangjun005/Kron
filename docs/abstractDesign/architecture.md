@@ -115,18 +115,18 @@ Position encoding、文档同步协议、capabilities。下沉到 `internal/` �
 
 Kron 的核心是**数据格式 + 协议**，不是一个二进制。同一份仓库内 `.md` 数据有五种访问入口：
 
-| 入口 | 触达路径 | 用户 | 核心场景 | 共享底层 | v1 状态 |
-|---|---|---|---|---|---|
-| **CLI** | 终端直接执行 | 人类 / 脚本 / CI | 初始化、批处理、CI 门禁 | `internal/store`、`internal/parser` | ✅ 交付 |
-| **MCP server** | stdio JSON-RPC | AI Agent | 起草 / 检索 / 校验意图 | `internal/store`、`internal/parser` | ✅ 交付 |
-| **LSP server** | 编辑器子进程 | 人类（在 IDE 中） | Hover、`Ctrl+单击` 跳转 | `internal/store`、`internal/parser` | ❌ Phase 2 |
-| **IDE 插件** | VSCode / Cursor 扩展 | 人类（在 IDE 中） | 锚点高亮、承载 LSP / MCP | **直接**调 `internal/parser`、`internal/store`；**不** import LSP server | ❌ Phase 2 |
-| **GUI** | Web 应用 | 人类（视觉化） | 意图树、关系图、可视化编辑 | 通过独立 GUI API 边界访问（见 §5.4.2） | ❌ Phase 2 |
+| 入口 | 触达路径 | 用户 | 核心场景 | 共享底层 |
+|---|---|---|---|---|
+| **CLI** | 终端直接执行 | 人类 / 脚本 / CI | 初始化、批处理、CI 门禁 | `internal/store`、`internal/parser` |
+| **MCP server** | stdio JSON-RPC | AI Agent | 起草 / 检索 / 校验意图 | `internal/store`、`internal/parser` |
+| **LSP server** | 编辑器子进程 | 人类（在 IDE 中） | Hover、`Ctrl+单击` 跳转 | `internal/store`、`internal/parser` |
+| **IDE 插件** | VSCode / Cursor 扩展 | 人类（在 IDE 中） | 锚点高亮、承载 LSP / MCP | **直接**调 `internal/parser`、`internal/store`；**不** import LSP server |
+| **GUI** | Web 应用 | 人类（视觉化） | 意图树、关系图、可视化编辑 | 通过独立 GUI API 边界访问（见 §5.4.2） |
 
 > **访问层之间禁止互相调用**（§〇 铁律 #3 + §〇·五·2 三条理由）。
 > 表里"复用 LSP"这一栏的含义是"访问相同底层 `internal/`"，**不是**"IDE 调 LSP"。
-> 每种访问层独立 import `internal/`，不依赖其他访问层。Phase 2 的入口（IDE / LSP / GUI）
-> 仓库结构未开，先把规则定死，避免 Phase 1 代码里出现"为 Phase 2 留耦合"。
+> 每种访问层独立 import `internal/`，不依赖其他访问层。
+> 五种入口在仓库里**已开**哪几条、**未开**哪几条——看 `cmd/kron/` 当前目录结构（实景优先于文档）。
 
 ### 1.1 CLI 最小集
 
@@ -180,7 +180,7 @@ internal/                        ← 只放底层包，禁止 import 任何访�
                       │
 cmd/kron/main.go ─────┼─► cmd/kron/serve-mcp/   ───► internal/parser/ ─► model
                       │
-                      └─► (Phase 2) cmd/kron/serve-gui/ 等
+                      └─► cmd/kron/serve-gui/ 等 (设计性预留，不在 v1)
                           ──────────────────────► internal/lint/    (按需新增)
 ```
 
@@ -278,20 +278,21 @@ func (s *Store) WriteIntent(caller string, slug string, intent *model.Intent) er
 
 ### 5.4 MCP / LSP 复用边界
 
-| 复用层 | v1 是否交付 | 方式 |
-|---|---|---|
-| MCP server | ✅ v1 交付 | stdio JSON-RPC；`cmd/kron/serve-mcp/` 做序列化，直接调 `internal/store` 与 `internal/parser` |
-| LSP server | ❌ Phase 2 | LSP 协议笨重（文件同步、Position 偏移、生命周期），v1 不碰 |
-| IDE 插件 | ❌ Phase 2 | 宿主 LSP / MCP 进程；业务逻辑**直接**调 `internal/parser` 与 `internal/store` |
-| GUI 客户端 | ❌ Phase 2 | 通过独立 GUI API 边界访问（见 [`docs/implementation/mcp.md`](../implementation/mcp.md)），不依赖 CLI `--json` flag |
+| 复用层 | 方式 |
+|---|---|
+| MCP server | stdio JSON-RPC；`cmd/kron/serve-mcp/` 做序列化，直接调 `internal/store` 与 `internal/parser` |
+| LSP server | LSP 协议笨重（文件同步、Position 偏移、生命周期），不做 |
+| IDE 插件 | 宿主 LSP / MCP 进程；业务逻辑**直接**调 `internal/parser` 与 `internal/store` |
+| GUI 客户端 | 通过独立 GUI API 边界访问（见 [`docs/implementation/mcp.md`](../implementation/mcp.md)），不依赖 CLI `--json` flag |
 
 > **访问层之间禁止互相调用**（§〇 铁律 #3）。表中所有"复用"行的含义都是"共享同一个 `internal/` 业务逻辑"，不是"这一层调另一层"。
+> 实际已落地的访问层入口看 `cmd/kron/` 当前目录结构。
 
 #### 5.4.1 MCP 工具契约
 
 见 [`docs/implementation/mcp.md`](../implementation/mcp.md)。
 
-#### 5.4.2 GUI API 边界（Phase 2 预留）
+#### 5.4.2 GUI API 边界（设计性预留接口）
 
 见 [`docs/implementation/mcp.md`](../implementation/mcp.md) §5。
 
@@ -316,7 +317,7 @@ func (s *Store) WriteIntent(caller string, slug string, intent *model.Intent) er
 | 导入迁移、`config.toml` 字段扩展 | v1 仅 `intents_dir` | — |
 | `kron add` stdin / 外部模板支持 | 脚手架职责，复杂输入留给编辑器或 GUI | — |
 | `kron lint` `--path` 自定义扫描根 | 全仓 + 黑名单足够 | — |
-| `serve-lsp`、IDE 插件、GUI 客户端 | Phase 2 | — |
+| `serve-lsp`、IDE 插件、GUI 客户端 | v1 故意不做（属更大 phase 范畴） | — |
 | AI 起草 → 入库的完整工作流 | v1 后另议；MCP 已为它留接口 | — |
 | 新增 CLI flag | — | [`docs/process/cli-flag.md`](../process/cli-flag.md) |
 | 新增 lint 规则 | — | [`docs/process/lint-rule.md`](../process/lint-rule.md) |

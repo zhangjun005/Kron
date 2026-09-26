@@ -190,8 +190,8 @@ var (
 |---|---|---|
 | CLI | `"cli"` | — |
 | MCP | `"mcp:<agent>"` | `"mcp:claude-3.7"` |
-| LSP（Phase 2） | `"lsp"` | — |
-| IDE 插件（Phase 2） | `"ide"` | — |
-| GUI（Phase 2） | `"gui"` | — |
+| LSP | `"lsp"` | — |
+| IDE 插件 | `"ide"` | — |
+| GUI | `"gui"` | — |
 
 在 `context.Context` 中以 `context.WithValue(ctx, callerKey, "cli")` 注入，store/parser/lint 函数通过 `ctx.Value(callerKey)` 读取。

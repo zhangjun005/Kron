@@ -28,7 +28,7 @@
 - Kron 的数据是仓库里的 .md 文件，任何能发起 HTTP 请求或调 CLI 子进程的地方都能访问。客户端不是"唯一的入口"，只是人类更舒服的入口。
 - TS 是 skill 规范好的，方向确定。
 - 客户端通过 Go CLI 的 `--json` 输出获取数据，不直接读写文件系统——Go CLI 才是 Single Source of Truth 的实现层。
-- Electron / 纯 Web / PWA 都行，具体形态等 Core CLI（Phase 2）稳定后再决定。
+- Electron / 纯 Web / PWA 都行，具体形态等 Core CLI 稳定后再决定。
 
 **不建议** Tauri（Rust 重叠）、桌面原生框架。
 

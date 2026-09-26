@@ -69,7 +69,7 @@ kron/
 └── AGENTS.md              ← this file
 ```
 
-> **Phase 2 (not in v1)**: IDE plugin, LSP server, GUI client, hard-delete / GC.
+> 不在 v1 必需范围：IDE plugin / LSP server / GUI client / hard-delete / GC——目录与代码尚未在仓库出现。
 
 ## Coding standards
 
@@ -119,9 +119,9 @@ Kron exposes the same `.md` data through five entry points:
 
 - **CLI** (human / CI): `kron init` / `kron add` / `kron lint` / `kron serve-mcp` — minimal subset.
 - **MCP server** (AI Agent): stdio JSON-RPC, 8 tools covering init / add / list / get / update / delete / restore / lint.
-- **LSP server** (Phase 2): editor-side hover + definition.
-- **IDE plugin** (Phase 2): hosts LSP / MCP, does **not** directly import `internal/`.
-- **GUI** (Phase 2): independent HTTP API boundary (`serve-gui`), not coupled to CLI flags.
+- **LSP server**: editor-side hover + definition. 不在 v1 必需范围。
+- **IDE plugin**: hosts LSP / MCP, does **not** directly import `internal/`. 不在 v1 必需范围。
+- **GUI**: independent HTTP API boundary (`serve-gui`), not coupled to CLI flags. 不在 v1 必需范围。
 
 CLI explicitly does NOT implement `list` / `get` / `update` / `delete` / `restore` — those live in MCP only. Don't add them as CLI subcommands without consulting architecture.md §一.
 
@@ -164,7 +164,7 @@ CLI explicitly does NOT implement `list` / `get` / `update` / `delete` / `restor
 - Adding CLI subcommands beyond `init` / `add` / `lint` / `serve-mcp` — see architecture.md §1.1.
 - Adding config fields beyond `intents_dir` — see architecture.md §3.5 (zero-config).
 - Adding `--path` / stdin / external-template flags to existing commands without consulting `docs/process/cli-flag.md`.
-- Implementing `serve-lsp`, IDE plugin, GUI, hard-delete / GC — these are Phase 2.
+- Implementing `serve-lsp`, IDE plugin, GUI, hard-delete / GC — 这些都不在 v1 必需范围。
 - Adding `parent` / `depends_on` to frontmatter — directory + relative links cover it (see intent-structure.md).
 - Adding new lint rules without following `docs/process/lint-rule.md`.
 - Modifying frontmatter schema without following `docs/process/migrate.md`.

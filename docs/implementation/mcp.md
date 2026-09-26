@@ -117,11 +117,11 @@ MCP 必须覆盖**增删改查 + 校验**完整意图生命周期。
 
 ---
 
-## 5 GUI API 边界（Phase 2 预留）
+## 5 GUI API 边界（设计性预留接口）
 
 GUI 不走 CLI 的 `--json` flag，而是通过**单独的 API 包**消费同一份 `internal/store` / `internal/parser`。
 
-Phase 2 建议形态：
+建议形态：
 
 - **HTTP server 子命令**（`kron serve-gui`）启动轻量 HTTP 服务
 - 端点对应 MCP 工具集：`POST /intents` / `GET /intents` / `PATCH /intents/:slug` / `DELETE /intents/:slug` / `GET /lint`

@@ -91,12 +91,15 @@ See docs/process/internal-pkg.md"
 
 ---
 
-## 5 v1 已有 `internal/` 包
+## 5 已规划 / 已开的 `internal/` 包
 
-| 包 | 职责 | 何时开 |
+> 实景：当前 `internal/` 已开的包 = `model`（已实现）/ `store`（stub）/ `parser`（stub）。开新包前先 grep 仓库结构。  
+> 本表只描述**设计上的开包时机规则**，不反映具体完成情况。
+
+| 包 | 职责 | 设计上何时开 |
 |---|---|---|
-| `internal/model` | 对象层：纯数据结构 + 校验方法 | v1 必须 |
-| `internal/store` | 业务层：文件 I/O + YAML 序列化 | v1 必须 |
-| `internal/parser` | 业务层：输入解析（slug、markdown、锚点、相对链接） | v1 必须 |
-| `internal/lint` | 业务层：扫描 + 校验组合（两个以上访问层用到时才开） | 当 CLI、MCP、IDE 都需要 lint 时开 |
+| `internal/model` | 对象层：纯数据结构 + 校验方法 | 设计上要求必有 |
+| `internal/store` | 业务层：文件 I/O + YAML 序列化 | 设计上要求必有 |
+| `internal/parser` | 业务层：输入解析（slug、markdown、锚点、相对链接） | 设计上要求必有 |
+| `internal/lint` | 业务层：扫描 + 校验组合（两个以上访问层用到时才开） | 设计上要求：CLI、MCP、IDE 都需 lint 时开 |
 | `internal/...` | **不**预设更多 | 每个新包都要 commit 论证 |

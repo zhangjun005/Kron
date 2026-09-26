@@ -70,8 +70,8 @@
 三种对外入口：
 
 - **MCP**：给 AI Agent 提供意图的检索与校验能力（参考 `requirements.md` §3）
-- **LSP**：给编辑器提供 Hover 悬停预览 + `Ctrl+单击` 跳转（Phase 2 占位，见 [`implementation/ide-interaction.md`](../implementation/ide-interaction.md)）
-- **GUI**：提供意图树浏览与关系图可视化（Phase 2，非 v1 必需）
+- **LSP**：给编辑器提供 Hover 悬停预览 + `Ctrl+单击` 跳转（见 [`implementation/ide-interaction.md`](../implementation/ide-interaction.md) 契约）
+- **GUI**：提供意图树浏览与关系图可视化（不在 v1 必需范围）
 
 **为什么需要这件事：**
 AI 需要在写代码前后取意图（LSP hover 让人类就地核验），GUI 提供结构化浏览。意图不消费，就只是另一个没人看的文档。
@@ -91,7 +91,7 @@ AI 需要在写代码前后取意图（LSP hover 让人类就地核验），GUI 
 │                横向: [@slug] 相对链接
 │
 └─ 产出条目 ──► 2.3 意图协作
-                 MCP（给 AI） / LSP（给编辑器） / GUI（Phase 2）
+                 MCP（给 AI） / LSP（给编辑器） / GUI（不在 v1 必需范围）
 ```
 
 ---

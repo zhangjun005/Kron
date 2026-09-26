@@ -87,7 +87,7 @@ fi
 |---|---|---|
 | `architecture.md` §〇·五的判定表措辞是否"过强" | 表格文字是否算"建议性"还是"强制性"是语义问题 | code review；评审者需读 §〇 铁律 |
 | `business.md` 的"建议这样设计"是否实际上已经违反 | 文字约束无法量化 | `kron lint` 负责 lint 层约束，业务层约束靠架构 review |
-| Phase 2 文件（如 `ide-interaction.md`）的内容是否真的不执行 | v1 阶段无代码落地，无法验证 | Phase 2 开始时做一次全面 cross-check |
+| `ide-interaction.md` 等不在 v1 交付范围的文件，内容是否真的不执行 | 当前阶段无代码落地，无法验证 | v1 收尾时做一次全面 cross-check |
 | `AGENTS.md` 与 `architecture.md` 的措辞一致性 | 两份文件措辞不同但含义相同 | code review；两份文件在同一次 PR 修改 |
 
 ---

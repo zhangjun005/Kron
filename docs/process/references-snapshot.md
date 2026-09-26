@@ -148,7 +148,10 @@
 
 ## 三、是否符合 [`docs-map.md`](../abstractDesign/docs-map.md) 单向链？
 
-| 检查项 | 期望 | 实际 | 状态 |
+> 表中 ✅ / ❌ 表示**链路规则是否通过**（与"功能是否已实现"无关）。
+
+| 检查项 | 期望 | 实际 | 通过？ |
+|---|---|---|---|
 |---|---|---|---|
 | B → F | [`architecture.md`](../abstractDesign/architecture.md) 引用 `implementation/*.md` 仅为导航引用 | 17 处全是 "见 [`implementation/cli.md`](../implementation/cli.md)" 导航引用 | ✅ |
 | B → G | [`architecture.md`](../abstractDesign/architecture.md) 引用 `process/*.md` 仅为导航引用 | 5 处全是 "see [`process/cli-flag.md`](../process/cli-flag.md)" 导航引用 | ✅ |

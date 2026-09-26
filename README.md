@@ -77,7 +77,7 @@ func ParseFrontmatter(raw []byte) (map[string]any, string, error) { ... }
 
 ## 状态
 
-🚧 **重做中（Go）**。
+仓库 `cmd/kron/` 与 `internal/` 现状即 Kron 当前完成度（看目录比看状态声明更准）。
 
 ## 参与贡献
 
