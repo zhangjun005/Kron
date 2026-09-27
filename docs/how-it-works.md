@@ -70,6 +70,24 @@ updated_at: "2026-09-22T10:00:00Z"
 reviewers:
   - "@alice"
 status: "active"
+
+# assumptions 写在 frontmatter 里，是正文"边界假设"的结构化表达
+# 正文"边界假设"可保留为纯自然语言补充，或删除以避免重复
+assumptions:
+  - id: single-issuer
+    text: 全系统只有单一签发方，不需要 RS256 多密钥支持
+    severity: hard
+    expires_at: "2026-12-31"
+  - id: daus-under-10k
+    text: 当前 DAU ≤ 10K，黑名单放 Redis 无压力
+    severity: hard
+  - id: redis-availability
+    text: Redis 可用性 ≥ 99.9%，Redis 挂了则 token 吊销失效（业务可接受）
+    severity: soft
+    expires_at: "2027-06-01"
+  - id: clock-skew-30s
+    text: 客户端时钟偏差 ≤ 30 秒，否则 exp 判断误差导致误踢用户
+    severity: hard
 ---
 
 # Refresh Token 实现选型
@@ -83,10 +101,6 @@ status: "active"
 ## Trade-offs
 - **放弃**：跨服务 token 共享（违反"吊销立即全局生效"诉求）
 - **代价**：每次请求一次 Redis 查询
-
-## Invariants / Assumptions
-- 假设 ≤10K DAU
-- 假设 Redis 可用性 ≥ 99.9%
 ```
 
 > 这是 v1 当前实现（按 [`internal/model/intent.go`](../internal/model/intent.go) 的 `Frontmatter` 结构）。字段名严格来自 `model.Frontmatter`，不杜撰。
@@ -160,7 +174,7 @@ exit 1
 
 ## 5 AI Agent 视角：MCP 是入口
 
-设计：如果你是 AI Agent（不是人），你**不会用 CLI**——你用 MCP。预期配置如下（谁配置谁就能调 8 个工具；当前是否真正可用，看 main 分支）：
+设计：如果你是 AI Agent（不是人），你**不会用 CLI**——你用 MCP。预期配置如下（谁配置谁就能调 12 个工具；当前是否真正可用，看 main 分支）：
 
 ```jsonc
 // .cursor/mcp.json (or whatever client config)
@@ -174,7 +188,20 @@ exit 1
 }
 ```
 
-设计上的工具集：`kron_init` / `kron_add` / `kron_list` / `kron_get` / `kron_update` / `kron_delete` / `kron_restore` / `kron_lint`。这部分是**接口契约**的预期—— MCP 服务自身实现进度见仓库代码现状。
+设计上的工具集（v1 总数 12 个）：
+
+- 生命周期：`kron_init` / `kron_add` / `kron_list` / `kron_get` / `kron_update` / `kron_delete` / `kron_restore`
+- 校验：`kron_lint`
+- **AI 主动消费**：`kron_assume_check` / `kron_impact` / `kron_intent_density` / `kron_stale`
+
+这 4 个"主动消费"工具让 AI 在编码循环里**主动**消费意图，而不是被动 grep Markdown：
+
+- `kron_assume_check` 在改代码前自动列出"你依赖的假设"
+- `kron_impact` 在改意图前自动列出"哪些代码 / 下游意图受影响"
+- `kron_intent_density` 让 CI 量化"意图覆盖率"
+- `kron_stale` 让 CI 找出"过期意图"
+
+完整契约见 [`docs/implementation/mcp.md`](implementation/mcp.md) §2；新增 MCP 工具的流程见 [`docs/process/mcp-tool.md`](process/mcp-tool.md)。
 
 作者写完意图文件，**人和 AI 用同一份数据**——零双向同步、零事件总线、零状态机。这是 Kron 的核心承诺，与是否已实现无关。
 

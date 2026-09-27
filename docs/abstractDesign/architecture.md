@@ -151,8 +151,11 @@ Kron 的核心是**数据格式 + 协议**，不是一个二进制。同一份�
 | 删（软） | `kron_delete` | 提供可恢复的软删除能力 |
 | 恢复 | `kron_restore` | 提供从软删除状态还原的能力 |
 | 校验 | `kron_lint` | 提供锚点与 frontmatter 校验能力 |
+| 主动消费 | `kron_assume_check`、`kron_impact`、`kron_intent_density`、`kron_stale` | 提供 AI Agent 编码循环中**主动**消费意图的能力——把"AI 主动校验假设 / 量化覆盖率 / 影响范围"从口头承诺变成可执行 API |
 
 完整工具契约（入参/出参/错误码）：见 [`docs/implementation/mcp.md`](../implementation/mcp.md)。
+
+> 新增 MCP 工具的流程：见 [`docs/process/mcp-tool.md`](../process/mcp-tool.md)。
 
 ---
 
@@ -331,6 +334,7 @@ func (s *Store) WriteIntent(caller string, slug string, intent *model.Intent) er
 | 方向 | 留口方式 | 流程文档 |
 |---|---|---|
 | AI 起草工作流 | MCP 工具集已覆盖完整生命周期；store 接口走 ctx，可携带 caller 身份 | — |
+| AI 主动消费意图 | MCP 主动消费类工具（`kron_assume_check` / `kron_impact` / `kron_intent_density` / `kron_stale`）已在 §1.2；详细契约见 [`docs/implementation/mcp.md`](../implementation/mcp.md)；视图形态见 [`view-call-tree-intent.md`](./view-call-tree-intent.md) | [`docs/process/mcp-tool.md`](../process/mcp-tool.md) |
 | GUI 客户端 | 独立的 GUI API 边界（见 [`docs/implementation/mcp.md`](../implementation/mcp.md)） | — |
 | 健康度诊断 | `kron lint` 子命令可扩展 lint 规则集 | [`docs/process/lint-rule.md`](../process/lint-rule.md) |
 | 多编辑器 LSP 复用 | LSP server 与 CLI 解耦，可独立打包 | — |

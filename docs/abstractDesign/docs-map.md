@@ -172,11 +172,13 @@ A (requirements.md)  ──►  D (business.md)  ──►  B (architecture.md)
 | **F** | `docs/implementation/ide-interaction.md` | B |
 | **F** | `docs/implementation/mcp.md` | B |
 | **F** | `docs/implementation/testing.md` | B |
+| **F** | `docs/abstractDesign/view-call-tree-intent.md` | B, C |
 | **G** | `docs/process/cli-flag.md` | B |
 | **G** | `docs/process/internal-pkg.md` | B |
 | **G** | `docs/process/lint-rule.md` | B |
 | **G** | `docs/process/migrate.md` | B, C |
 | **G** | `docs/process/ci-enforcement.md` | B |
+| **G** | `docs/process/mcp-tool.md` | B |
 | **H** | `docs/article.md` | — |
 | **K** | `docs/how-it-works.md` | `internal/model/intent.go` (代码示例的真实类型) |
 | **I** | `AGENTS.md` | B, C, F, G |

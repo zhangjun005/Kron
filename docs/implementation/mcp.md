@@ -17,8 +17,14 @@
 | `kron_delete` | 软删 | `cmd/kron/serve-mcp/` |
 | `kron_restore` | 恢复 | `cmd/kron/serve-mcp/` |
 | `kron_lint` | 校验 | `cmd/kron/serve-mcp/` |
+| `kron_assume_check` | 主动校验 | `cmd/kron/serve-mcp/` |
+| `kron_impact` | 影响分析 | `cmd/kron/serve-mcp/` |
+| `kron_intent_density` | 量化审计 | `cmd/kron/serve-mcp/` |
+| `kron_stale` | 时效审计 | `cmd/kron/serve-mcp/` |
 
-MCP 必须覆盖**增删改查 + 校验**完整意图生命周期。
+MCP 必须覆盖**增删改查 + 校验**完整意图生命周期。v1 扩展 4 个工具（`kron_assume_check` / `kron_impact` / `kron_intent_density` / `kron_stale`）让 AI Agent **主动**消费意图，而不是被动 grep Markdown。
+
+> **新增 MCP 工具的流程**：见 [`docs/process/mcp-tool.md`](../process/mcp-tool.md)。
 
 ---
 
@@ -95,6 +101,53 @@ MCP 必须覆盖**增删改查 + 校验**完整意图生命周期。
 | 入参 | 无 |
 | 出参 | `{ passed: bool, errors: string[] }` |
 
+### `kron_assume_check`
+
+| 字段 | 值 |
+|---|---|
+| 入参 | `file_path` (string, optional) |
+| 出参 | `{ warnings: [{intent_slug, assumption_id, severity, text}] }` |
+| 错误码 | 无 |
+
+**说明**：读 `.kron/intents/*.md` 的 `assumptions[]`，对锚点指定的意图列出"该 `file_path` 依赖的 hard 假设清单"。
+v1 简化：仅列清单，不做 diff 对比（留 TODO）。
+**触发场景**：AI Agent 改完代码、准备 commit 前自动调——把"AI 主动校验假设"从口头承诺变成可执行能力。
+
+### `kron_impact`
+
+| 字段 | 值 |
+|---|---|
+| 入参 | `slug` (string, required) |
+| 出参 | `{ intent: IntentSummary, incoming_anchors: [Anchor], depends_on_intents: [string] }` |
+| 错误码 | `ErrIntentNotFound` |
+
+**说明**：`incoming_anchors` 是反向 anchor 扫描结果（哪些源文件依赖这个意图）；
+`depends_on_intents` 是按共享 `symbol` 推断的横向关系。
+**触发场景**：AI Agent 准备修改某个意图前自动调——把"意图 × 调用树"视图的数据基础变成可执行 API。
+
+### `kron_intent_density`
+
+| 字段 | 值 |
+|---|---|
+| 入参 | 无 |
+| 出参 | `{ total_intents: int, total_anchors: int, coverage: { intents_with_anchors: int, intents_without_anchors: [slug] }, files_without_intent: [path] }` |
+| 错误码 | 无 |
+
+**说明**：`files_without_intent` 是行数 > 50 且 0 anchor 的源文件——意图盲区。
+**触发场景**：CI / IDE 侧栏——把"意图覆盖率"从感觉变成可量化指标。
+
+### `kron_stale`
+
+| 字段 | 值 |
+|---|---|
+| 入参 | `days_threshold` (int, optional, 默认 90) |
+| 出参 | `{ superseded_candidates: [slug], expired_assumptions: [{slug, assumption_id, expires_at}] }` |
+| 错误码 | 无 |
+
+**说明**：`superseded_candidates` 是 `status=active` 但 `updated_at > days_threshold` 的意图；
+`expired_assumptions` 是已过 `expires_at` 但尚未 superseded 的硬假设。
+**触发场景**：CI / 定时任务——把"假设失效"从人工巡检变成自动告警。
+
 ---
 
 ## 3 底层实现
@@ -102,6 +155,9 @@ MCP 必须覆盖**增删改查 + 校验**完整意图生命周期。
 - 每个工具底层映射到 `internal/store` / `internal/parser` / `internal/lint` 函数
 - 签名带 `ctx context.Context`，caller 由 MCP server 注入为 `"mcp:<agent>"`（如 `"mcp:claude-3.7"`）
 - JSON-RPC 序列化 / 反序列化留在 `cmd/kron/serve-mcp/`，不做下沉
+- v1 扩展的 4 个工具（`kron_assume_check` / `kron_impact` / `kron_intent_density` / `kron_stale`）
+  是 `internal/store` + `internal/parser` 现成能力的**组合调用**，**不**下沉到新包；
+  当 CLI / IDE 也需要同等 lint 输出时再考虑下沉 `internal/lint/`（见 [architecture.md §〇·五·5](../abstractDesign/architecture.md)）
 
 ---
 

@@ -14,8 +14,10 @@
 | [`domain-model.md`](./domain-model.md) | 领域模型结构体（Intent / Frontmatter / Status / Anchor / Config） |
 | [`error-catalog.md`](./error-catalog.md) | 错误 sentinel 清单 + 包装规则 + 退出码对照 |
 | [`ide-interaction.md`](./ide-interaction.md) | IDE / LSP 三路交互（接口契约，不实现） |
-| [`mcp.md`](./mcp.md) | MCP 工具契约（8 工具入参/出参）+ GUI API 边界 |
+| [`mcp.md`](./mcp.md) | MCP 工具契约（v1 共 12 工具：8 个生命周期 + 4 个 AI 主动消费）+ GUI API 边界 |
 | [`testing.md`](./testing.md) | 分层测试策略 + fixture 管理 + CI 门禁 |
+
+> **F 层外部同类文件**：`docs/abstractDesign/view-call-tree-intent.md`（调用树 × 意图视图数据契约）——与本目录文件同角色（F），受 B 约束；本目录文件不引用它，它不引用本目录文件（F→F 反向禁止）。
 
 ---
 
