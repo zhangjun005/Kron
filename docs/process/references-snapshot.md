@@ -3,6 +3,8 @@
 > 状态：**快照**，生成于 2026-09-26。  
 > 与 [`docs-map.md`](../abstractDesign/docs-map.md) 的关系：本文件是其实例化结果，不是规则定义。  
 > 重新生成方法见下方"如何重新生成此文件"。
+>
+> **注意**：2026-09-27 本批改动（MCP 工具集 8 → 12、新增 [`view-call-tree-intent.md`](../abstractDesign/view-call-tree-intent.md) 与 [`mcp-tool.md`](./mcp-tool.md)）后，**§一 §二 数据已过期**；见 §四 末"已修复的陈旧引用（待重生成）"。
 
 ---
 
@@ -176,6 +178,24 @@
 | `docs/process/internal-pkg.md` L90 | `docs/architecture-structure.md` | (删除该行) | 文件已删除 |
 
 > **历史**：`docs/architecture-structure.md` 在上次清理中删除；本次提交 `037da8c` 后残留 2 处未清理引用，今日 (2026-09-26) 修复。
+
+### 4.1 已过期引用（2026-09-27 待重生成）
+
+本批改动后 §一 §二 数据需重新生成才能反映。**未重生成前的差异**：
+
+| 文件 | 改动 | 重生成后 §一 期望新增行 |
+|---|---|---|
+| [`docs/implementation/mcp.md`](../implementation/mcp.md) | §1 表格 8 行 → 12 行；§2 追加 4 个工具契约；§3 加 1 行 "v1 扩展的 4 个工具..." | `architecture.md` 引用 `mcp.md` 计数从 6 → 7 |
+| [`docs/abstractDesign/architecture.md`](../abstractDesign/architecture.md) | §1.2 表格扩 1 行 + 末段 1 行；§八 加 1 行 | (无新增引用;但 §1.2 与 §八 文本被多家引用) |
+| [`docs/business.md`](../business.md) | §一目标加 1 句;§2.3 末加 2.3.1 段(1 个新工具表格 + 3 行文字) | (无新增引用) |
+| [`docs/how-it-works.md`](../how-it-works.md) | §5 工具集列表扩到 12 + 加 2 句 | `implementation/mcp.md` 引用计数从 1 → 2 |
+| **新增** [`docs/abstractDesign/view-call-tree-intent.md`](../abstractDesign/view-call-tree-intent.md) | (整篇新文件) | 6 个文件已引用:architecture.md / docs-map.md / how-it-works.md / implementation/mcp.md / implementation/README.md / process/README.md |
+| **新增** [`docs/process/mcp-tool.md`](./mcp-tool.md) | (整篇新文件) | 2 个文件已引用:docs-map.md / process/README.md |
+| [`docs/abstractDesign/docs-map.md`](../abstractDesign/docs-map.md) | §五 索引加 2 行 | (无新增引用;但本身入度从 4 → 6) |
+| [`docs/implementation/README.md`](../implementation/README.md) | 文档地图补 view-call-tree-intent.md;mcp.md 描述 8 → 12 | (无新增引用) |
+| [`docs/process/README.md`](./README.md) | 文档地图补 mcp-tool.md | (无新增引用) |
+
+> 重生成命令：见 §五 `scripts/regen-refs-snapshot.sh`（当前未落地，按 §五 手工流程执行）。
 
 ---
 

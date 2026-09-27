@@ -12,6 +12,7 @@
 | [`cli-flag.md`](./cli-flag.md) | 想给现有 CLI 命令加新 flag |
 | [`internal-pkg.md`](./internal-pkg.md) | 想新建 `internal/<name>/` 子包 |
 | [`lint-rule.md`](./lint-rule.md) | 想给 `kron lint` 增加新检查规则 |
+| [`mcp-tool.md`](./mcp-tool.md) | 想给 `kron serve-mcp` 增加新 MCP 工具 |
 | [`migrate.md`](./migrate.md) | 想修改 frontmatter schema |
 | [`references-snapshot.md`](./references-snapshot.md) | 想看当前 md 之间实际引用关系（快照而非规则） |
 
