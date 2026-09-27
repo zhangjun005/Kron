@@ -7,24 +7,32 @@
 
 ---
 
-## 1 一个真实场景：接手 `auth.RefreshToken`
+## 1 一个真实场景:AI 写了一周代码,你接手排查
 
-设你 6 个月前离开项目，现在回来接手。
+设你今天刚加入团队分支。**上周 AI 编码助手一口气写完了一个 auth 模块**——几天内提交了十几个新文件、几十处函数、几百行注释。你需要在它**自信满满的输出**里找出:① 哪些决策值得 review;② 哪些假设已经悄悄过时;③ 下游改个 API 会不会炸到这些新写的代码。
 
 ```bash
-git clone git@github.com:yourorg/kron-auth-demo.git
-cd kron-auth-demo
+git checkout feature/ai-auth-week
+git log --oneline -20            # AI 这周的 commit 密度高得反常
 ```
 
 `ls` 后你会看见：
 
 ```
 your-project/
-├── .kron/                          ← Kron 目录
-│   ├── config.toml                 ← 一行：intents_dir = ".kron/intents"
-│   └── intents/
-│       └── auth-refresh-token.md   ← 本次示例的意图文件
-└── internal/auth/refresh.go        ← 你要接手的代码
+├── .kron/                                ← Kron 目录
+│   ├── config.toml                       ← 一行:intents_dir = ".kron/intents"
+│   └── intents/                          ← 每个意图一个 .md
+│       ├── 2026-09-20-auth-refresh-token.md
+│       ├── 2026-09-20-auth-rotation.md
+│       ├── 2026-09-21-rate-limit.md
+│       ├── 2026-09-22-token-bucket.md
+│       ├── 2026-09-23-soft-delete.md
+│       └── ...
+└── internal/auth/
+    ├── refresh.go                        ← 你要 review 的代码
+    ├── rotate.go
+    ├── ...
 ```
 
 打开 `internal/auth/refresh.go`：
@@ -44,22 +52,28 @@ func NewRefreshToken(userID string) (string, error) {
 
 ---
 
-## 2 跟随锚点：哪一行指向哪个意图
+## 2 跟随锚点:哪一行指向哪个意图
 
-想看 `NewRefreshToken` 的设计意图？两种方式：
+打开 `internal/auth/refresh.go`,你看到几个 `// @kron:intent <slug>` 锚点。注释 `// @kron:intent auth-refresh-token` 是**锚点**——一个**轻量反向引用**。锚点本身不是 Kron 的核心数据,只是把代码符号钩到意图文件。
 
-**（a）CLI**：暂未提供 `kron get`（v1 CLI 仅有 `init` / `add` / `lint` / `serve-mcp`；取意图走 MCP，详见 §5）。
+面对一周 AI 写下的代码量,你不会逐个 `cat` `.md`——你会问 AI:**"这块代码依赖了哪些假设?过期了没?"**
 
-**（b）手动阅读**：
-
-```bash
-# 锚点 → slug
-$ sed -n '5p' internal/auth/refresh.go       # 提取锚点行
-// @kron:intent auth-refresh-token
-$ cat .kron/intents/auth-refresh-token.md
+```
+人类: 这文件依赖哪些 hard 假设? 有过期的吗?
+AI:    我帮你跑了 kron_assume_check + kron_stale:
+       auth-refresh-token:
+         - hard "single-issuer" 还 active
+         - soft "redis-availability" 还 active
+         - hard "daus-under-10k" 还 active
+         - soft "clock-skew-30s" 还 active(还剩 60 天)
+       auth-rotation:
+         - hard "rotate-on-password-change" 还 active
+       rate-limit:
+         ⚠ hard "no-burst-protection" 已过期(expires_at: 2026-09-01)
+       建议:先补上 burst protection 的新意图,或把这个 hard 改 soft。
 ```
 
-`.kron/intents/auth-refresh-token.md` 内容（v1 实际存储格式）：
+这是 §3.2 提到的 **`kron_assume_check` + `kron_stale`** 在实际场景里的用法——AI 主动 query 假设清单 + 主动告警过期,人类不需要挨个翻文件。
 
 ```markdown
 ---
@@ -103,7 +117,7 @@ assumptions:
 - **代价**：每次请求一次 Redis 查询
 ```
 
-> 这是 v1 当前实现（按 [`internal/model/intent.go`](../internal/model/intent.go) 的 `Frontmatter` 结构）。字段名严格来自 `model.Frontmatter`，不杜撰。
+> 这是其中一份意图文件的 raw 内容——AI 通过 MCP 拉到的就是这个形状,字段名严格来自 [`internal/model/intent.go`](../internal/model/intent.go) 的 `Frontmatter` 结构。人和 AI 读的是同一份数据。
 
 ---
 
