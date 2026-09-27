@@ -181,6 +181,12 @@ created_by: "@zhangjun005"
 updated_at: "2026-09-22T10:00:00Z"
 # optional for multi-collaborator projects:
 # reviewers: ["@alice", "@bob"]
+# optional: structured assumptions (see docs/abstractDesign/intent-structure.md)
+# assumptions:
+#   - id: single-region
+#     text: 服务仅部署在单 region，无跨区时钟漂移问题
+#     severity: hard
+#     expires_at: "2026-12-31"
 ---
 
 # Intent title
@@ -192,10 +198,9 @@ updated_at: "2026-09-22T10:00:00Z"
 
 ## Trade-offs
 ...
-
-## Invariants / Assumptions
-...
 ```
+
+> **边界假设写在 frontmatter 的 `assumptions` 字段里**（见 [`docs/abstractDesign/intent-structure.md`](docs/abstractDesign/intent-structure.md) §三），不在正文重复。
 
 Status lifecycle (managed via `status` field when needed):
 - `draft` → `active` → `superseded`

@@ -90,6 +90,7 @@
 - `updated_at`：ISO 8601 时间戳
 - `reviewers`：（可选，多人协作时使用）签名列表，`@<github_handle>` 数组，声明对该意图决策进行过 Review 的人员
 - `status`：（可选）`draft` / `active` / `superseded`，详见下方"status 字段策略"
+- `assumptions`：（可选）可验证前提列表，详见下方"Assumptions 字段策略"
 
 ### `status` 字段策略
 
@@ -107,6 +108,34 @@
 - `active`（已达成共识）
 - `superseded`（被新方案替代，文件保留不删）
 
+### `assumptions` 字段策略
+
+**完全可选，默认为空数组，等价于"该 intent 无显式假设"。**
+
+语义：每条假设表达"这段代码在什么前提下成立"。假设显式化后，AI Agent 和 LSP 可主动消费。
+
+字段结构：
+```yaml
+assumptions:
+  - id: <短机器名>           # 唯一标识，用于 lint 和 MCP 锚点
+    text: <自然语言描述>      # 人/AI 可读的前提描述
+    severity: hard | soft     # hard=破了必须改代码；soft=破了需评估影响
+    expires_at: "YYYY-MM-DD" # （可选）人工估量的重新审视截止日期
+    verified_at: "YYYY-MM-DD" # （可选）最近一次人工确认该假设仍成立的日期
+    verified_by: "@handle"   # （可选）确认人
+```
+
+`severity` 语义：
+- `hard`：假设破裂时，相关代码逻辑必须修改。例如"Redis 可用性 ≥ 99.9%"破了意味着 token 吊销完全失效，必须改。
+- `soft`：假设破裂时，代码仍可工作，但存在性能或功能降级。例如"DAU ≤ 10K"破了意味着 Redis 内存压力上升，需要评估。
+
+`expires_at` 用途：
+- 不驱动任何自动行为
+- 仅供 LSP hover 提示变色（MCP `kron_assume_check` 也可读）
+- 到期不报错，只提醒"该重新审这条假设了"
+
+`id` 命名建议：kebab-case，如 `single-region`、`blacklist-fits-ram`、`clock-skew-30s`。
+
 ### 正文骨架
 
 ```markdown
@@ -120,8 +149,7 @@
 ## 权衡（Trade-offs）
 选择与放弃的考量。
 
-## 边界假设（Invariants / Assumptions）
-必须遵守的前提与限制。
+<!-- 边界假设写在 frontmatter 的 assumptions 字段里，不在正文重复 -->
 ```
 
 ### 字段 / 章节的选用
@@ -140,6 +168,16 @@ created_by: "@zhangjun005"
 reviewers:
   - "@alice"
 updated_at: "2026-09-22T10:00:00Z"
+status: "active"
+
+assumptions:
+  - id: single-region
+    text: 服务仅部署在单 region，无跨区时钟漂移问题
+    severity: hard
+    expires_at: "2026-12-31"
+  - id: csrf-protected
+    text: 续期接口已加 CSRF token 防护
+    severity: hard
 ---
 
 # JWT 滑动窗口续期
@@ -153,10 +191,6 @@ OAuth2 标准推荐短期令牌 + 刷新策略；15 分钟窗口兼顾安全与�
 - ✅ 令牌泄露窗口小
 - ❌ 用户每次操作均需写 DB 更新过期时间，高并发下有压力
 - 选择：接受写压力，换取安全性
-
-## 边界假设（Invariants / Assumptions）
-- 刷新令牌存储在 HttpOnly Cookie 中，不经过 JS
-- 续期接口需 CSRF 保护
 ```
 
 ---

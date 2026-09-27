@@ -36,6 +36,11 @@ AI 编程助手在清楚"为什么这么做、权衡了什么、放弃了什么"
 symbol: "auth.RefreshToken"
 created_by: "@zhangjun005"
 updated_at: "2026-09-19T22:30:00Z"
+# 可选：边界假设结构化（见 docs/abstractDesign/intent-structure.md §三）
+# assumptions:
+#   - id: small-repo
+#     text: 仓库规模在个人/小团队级别（<1k 条）
+#     severity: hard
 ---
 
 # 存储格式选型
@@ -51,9 +56,7 @@ updated_at: "2026-09-19T22:30:00Z"
 - **放弃了**：原生 SQLite 索引查询能力 —— 换来了零依赖、零迁移成本
 - **代价**：大规模条目下需要全文搜索，不适合 >1万条 的仓库
 
-## 边界假设
-- 假设仓库规模在个人 / 小团队级别（<1k 条）
-- 假设意图条目不会被频繁跨文件交叉引用（重写场景少见）
+> 边界假设写在 frontmatter 的 `assumptions` 字段（见 [intent-structure.md §三](./docs/abstractDesign/intent-structure.md#三边界假设-assumptions-字段)），不在正文重复。
 ```
 
 代码侧用极轻量锚点反向引用：
