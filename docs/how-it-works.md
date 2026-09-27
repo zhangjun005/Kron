@@ -112,38 +112,75 @@ assumptions:
 > **本节只列功能，不标完成度。**  
 > 一个能力"在 Kron 的设计里"是"被期望提供"，跟它在当前仓库里"已落地可运行"是两回事——后者请看仓库当前 main 分支的 `cmd/kron/cli/` 与 `cmd/kron/serve-mcp/`，或 [`internal/model/intent.go`](../internal/model/intent.go)（这是当前唯一一份真实代码示例，字段名严格来自 `model.Frontmatter`）。
 
-### 3.1 CLI 提供的功能
+Kron 暴露**三个互相独立的访问层**，对应三类用户。**这三层互不依赖**：CLI 不知道 MCP 存在、MCP 不知道 IDE 存在、IDE 不知道 CLI 存在（[`architecture.md`](../abstractDesign/architecture.md) §〇 铁律 #3）。
 
-Kron 设计四个 CLI 子命令（完整契约在 [`docs/implementation/cli.md`](implementation/cli.md)）：
+### 3.1 CLI —— 给人 / CI 用的最小集
 
-- **`kron init`** —— 在仓库根创建 `.kron/intents/` 目录 + 写 `config.toml`（默认值：`intents_dir = ".kron/intents"`）。
-- **`kron add <slug>`** —— 脚手架一个新意图文件（写默认 frontmatter 骨架；之后人或 AI 用编辑器继续编辑）。
-- **`kron lint`** —— 扫描仓库所有源码，检查两类错误：① 代码里的 `// @kron:intent <slug>` 锚点是否指向真实存在的 `.md` 文件；② `.kron/intents/**/*.md` 是否含必填 frontmatter 字段。
-- **`kron serve-mcp`** —— 启动 MCP stdio server，暴露 JSON-RPC 工具给 AI Agent。
+CLI 是 v1 唯一已稳定的访问层。**只四个子命令**（最小集，不扩展）：
 
-CLI **不**实现 `list` / `get` / `update` / `delete` / `restore`——这五个是 MCP-only。
+| 命令 | 用途 | 典型场景 |
+|---|---|---|
+| `kron init` | 创建 `.kron/intents/` + 默认 `config.toml` | 新仓库第一次用 Kron |
+| `kron add <slug>` | 脚手架一个新意图文件（写默认 frontmatter 骨架） | 写新意图前的骨架 |
+| `kron lint` | 扫描仓库校验锚点 + frontmatter；**唯一 CI 强制命令** | `kron lint` 在 CI gate 强制跑 |
+| `kron serve-mcp` | 启动 MCP stdio server 给 AI 用 | 见 §3.2 |
 
-### 3.2 MCP 给 AI Agent 提供的功能
+**CLI 不实现**：`list` / `get` / `update` / `delete` / `restore` / `assume_check` / `impact` / `intent_density` / `stale` —— 查询类操作是 MCP 的事,不是 CLI 的事。这是有意为之——CLI 故意小。
 
-AI Agent 不走 CLI。Kron 启动一个 stdio JSON-RPC server，暴露 8 个工具：
+完整契约见 [`docs/implementation/cli.md`](implementation/cli.md)。
 
-- 写：`kron_init` / `kron_add` / `kron_update`
-- 读：`kron_list` / `kron_get`
-- 删除：`kron_delete`（软删除到 `.kron/.trash/`）/ `kron_restore`（从 `.trash/` 移回）
-- 校验：`kron_lint`
+### 3.2 MCP —— 给 AI Agent 的可 query schema
 
-完整工具契约见 [`docs/implementation/mcp.md`](implementation/mcp.md)。
+AI Agent **不走 CLI**——它通过 stdio JSON-RPC 调用 MCP 工具。v1 工具集**共 12 个**，分三组：
 
-### 3.3 文件格式提供的功能
+**生命周期 8 个**：增删改查 + 软删/恢复 + 校验
 
-由于数据就是 `.kron/intents/*.md`，以下"功能"是 Markdown + Git 自带的，不靠 Kron 提供：
+| 工具 | 一句话 |
+|---|---|
+| `kron_init` | 在仓库建立 `.kron/` 骨架 |
+| `kron_add` | 脚手架一个新意图文件 |
+| `kron_list` | 列出所有意图（按 `status` / `symbol` 过滤） |
+| `kron_get` | 取出指定 slug 的意图全文 + frontmatter |
+| `kron_update` | 修改意图正文或 frontmatter（保留 git 历史） |
+| `kron_delete` | 软删除：移到 `.kron/.trash/`（可恢复） |
+| `kron_restore` | 从 `.trash/` 移回 `.kron/intents/` |
+| `kron_lint` | 校验锚点 + frontmatter；与 `kron lint` 等价 |
+
+**AI 主动消费 4 个**（这是 Kron 相对注释 / ADR / `codebase.md` 的差异化）：
+
+| 工具 | 一句话 | 价值 |
+|---|---|---|
+| `kron_assume_check` | 列出某文件依赖的所有 `hard` 假设 | AI 改代码前**自动**收到假设清单 |
+| `kron_impact` | 列出修改某意图会牵连哪些代码 + 下游意图 | 影响范围可视化 |
+| `kron_intent_density` | 量化"意图覆盖率"（哪些意图无锚点 / 哪些核心文件无意图） | 意图盲区指标 |
+| `kron_stale` | 找出过期意图 + 已过 `expires_at` 的假设 | 自动告警，不再人工巡检 |
+
+完整契约见 [`docs/implementation/mcp.md`](implementation/mcp.md) §2。
+
+### 3.3 IDE —— 给人 / AI 在编辑器内的可调用能力
+
+> **范畴**：v1 不交付 IDE 插件 / LSP server 本体，但 Kron 的数据契约（frontmatter + 锚点格式）已经按"未来 LSP 友好"设计。
+
+预期 IDE 入口提供**三路触发**（来自 [`implementation/ide-interaction.md`](implementation/ide-interaction.md)）：
+
+| 触发位置 | 元素 | Hover | Ctrl+单击 |
+|---|---|---|---|
+| 源码 | `// @kron:intent jwt-sliding-window` | 弹出意图摘要 | 跳转打开 `.kron/intents/jwt-sliding-window.md` |
+| 意图 MD（横向） | `[@token-bucket](../rate-limit/token-bucket.md)` | 弹出被依赖意图摘要 | 跳转打开目标 `.md` |
+| 意图 MD（纵向父级） | `[@auth](README.md)` 或自动推导 | 弹出父模块背景与范围边界 | 跳转打开父级 README.md |
+
+**额外能力**：调用树 × 意图视图——见 [`abstractDesign/view-call-tree-intent.md`](../abstractDesign/view-call-tree-intent.md)。它把"调用树节点 ↔ 意图 slug"二维展示,基于 `kron_impact` 与 `kron_intent_density` 的输出。**Kron 不画调用树本身**——画图是 IDE / LSP / GUI 的工作,Kron 只暴露数据。
+
+### 3.4 文件格式自带的能力
+
+由于数据就是 `.kron/intents/*.md`,以下"功能"是 Markdown + Git 自带的,不靠 Kron 提供：
 
 - `git diff` 直观看到意图变更
 - `git log` / `git blame` 追溯意图历史
 - PR review 时直接读 Markdown
 - 多人协作按 Markdown 处理 merge conflict
 
-完整命令清单见 [`docs/implementation/cli.md`](implementation/cli.md)；MCP 工具契约见 [`docs/implementation/mcp.md`](implementation/mcp.md)。
+完整命令清单见 [`docs/implementation/cli.md`](implementation/cli.md)；MCP 工具契约见 [`docs/implementation/mcp.md`](implementation/mcp.md)；IDE 交互契约见 [`docs/implementation/ide-interaction.md`](implementation/ide-interaction.md)。
 
 ---
 
@@ -201,7 +238,7 @@ exit 1
 - `kron_intent_density` 让 CI 量化"意图覆盖率"
 - `kron_stale` 让 CI 找出"过期意图"
 
-完整契约见 [`docs/implementation/mcp.md`](implementation/mcp.md) §2；新增 MCP 工具的流程见 [`docs/process/mcp-tool.md`](process/mcp-tool.md)。
+完整契约见 [`docs/implementation/mcp.md`](implementation/mcp.md) §2。
 
 作者写完意图文件，**人和 AI 用同一份数据**——零双向同步、零事件总线、零状态机。这是 Kron 的核心承诺，与是否已实现无关。
 

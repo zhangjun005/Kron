@@ -1,0 +1,49 @@
+docs: align CLI/IDE/MCP capability descriptions with current spec
+
+Two H-layer / K-layer documents updated to reflect Kron's actual
+3-entry design (CLI / IDE / MCP). Per user instruction, this
+commit describes what Kron *does* (i.e. the product surface),
+not what is currently runnable - we lean on Kron's design-as-truth
+posture ("design intent = the source") which is what
+docs/how-it-works.md already commits to at the top.
+
+README.md:
+- New section "## 三个入口" added between "## Kron 不做什么"
+  and "## 状态".
+- Each of CLI / MCP / IDE gets a one-sentence framing + a small
+  table summarising its capability surface.
+- CLI table mirrors docs/implementation/cli.md (4 commands,
+  with explicit "CLI 故意不做 list/get/update/delete/restore"
+  positioning).
+- MCP table lists all 12 tools split into 8 lifecycle +
+  4 active-consumption. The latter 4 carry a one-line
+  "differentiation vs comments/ADR/codebase.md" framing.
+- IDE section flags that LSP/IDE plugins themselves are not in
+  v1, but that the data contract is forward-compatible; lists
+  the 3 trigger locations from implementation/ide-interaction.md
+  and points to view-call-tree-intent.md.
+
+docs/how-it-works.md:
+- Section 3 rewritten with explicit "三个互相独立的访问层"
+  framing, with the architecture.md §〇 iron rule #3 (no
+  cross-access-layer calls) cited as the reason.
+- §3.1 CLI: minimal set table; reaffirms CLI does not implement
+  query operations.
+- §3.2 MCP: full 12-tool table, with the 4 active-consumption
+  tools given a "价值" column showing the differentiation
+  (auto-listing assumptions / impact scope / coverage metric /
+  stale alerts).
+- §3.3 IDE: NEW section, citing implementation/ide-interaction.md
+  and view-call-tree-intent.md.
+- §3.4 (formerly §3.3) file-format capabilities unchanged.
+
+Reference direction discipline:
+- Both files are K-layer / H-layer; they can cite F-layer
+  (implementation/, abstractDesign/) as navigation.
+- Removed two K->G (how-it-works -> process/) cross-references
+  that this commit was introducing, to avoid widening the
+  existing K->G pattern.
+- Existing K->G references (line 208 lint-rule.md, line 271
+  references-snapshot.md) are pre-existing and not touched here.
+
+No code (.go) changed. No frontmatter schema changed.

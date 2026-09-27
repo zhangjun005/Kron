@@ -78,6 +78,46 @@ func ParseFrontmatter(raw []byte) (map[string]any, string, error) { ... }
 
 只要贡献者或 AI 能自信地编辑 Markdown 文件，那文件就是真相。
 
+## 三个入口
+
+Kron 暴露**三个互相独立的访问层**，对应三类用户。三层互不依赖：CLI 不知道 MCP 存在、MCP 不知道 IDE 存在、IDE 不知道 CLI 存在（[`docs/abstractDesign/architecture.md`](./docs/abstractDesign/architecture.md) §〇 铁律 #3）。
+
+### CLI —— 给人 / CI
+
+**最小集**，四个子命令，刻意不再扩展：
+
+| 命令 | 用途 |
+|---|---|
+| `kron init` | 建立 `.kron/intents/` 骨架 |
+| `kron add <slug>` | 脚手架一个新意图文件 |
+| `kron lint` | 校验锚点 + frontmatter（**唯一 CI gate**） |
+| `kron serve-mcp` | 启动 MCP server（给 AI） |
+
+CLI 故意不做 `list` / `get` / `update` / `delete` / `restore`——查询类操作是 MCP 的事。详情见 [`docs/implementation/cli.md`](./docs/implementation/cli.md)。
+
+### MCP —— 给 AI Agent
+
+AI Agent 不走 CLI。它通过 stdio JSON-RPC 调用 MCP 工具。**v1 共 12 个**，分两组：
+
+- **生命周期 8 个**：`kron_init` / `kron_add` / `kron_list` / `kron_get` / `kron_update` / `kron_delete`（软删）/ `kron_restore` / `kron_lint`
+- **AI 主动消费 4 个**：`kron_assume_check`（改代码前自动列假设）/ `kron_impact`（修改某意图的影响范围）/ `kron_intent_density`（量化意图覆盖率）/ `kron_stale`（过期意图自动告警）
+
+后四个是 Kron **相对注释 / ADR / Cursor `codebase.md` 的差异化**——让 AI 在编码循环里**主动**消费意图,不是被动 grep Markdown。详情见 [`docs/implementation/mcp.md`](./docs/implementation/mcp.md) §2。
+
+### IDE —— 给人 / AI 在编辑器内
+
+> v1 不交付 IDE 插件 / LSP server 本体，但数据契约（frontmatter + 锚点格式）已按"未来 LSP 友好"设计。
+
+预期 IDE 入口提供**三路触发**：
+
+| 触发位置 | 元素 | Hover | Ctrl+单击 |
+|---|---|---|---|
+| 源码 | `// @kron:intent <slug>` | 弹出意图摘要 | 跳转打开 `.kron/intents/<slug>.md` |
+| 意图 MD（横向） | `[@token-bucket](../path/to.md)` | 弹出被依赖意图摘要 | 跳转 |
+| 意图 MD（纵向） | `[@auth](README.md)` 或自动推导 | 弹出父模块背景 | 跳转 |
+
+**调用树 × 意图视图**——基于 `kron_impact` + `kron_intent_density` 的输出,Kron 暴露数据;画图是 IDE 的工作。详情见 [`docs/abstractDesign/view-call-tree-intent.md`](./docs/abstractDesign/view-call-tree-intent.md) 与 [`docs/implementation/ide-interaction.md`](./docs/implementation/ide-interaction.md)。
+
 ## 状态
 
 仓库 `cmd/kron/` 与 `internal/` 现状即 Kron 当前完成度（看目录比看状态声明更准）。
