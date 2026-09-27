@@ -33,3 +33,6 @@ frontend/.vite/
 # Uncomment if rebuilding Rust side:
 # src-tauri/target/
 # target/
+
+# Temporary commit messages written by automated agent sessions
+.cursor/commit-msg-*.txt
