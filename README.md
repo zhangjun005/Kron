@@ -16,6 +16,28 @@ AI 编程助手在清楚"为什么这么做、权衡了什么、放弃了什么"
 
 长期下来就产生了 **Intent Debt**：意图丢失、假设漂移、权衡失效。
 
+## Kron 解决了什么
+
+1. **决策写完即遗忘** — 写在 Notion / Slack / 脑里,半年后没人记得为何拒绝方案 B。  
+   → Kron 把决策落为 `.kron/intents/*.md`,跟代码同 PR 同 review,`git diff` 直接看。
+2. **假设沉到代码里找不到** — 写代码时的前提(DAU ≤ 10K、Redis 99.9%)只在脑子里。  
+   → frontmatter 的 `assumptions[]` 把假设显式化,带 `severity: hard | soft` 与 `expires_at`。
+3. **改代码不知道影响范围** — 改一个 API,下游多少文件多少意图跟着炸。  
+   → MCP `kron_impact` 反向查"改这个意图牵连哪些代码 + 哪些下游意图"。
+4. **过期假设无人察觉** — "Redis 可用性 ≥ 99.9%" 已经过了一年,没人复审。  
+   → MCP `kron_stale` 自动列出过期意图 + 已过 `expires_at` 的假设,CI 可拦门。
+
+第 2、3、4 项是 Kron 跟 `// FIXME`、ADR、Notion、Cursor `codebase.md` 的实质差别——这些替代品都没有 `severity` 字段,也没有被 AI 主动消费的查询接口。
+
+## 意图之间的关系
+
+Kron **不**用字段表达关系(`parent` / `depends_on` 都不存在),只用两种**文件系统 + Markdown 原生**手段:
+
+- **目录 = 层级归属**。`auth/jwt-sliding-window.md` 自动属于 `auth/` 模块;`auth/README.md` 是该模块的总览。
+- **相对链接 = 横向依赖**。意图正文里写 `[令牌桶](../rate-limit/token-bucket.md)`,语义是"这条决策依赖 / 复用 / 引用另一条意图"。普通编辑器的 `Ctrl+单击` 就能跳转,Kron 的 `kron_impact` 工具也会扫这种链接来算影响范围。
+
+完整规范见 [`docs/abstractDesign/intent-structure.md`](./docs/abstractDesign/intent-structure.md) §二、§四。
+
 ## Kron 是什么
 
 一个把意图沉淀为**仓库内 Markdown 文件**的系统：
@@ -100,9 +122,9 @@ CLI 故意不做 `list` / `get` / `update` / `delete` / `restore`——查询类
 AI Agent 不走 CLI。它通过 stdio JSON-RPC 调用 MCP 工具。**v1 共 12 个**，分两组：
 
 - **生命周期 8 个**：`kron_init` / `kron_add` / `kron_list` / `kron_get` / `kron_update` / `kron_delete`（软删）/ `kron_restore` / `kron_lint`
-- **AI 主动消费 4 个**：`kron_assume_check`（改代码前自动列假设）/ `kron_impact`（修改某意图的影响范围）/ `kron_intent_density`（量化意图覆盖率）/ `kron_stale`（过期意图自动告警）
+- **查询类 4 个**：`kron_assume_check`（列出某文件依赖的 hard 假设）/ `kron_impact`（修改某意图的影响范围）/ `kron_intent_density`（量化意图覆盖率）/ `kron_stale`（列出过期意图 + 已过期的假设）
 
-后四个是 Kron **相对注释 / ADR / Cursor `codebase.md` 的差异化**——让 AI 在编码循环里**主动**消费意图,不是被动 grep Markdown。详情见 [`docs/implementation/mcp.md`](./docs/implementation/mcp.md) §2。
+后四个让 AI Agent 在编码循环里**主动**调用,而非被动 grep Markdown——这是它跟"AI 读 README.md"的差别。详情见 [`docs/implementation/mcp.md`](./docs/implementation/mcp.md) §2。
 
 ### IDE —— 给人 / AI 在编辑器内
 

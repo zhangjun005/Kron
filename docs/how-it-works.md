@@ -73,7 +73,7 @@ AI:    我帮你跑了 kron_assume_check + kron_stale:
        建议:先补上 burst protection 的新意图,或把这个 hard 改 soft。
 ```
 
-这是 §3.2 提到的 **`kron_assume_check` + `kron_stale`** 在实际场景里的用法——AI 主动 query 假设清单 + 主动告警过期,人类不需要挨个翻文件。
+这是 §5.2 提到的 **`kron_assume_check` + `kron_stale`** 在实际场景里的用法——AI 主动 query 假设清单 + 主动告警过期,人类不需要挨个翻文件。
 
 ```markdown
 ---
@@ -121,14 +121,34 @@ assumptions:
 
 ---
 
-## 3 Kron 提供哪些能力
+## 3 Kron 解决什么
+
+> 简短版,详细 4 问题见 [`README.md`](../../README.md) §Kron 解决了什么。
+
+1. **决策写完即遗忘** — `.kron/intents/*.md` 跟代码同 PR 同 review。
+2. **假设沉到代码里找不到** — frontmatter 的 `assumptions[]` 把"DAU ≤ 10K / Redis 99.9%"之类前提显式化,带 `severity: hard | soft` 与 `expires_at`。
+3. **改代码不知道影响范围** — MCP `kron_impact` 反向查"改这个意图牵连哪些文件 + 下游意图"。
+4. **过期假设无人察觉** — MCP `kron_stale` 自动列过期意图与已过 `expires_at` 的假设,CI 可拦门。
+
+`severity` / `expires_at` 这两个字段是 Kron 跟 `// FIXME`、ADR、Notion、Cursor `codebase.md` 的实质差别——这些替代品都没有 `severity`,也没有被 AI 主动调用的查询接口。
+
+## 4 意图之间的关系
+
+Kron **不**在 frontmatter 加 `parent` / `depends_on` 字段。关系用两种**文件系统 + Markdown 原生**手段表达：
+
+- **目录 = 层级归属**。`auth/jwt-sliding-window.md` 自动属于 `auth/` 模块;`auth/README.md` 是该模块的总览。
+- **相对链接 = 横向依赖**。意图正文写 `[令牌桶](../rate-limit/token-bucket.md)`,语义是"这条决策依赖 / 复用 / 引用另一条意图"。编辑器 `Ctrl+单击` 即可跳转;`kron_impact` 工具扫的就是这种链接。
+
+完整规范见 [`abstractDesign/intent-structure.md`](../abstractDesign/intent-structure.md) §二、§四。
+
+## 5 Kron 提供哪些能力
 
 > **本节只列功能，不标完成度。**  
 > 一个能力"在 Kron 的设计里"是"被期望提供"，跟它在当前仓库里"已落地可运行"是两回事——后者请看仓库当前 main 分支的 `cmd/kron/cli/` 与 `cmd/kron/serve-mcp/`，或 [`internal/model/intent.go`](../internal/model/intent.go)（这是当前唯一一份真实代码示例，字段名严格来自 `model.Frontmatter`）。
 
 Kron 暴露**三个互相独立的访问层**，对应三类用户。**这三层互不依赖**：CLI 不知道 MCP 存在、MCP 不知道 IDE 存在、IDE 不知道 CLI 存在（[`architecture.md`](../abstractDesign/architecture.md) §〇 铁律 #3）。
 
-### 3.1 CLI —— 给人 / CI 用的最小集
+### 5.1 CLI —— 给人 / CI 用的最小集
 
 CLI 是 v1 唯一已稳定的访问层。**只四个子命令**（最小集，不扩展）：
 
@@ -137,13 +157,13 @@ CLI 是 v1 唯一已稳定的访问层。**只四个子命令**（最小集，�
 | `kron init` | 创建 `.kron/intents/` + 默认 `config.toml` | 新仓库第一次用 Kron |
 | `kron add <slug>` | 脚手架一个新意图文件（写默认 frontmatter 骨架） | 写新意图前的骨架 |
 | `kron lint` | 扫描仓库校验锚点 + frontmatter；**唯一 CI 强制命令** | `kron lint` 在 CI gate 强制跑 |
-| `kron serve-mcp` | 启动 MCP stdio server 给 AI 用 | 见 §3.2 |
+| `kron serve-mcp` | 启动 MCP stdio server 给 AI 用 | 见 §5.2 |
 
 **CLI 不实现**：`list` / `get` / `update` / `delete` / `restore` / `assume_check` / `impact` / `intent_density` / `stale` —— 查询类操作是 MCP 的事,不是 CLI 的事。这是有意为之——CLI 故意小。
 
 完整契约见 [`docs/implementation/cli.md`](implementation/cli.md)。
 
-### 3.2 MCP —— 给 AI Agent 的可 query schema
+### 5.2 MCP —— 给 AI Agent 的可 query schema
 
 AI Agent **不走 CLI**——它通过 stdio JSON-RPC 调用 MCP 工具。v1 工具集**共 12 个**，分三组：
 
@@ -160,7 +180,7 @@ AI Agent **不走 CLI**——它通过 stdio JSON-RPC 调用 MCP 工具。v1 工
 | `kron_restore` | 从 `.trash/` 移回 `.kron/intents/` |
 | `kron_lint` | 校验锚点 + frontmatter；与 `kron lint` 等价 |
 
-**AI 主动消费 4 个**（这是 Kron 相对注释 / ADR / `codebase.md` 的差异化）：
+**查询类 4 个**（Kron 跟注释 / ADR / `codebase.md` 的差别就在这）：
 
 | 工具 | 一句话 | 价值 |
 |---|---|---|
@@ -171,7 +191,7 @@ AI Agent **不走 CLI**——它通过 stdio JSON-RPC 调用 MCP 工具。v1 工
 
 完整契约见 [`docs/implementation/mcp.md`](implementation/mcp.md) §2。
 
-### 3.3 IDE —— 给人 / AI 在编辑器内的可调用能力
+### 5.3 IDE —— 给人 / AI 在编辑器内的可调用能力
 
 > **范畴**：v1 不交付 IDE 插件 / LSP server 本体，但 Kron 的数据契约（frontmatter + 锚点格式）已经按"未来 LSP 友好"设计。
 
@@ -185,7 +205,7 @@ AI Agent **不走 CLI**——它通过 stdio JSON-RPC 调用 MCP 工具。v1 工
 
 **额外能力**：调用树 × 意图视图——见 [`abstractDesign/view-call-tree-intent.md`](../abstractDesign/view-call-tree-intent.md)。它把"调用树节点 ↔ 意图 slug"二维展示,基于 `kron_impact` 与 `kron_intent_density` 的输出。**Kron 不画调用树本身**——画图是 IDE / LSP / GUI 的工作,Kron 只暴露数据。
 
-### 3.4 文件格式自带的能力
+### 5.4 文件格式自带的能力
 
 由于数据就是 `.kron/intents/*.md`,以下"功能"是 Markdown + Git 自带的,不靠 Kron 提供：
 
@@ -198,7 +218,7 @@ AI Agent **不走 CLI**——它通过 stdio JSON-RPC 调用 MCP 工具。v1 工
 
 ---
 
-## 4 短短的一段：`kron lint` 的输出形状
+## 6 短短的一段：`kron lint` 的输出形状
 
 `kron lint` 设计上的输出形状（CI 集成时一个 yaml block）：
 
@@ -223,7 +243,7 @@ exit 1
 
 ---
 
-## 5 AI Agent 视角：MCP 是入口
+## 7 AI Agent 视角：MCP 是入口
 
 设计：如果你是 AI Agent（不是人），你**不会用 CLI**——你用 MCP。预期配置如下（谁配置谁就能调 12 个工具；当前是否真正可用，看 main 分支）：
 
@@ -243,9 +263,9 @@ exit 1
 
 - 生命周期：`kron_init` / `kron_add` / `kron_list` / `kron_get` / `kron_update` / `kron_delete` / `kron_restore`
 - 校验：`kron_lint`
-- **AI 主动消费**：`kron_assume_check` / `kron_impact` / `kron_intent_density` / `kron_stale`
+- **查询类**：`kron_assume_check` / `kron_impact` / `kron_intent_density` / `kron_stale`
 
-这 4 个"主动消费"工具让 AI 在编码循环里**主动**消费意图，而不是被动 grep Markdown：
+这 4 个让 AI 在编码循环里**主动调用**,而不是被动 grep Markdown：
 
 - `kron_assume_check` 在改代码前自动列出"你依赖的假设"
 - `kron_impact` 在改意图前自动列出"哪些代码 / 下游意图受影响"
@@ -258,7 +278,7 @@ exit 1
 
 ---
 
-## 6 你不需要知道的（但很多人会问）
+## 8 你不需要知道的（但很多人会问）
 
 **Q：意图文件是数据库吗？**  
 A：不是。是 Git 跟踪的 Markdown。版本控制、diff、merge conflict 都用 Git 原生机制。
@@ -274,12 +294,12 @@ A：把 `status: "active"` 改为 `status: "superseded"`，再写一个 supersed
 
 ---
 
-## 7 你接下来读什么
+## 9 你接下来读什么
 
 | 如果你是… | 先读 | 然后 |
 |---|---|---|
 | **新使用者**（想用 Kron）| 本文档（已完成）| [`README.md`](../../README.md) §参与贡献 |
 | **新贡献者**（想改 Kron 代码）| [`AGENTS.md`](../../AGENTS.md) | [`docs/abstractDesign/architecture.md`](abstractDesign/architecture.md) |
-| **AI Agent 操作员**（想配置 MCP）| §5（已完成）| [`docs/implementation/mcp.md`](implementation/mcp.md) |
-| **CLI 用户**（想在 CI 里跑）| §4（已完成）| [`docs/implementation/cli.md`](implementation/cli.md) |
+| **AI Agent 操作员**（想配置 MCP）| §7（已完成）| [`docs/implementation/mcp.md`](implementation/mcp.md) |
+| **CLI 用户**（想在 CI 里跑）| §6（已完成）| [`docs/implementation/cli.md`](implementation/cli.md) |
 | **文档维护者** | [`docs/abstractDesign/docs-map.md`](abstractDesign/docs-map.md) | [`docs/process/references-snapshot.md`](process/references-snapshot.md) |
