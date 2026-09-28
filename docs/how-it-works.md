@@ -22,18 +22,23 @@ git log --oneline -20            # AI 这周的 commit 密度高得反常
 your-project/
 ├── .kron/                                ← Kron 目录
 │   ├── config.toml                       ← 一行:intents_dir = ".kron/intents"
-│   └── intents/                          ← 每个意图一个 .md
-│       ├── 2026-09-20-auth-refresh-token.md
-│       ├── 2026-09-20-auth-rotation.md
-│       ├── 2026-09-21-rate-limit.md
-│       ├── 2026-09-22-token-bucket.md
-│       ├── 2026-09-23-soft-delete.md
-│       └── ...
+│   └── intents/                          ← 目录 = 模块分组
+│       ├── README.md                     ← 全部意图的总览
+│       ├── auth/
+│       │   ├── README.md                 ← auth 模块的总览
+│       │   ├── refresh-token.md          ← 本周 AI 新写的
+│       │   └── rotation.md
+│       └── rate-limit/
+│           ├── README.md
+│           ├── token-bucket.md
+│           └── burst-protection.md
 └── internal/auth/
     ├── refresh.go                        ← 你要 review 的代码
     ├── rotate.go
-    ├── ...
+    └── ...
 ```
+
+> 目录本身就是分组：`refresh-token.md` 属于 `auth/`，`token-bucket.md` 属于 `rate-limit/`。意图之间**没有** `parent` / `depends_on` 字段——归属看目录，依赖看正文里的相对链接（见 §4）。
 
 打开 `internal/auth/refresh.go`：
 
@@ -42,33 +47,31 @@ package auth
 
 import "time"
 
-// @kron:intent auth-refresh-token
+// @kron:intent auth/refresh-token
 func NewRefreshToken(userID string) (string, error) {
     // ... 4 字节随机 ...
 }
 ```
 
-注释 `// @kron:intent auth-refresh-token` 是**锚点**——一个**轻量反向引用**。锚点本身不是 Kron 的核心数据，只是把代码符号钩到意图文件。
+注释 `// @kron:intent auth/refresh-token` 是**锚点**——一个**轻量反向引用**。路径部分 `auth/refresh-token` 就是意图文件在 `.kron/intents/` 下的相对路径，Kron 据此找到 `.kron/intents/auth/refresh-token.md`。锚点本身不是 Kron 的核心数据，只是把代码符号钩到意图文件。
 
 ---
 
 ## 2 跟随锚点:哪一行指向哪个意图
-
-打开 `internal/auth/refresh.go`,你看到几个 `// @kron:intent <slug>` 锚点。注释 `// @kron:intent auth-refresh-token` 是**锚点**——一个**轻量反向引用**。锚点本身不是 Kron 的核心数据,只是把代码符号钩到意图文件。
 
 面对一周 AI 写下的代码量,你不会逐个 `cat` `.md`——你会问 AI:**"这块代码依赖了哪些假设?过期了没?"**
 
 ```
 人类: 这文件依赖哪些 hard 假设? 有过期的吗?
 AI:    我帮你跑了 kron_assume_check + kron_stale:
-       auth-refresh-token:
+       auth/refresh-token:
          - hard "single-issuer" 还 active
          - soft "redis-availability" 还 active
          - hard "daus-under-10k" 还 active
          - soft "clock-skew-30s" 还 active(还剩 60 天)
-       auth-rotation:
+       auth/rotation:
          - hard "rotate-on-password-change" 还 active
-       rate-limit:
+       rate-limit/burst-protection:
          ⚠ hard "no-burst-protection" 已过期(expires_at: 2026-09-01)
        建议:先补上 burst protection 的新意图,或把这个 hard 改 soft。
 ```
@@ -115,9 +118,12 @@ assumptions:
 ## Trade-offs
 - **放弃**：跨服务 token 共享（违反"吊销立即全局生效"诉求）
 - **代价**：每次请求一次 Redis 查询
+- **依赖**：吊销走 [令牌桶算法](../rate-limit/token-bucket.md) 限流，避免 Redis 打穿
 ```
 
 > 这是其中一份意图文件的 raw 内容——AI 通过 MCP 拉到的就是这个形状,字段名严格来自 [`internal/model/intent.go`](../internal/model/intent.go) 的 `Frontmatter` 结构。人和 AI 读的是同一份数据。
+>
+> 注意 `## Trade-offs` 末尾的 `[令牌桶算法](../rate-limit/token-bucket.md)`:这就是一条**跨目录的意图依赖**——从 `auth/refresh-token.md` 指向 `rate-limit/token-bucket.md`。`kron_impact` 反查影响范围时走的就是这种链接。
 
 ---
 

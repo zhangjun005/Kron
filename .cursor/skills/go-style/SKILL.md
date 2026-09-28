@@ -155,7 +155,13 @@ docs: clarify storage format in README
 chore: bump github.com/spf13/cobra to 1.8.0
 ```
 
-Body explains *why*, not *what*. Reference design docs: `docs/abstractDesign/XX-name.md`.
+**Keep it short.** Summary line ≤ 72 chars. Body **≤ 3 lines** — one short paragraph, or two bullets. If a change needs a long
+write-up, that belongs in the PR description or a doc, not the commit body.
+
+- Body explains *why*, not *what*. The diff already shows *what*.
+- Do NOT enumerate every file touched, repeat the summary, or add a
+  "What this commit does NOT do" section. The user reads the diff.
+- Reference design docs when relevant: `docs/abstractDesign/XX-name.md`.
 
 ## Things that need a `// why` comment
 

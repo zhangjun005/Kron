@@ -85,7 +85,7 @@ These are non-negotiable. The rules cover:
 - **Naming**: package lowercase, mixed-case acronyms (HTTP, JSON), no `I` prefix on interfaces
 - **Project layout**: business logic in `internal/`, `cmd/` is wiring only
 - **Documentation**: godoc/JSDoc on every exported identifier, package comment on every package
-- **Commits**: `<scope>: <imperative summary>`, body explains *why* not *what*
+- **Commits**: `<scope>: <imperative summary>` (≤72 chars), body ≤3 lines explaining *why* not *what*
 
 ## Architecture iron rules
 
