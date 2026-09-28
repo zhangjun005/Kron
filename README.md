@@ -33,7 +33,7 @@ AI 编程助手在清楚"为什么这么做、权衡了什么、放弃了什么"
 
 Kron **不**用字段表达关系(`parent` / `depends_on` 都不存在),只用两种**文件系统 + Markdown 原生**手段:
 
-- **目录 = 层级归属**。`auth/jwt-sliding-window.md` 自动属于 `auth/` 模块;`auth/README.md` 是该模块的总览。
+- **目录 = 层级归属**。`.kron/intents/auth/refresh-token.md` 自动属于 `auth/` 模块;`.kron/intents/auth/README.md` 是该模块的总览。
 - **相对链接 = 横向依赖**。意图正文里写 `[令牌桶](../rate-limit/token-bucket.md)`,语义是"这条决策依赖 / 复用 / 引用另一条意图"。普通编辑器的 `Ctrl+单击` 就能跳转,Kron 的 `kron_impact` 工具也会扫这种链接来算影响范围。
 
 完整规范见 [`docs/abstractDesign/intent-structure.md`](./docs/abstractDesign/intent-structure.md) §二、§四。
@@ -44,18 +44,24 @@ Kron **不**用字段表达关系(`parent` / `depends_on` 都不存在),只用�
 
 ```
 .kron/
-├── intents/                   # 每个意图一个 .md（核心）
-│   ├── 2026-09-19-001-storage-format.md
-│   ├── 2026-09-19-002-id-scheme.md
-│   └── ...
-└── config.toml                # Kron 配置（可选）
+├── config.toml                # Kron 配置（可选）
+└── intents/                   # 目录 = 模块分组
+    ├── README.md              # 全部意图的总览
+    ├── storage/
+    │   ├── README.md          # storage 模块的总览
+    │   ├── storage-format.md  # 单条意图 = 单个 .md
+    │   └── id-scheme.md
+    └── auth/
+        ├── README.md
+        └── refresh-token.md
 ```
 
 每个意图文件是一份 Markdown 文档，带一个轻量的 YAML frontmatter：
 
 ```markdown
 ---
-symbol: "auth.RefreshToken"
+symbol:
+  - "store.ParseFrontmatter"
 created_by: "@zhangjun005"
 updated_at: "2026-09-19T22:30:00Z"
 # 可选：边界假设结构化（见 docs/abstractDesign/intent-structure.md §三）
@@ -77,14 +83,17 @@ updated_at: "2026-09-19T22:30:00Z"
 ## 权衡
 - **放弃了**：原生 SQLite 索引查询能力 —— 换来了零依赖、零迁移成本
 - **代价**：大规模条目下需要全文搜索，不适合 >1万条 的仓库
-
-> 边界假设写在 frontmatter 的 `assumptions` 字段（见 [intent-structure.md §三](./docs/abstractDesign/intent-structure.md#三边界假设-assumptions-字段)），不在正文重复。
+- **依赖**：条目命名沿用 [ID 方案](id-scheme.md)，保证排序稳定
 ```
+
+> 两点说明：
+> - `assumptions` 写在 frontmatter，不在正文重复（见 [`intent-structure.md` §三](./docs/abstractDesign/intent-structure.md#三意图文件内容模板)）。
+> - 末尾的 `[ID 方案](id-scheme.md)` 就是一条意图引用——同一 `storage/` 目录下的横向依赖，普通编辑器 `Ctrl+单击` 可跳转。
 
 代码侧用极轻量锚点反向引用：
 
 ```go
-// @kron:intent 2026-09-19-001-storage-format
+// @kron:intent storage/storage-format
 func ParseFrontmatter(raw []byte) (map[string]any, string, error) { ... }
 ```
 
