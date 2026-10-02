@@ -24,7 +24,25 @@ func writeFile(t *testing.T, dir, rel, content string) {
 	require.NoError(t, os.WriteFile(full, []byte(content), 0o644))
 }
 
-const sampleIntent = `---
+// sampleIntent uses the v1 sentinel-wrapped frontmatter format.
+// A separate fixture (`sampleLegacyIntent`) exercises the legacy "---"
+// fence format so backward compatibility is covered by TestReader_Load_LegacyFence.
+const sampleIntent = `<!-- kron:frontmatter -->
+created_by: "@alice"
+updated_at: 2026-10-01T10:00:00Z
+status: active
+<!-- /kron:frontmatter -->
+
+# Sample
+
+Body line 1.
+
+Body line 2.
+`
+
+// sampleLegacyIntent is a fixture using the legacy "---" fence format.
+// It must continue to parse without migration: see TestReader_Load_LegacyFence.
+const sampleLegacyIntent = `---
 created_by: "@alice"
 updated_at: 2026-10-01T10:00:00Z
 status: active
@@ -32,9 +50,7 @@ status: active
 
 # Sample
 
-Body line 1.
-
-Body line 2.
+Body line.
 `
 
 func TestReader_Load_HappyPath(t *testing.T) {
@@ -79,7 +95,7 @@ func TestReader_Load_InvalidFrontmatter(t *testing.T) {
 
 func TestReader_Load_MissingClosingFence(t *testing.T) {
 	dir := t.TempDir()
-	// Opening fence present, but no closing fence.
+	// Legacy fence: opening fence present, but no closing fence.
 	writeFile(t, dir, ".kron/intents/open.md", "---\ncreated_by: \"@bob\"\nupdated_at: 2026-10-01T10:00:00Z\nstatus: active\n")
 
 	r, err := NewReader(dir)
@@ -88,6 +104,54 @@ func TestReader_Load_MissingClosingFence(t *testing.T) {
 	_, err = r.Load(context.Background(), "open")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, model.ErrFrontmatterInvalid)
+}
+
+func TestReader_Load_MissingClosingSentinel(t *testing.T) {
+	dir := t.TempDir()
+	// Sentinel opening tag, but no closing tag — must be rejected.
+	writeFile(t, dir, ".kron/intents/open.md", "<!-- kron:frontmatter -->\ncreated_by: \"@bob\"\nupdated_at: 2026-10-01T10:00:00Z\nstatus: active\n")
+
+	r, err := NewReader(dir)
+	require.NoError(t, err)
+
+	_, err = r.Load(context.Background(), "open")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, model.ErrFrontmatterInvalid)
+}
+
+func TestReader_Load_LegacyFence(t *testing.T) {
+	// Backward compatibility: a file written with the old "---" fence must
+	// continue to parse identically to a file written with the new sentinel
+	// format. This is the migration window guarantee.
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/intents/legacy-jwt.md", sampleLegacyIntent)
+
+	r, err := NewReader(dir)
+	require.NoError(t, err)
+
+	intent, err := r.Load(context.Background(), "legacy-jwt")
+	require.NoError(t, err)
+	assert.Equal(t, "legacy-jwt", intent.Slug)
+	assert.Equal(t, "@alice", intent.Frontmatter.CreatedBy)
+	assert.Equal(t, model.StatusActive, intent.Frontmatter.Status)
+	assert.Equal(t, "2026-10-01T10:00:00Z", intent.Frontmatter.UpdatedAt.Format(time.RFC3339))
+	assert.Contains(t, intent.Body, "Body line.")
+}
+
+func TestReader_Load_Sentinel_BodyWithHorizontalRule(t *testing.T) {
+	// Body contains "---" horizontal rule + setext underline. With sentinel
+	// wrapping it must NOT be confused for a closing fence.
+	content := "<!-- kron:frontmatter -->\ncreated_by: \"@alice\"\nupdated_at: 2026-10-01T10:00:00Z\nstatus: active\n<!-- /kron:frontmatter -->\n# Sample\n\n---\n\n## After HR\n"
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/intents/hr-jwt.md", content)
+
+	r, err := NewReader(dir)
+	require.NoError(t, err)
+
+	intent, err := r.Load(context.Background(), "hr-jwt")
+	require.NoError(t, err)
+	assert.Contains(t, intent.Body, "---")
+	assert.Contains(t, intent.Body, "## After HR")
 }
 
 func TestReader_Load_NestedSlug(t *testing.T) {
