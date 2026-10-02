@@ -25,15 +25,19 @@ type Intent struct {
 
 ```go
 type Frontmatter struct {
-    Symbol    []string `yaml:"symbol,omitempty"`     // 关联代码符号列表
-    CreatedBy string   `yaml:"created_by"`          // "@user" 或 "agent:<model>"
-    UpdatedAt string   `yaml:"updated_at"`          // ISO 8601
-    Reviewers []string `yaml:"reviewers,omitempty"` // 可选；多协作项目使用
-    Status    Status   `yaml:"status,omitempty"`    // draft / active / superseded
+    Symbol      []string    `yaml:"symbol,omitempty"`     // 关联代码符号列表
+    CreatedBy   string      `yaml:"created_by"`           // "@user" 或 "agent:<model>"
+    UpdatedAt   time.Time   `yaml:"updated_at"`           // ISO 8601
+    Reviewers   []string    `yaml:"reviewers,omitempty"`  // 可选；多协作项目使用
+    Status      Status      `yaml:"status,omitempty"`     // draft / active / superseded
+    Assumptions []Assumption `yaml:"assumptions,omitempty"` // 可选；可验证前提
 }
 ```
 
 **注意**：`Status` 完全可选；不填 = 不参与生命周期管理。
+`Assumptions` 完全可选；不填 = "该 intent 无显式假设"（见 [intent-structure.md §三](../abstractDesign/intent-structure.md)）。
+每个 `Assumption` 必须有 `id` / `text` / `severity` 三个字段；`severity` 取值 `hard` / `soft`。
+`expires_at` / `verified_at` / `verified_by` 全部可选。
 
 ---
 
@@ -70,7 +74,38 @@ type Anchor struct {
 
 ---
 
-## 5 `Config`
+## 5 `Assumption` 与 `Severity`
+
+> 2026-10-03 补充：原 §4 之后，§3 `Status` 之前应插入本节。`Assumption` 与 `Severity` 已在
+> `internal/model/intent.go` 落地；本文档此前缺 §5，现补齐。
+
+```go
+// Assumption is a verifiable precondition that governs the intent's
+// validity. Written in frontmatter's assumptions[] field, not
+// duplicated in body.
+type Assumption struct {
+    ID         string   `yaml:"id"`                    // kebab-case
+    Text       string   `yaml:"text"`                  // 人/AI 可读
+    Severity   Severity `yaml:"severity"`              // hard | soft
+    ExpiresAt  string   `yaml:"expires_at,omitempty"`  // ISO date
+    VerifiedAt string   `yaml:"verified_at,omitempty"`
+    VerifiedBy string   `yaml:"verified_by,omitempty"` // @handle
+}
+
+type Severity string
+
+const (
+    SeverityHard Severity = "hard"
+    SeveritySoft Severity = "soft"
+)
+```
+
+`Severity` 语义见 [intent-structure.md §三](../abstractDesign/intent-structure.md) `assumptions` 字段策略。
+`expires_at` / `verified_at` / `verified_by` 不驱动任何自动行为——只供 MCP `kron_stale` 与 LSP hover 提示。
+
+---
+
+## 6 `Config`
 
 ```go
 type Config struct {
@@ -84,7 +119,7 @@ type Config struct {
 
 ---
 
-## 6 与 `intent-structure.md` 的关系
+## 7 与 `intent-structure.md` 的关系
 
 | 字段 | intent-structure.md 定义 | domain-model.md 落地 |
 |---|---|---|

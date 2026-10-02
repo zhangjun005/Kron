@@ -72,11 +72,11 @@
 
 ---
 
-## L3. 4 个新 MCP 工具的代码实现在 docs 里已 spec，但代码不存在
+## L3. 4 个新 MCP 工具的代码实现在 docs 里已 spec，但代码不存在 🟡 **CLI 部分已完成；MCP 部分仍 open**
 
-### 现状
+### 原现状
 
-`cmd/kron/serve-mcp/` 这个目录**在仓库里当前不存在**（只有占位 stub `cmd/kron/cli/cli.go`）。我 grep 整个仓库确认过：
+`cmd/kron/serve-mcp/` 这个目录**在仓库里当前不存在**（只有占位 stub `cmd/kron/cli/cli.go`）。grep 整个仓库确认过：
 
 ```
 cmd/kron/
@@ -84,27 +84,25 @@ cmd/kron/
 └── cli/cli.go        ← 不是 serve-mcp
 ```
 
-[`docs/how-it-works.md`](../docs/how-it-works.md) §5 写成"kron serve-mcp 启动后能被 Claude Desktop / Cursor 配置接管"——但**当前 main 分支上这个命令根本不存在**。
+[`docs/how-it-works.md`](../docs/how-it-works.md) §5 写成"kron serve-mcp 启动后能被 Claude Desktop / Cursor 配置接管"——但**当时 main 分支上这个命令根本不存在**。
 
-### 后果
+### 2026-10-03 拆分
 
-- "产品说服力"在 docs 层已写完
-- 但"使用 Kron"还是依赖 docs 设计意图，**没有任何可运行代码佐证**
-- 别人读 docs 觉得"很好",然后 `kron serve-mcp` 报错"not implemented",说服力归零
+L3 拆成两个子项：
 
-### 该做的范围
+- **L3-CLI ✅ done**：`kron init` / `kron add` / `kron lint` 三个子命令已实现并测试。
+  - `kron init` 写 `.kron/intents/` 骨架 + 默认 `config.toml`
+  - `kron add <slug>` 验证 slug + 写带哨兵 frontmatter 的 .md
+  - `kron lint` 实现 A 类（anchor-dangling）+ B 类（frontmatter-invalid）规则，text/json 两种 reporter
+  - `kron serve-mcp` 占位（exit 1 + 明确"not yet available"消息），phase 2 落地时替换
+  - 退出码按 `docs/implementation/cli.md` §4：0 / 1 / 2
+  - CLI 不引入 cobra（AGENTS.md off-limits），用 stdlib `flag` 派发
+- **L3-MCP ⏳ open**：12 个 MCP 工具的实现，按 `docs/process/mcp-tool.md` §2 流程走；推 phase 2
 
-按 [`docs/process/mcp-tool.md`](../docs/process/mcp-tool.md) §2 流程开 phase 2：
+### 状态
 
-1. 在 `internal/store/store.go` + `internal/parser/parser.go` 把 stub 变可运行（load / list / scan anchor）
-2. 新建 `cmd/kron/serve-mcp/`
-3. 实现 12 个工具的占位（8 个原工具按现有 spec + 4 个新工具按本次 docs spec）
-4. 端到端跑 `kron serve-mcp` + 一个 MCP 客户端（最小 demo）
-
-### 估算工作量
-
-- 2-3 天（核心是 store + parser 实现 + 12 工具占位）
-- 不可与本 phase 合并——docs 已经是稳定 spec，代码 PR 可以单独走
+- L3-CLI：**done**（本次 v1 收尾）
+- L3-MCP：**open**（phase 2）
 
 ---
 
@@ -151,7 +149,8 @@ cmd/kron/
 | 优先级 | L 编号 | 不做的后果 | 推荐顺序 |
 |---|---|---|---|
 | ~~P0~~ | ~~L1~~ | ~~docs 与代码 schema 不一致；示范例会失效~~ | **已完成** |
-| P1 | L3 | 别人跑 `kron serve-mcp` 直接破防；说服力归零 | phase 2 第一周 |
+| ~~P1~~ | ~~L3-CLI~~ | ~~别人跑 `kron init/add/lint` 直接破防~~ | **已完成** |
+| P1 | L3-MCP | 别人跑 `kron serve-mcp` 直接破防；说服力归零 | phase 2 第一周 |
 | P2 | L2 | 文档健康度下降，但不影响外部说服力 | phase 2 第二周顺手 |
 | P3 | L4 | 孤立文档，但 spec 已稳 | 等 LSP / IDE / GUI phase |
 
@@ -159,5 +158,6 @@ cmd/kron/
 > `kron init` / `kron add` / `kron lint` 三个子命令端到端可运行,lint 跑通 A/B 类规则。
 > `kron serve-mcp` 推迟到 phase 2（架构铁律 §〇·五·5: `internal/lint` 按需开,
 > CLI 独自用 lint 不下沉）。
+> **2026-10-03 状态：L1 + L3-CLI 已完成**；L3-MCP / L2 / L4 仍 open。
 
-P0 + P1 都完成后，"Kron 必留"才算**端到端可演示**——不是只在 docs 写得漂亮。
+P0 + P1-CLI 都完成后，"Kron 必留"才算**端到端可演示**——CLI 部分已经在本批 commit 中端到端跑通。
