@@ -174,8 +174,8 @@ CLI explicitly does NOT implement `list` / `get` / `update` / `delete` / `restor
 
 `.kron/intents/*.md` files use this frontmatter shape (don't change without migration plan):
 
-```yaml
----
+```markdown
+<!-- kron:frontmatter -->
 symbol: "auth.RefreshToken"
 created_by: "@zhangjun005"
 updated_at: "2026-09-22T10:00:00Z"
@@ -187,7 +187,7 @@ updated_at: "2026-09-22T10:00:00Z"
 #     text: 服务仅部署在单 region，无跨区时钟漂移问题
 #     severity: hard
 #     expires_at: "2026-12-31"
----
+<!-- /kron:frontmatter -->
 
 # Intent title
 

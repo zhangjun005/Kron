@@ -59,17 +59,18 @@ Kron **不**用字段表达关系(`parent` / `depends_on` 都不存在),只用�
 每个意图文件是一份 Markdown 文档，带一个轻量的 YAML frontmatter：
 
 ```markdown
----
+<!-- kron:frontmatter -->
 symbol:
   - "store.ParseFrontmatter"
 created_by: "@zhangjun005"
 updated_at: "2026-09-19T22:30:00Z"
-# 可选：边界假设结构化（见 docs/abstractDesign/intent-structure.md §三）
-# assumptions:
-#   - id: small-repo
-#     text: 仓库规模在个人/小团队级别（<1k 条）
-#     severity: hard
----
+<!-- 可选：边界假设结构化（见 docs/abstractDesign/intent-structure.md §三）
+assumptions:
+  - id: small-repo
+    text: 仓库规模在个人/小团队级别（<1k 条）
+    severity: hard
+-->
+<!-- /kron:frontmatter -->
 
 # 存储格式选型
 

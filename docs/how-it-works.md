@@ -79,7 +79,7 @@ AI:    我帮你跑了 kron_assume_check + kron_stale:
 这是 §5.2 提到的 **`kron_assume_check` + `kron_stale`** 在实际场景里的用法——AI 主动 query 假设清单 + 主动告警过期,人类不需要挨个翻文件。
 
 ```markdown
----
+<!-- kron:frontmatter -->
 symbol:
   - "auth.NewRefreshToken"
 created_by: "@zhangjun005"
@@ -105,7 +105,7 @@ assumptions:
   - id: clock-skew-30s
     text: 客户端时钟偏差 ≤ 30 秒，否则 exp 判断误差导致误踢用户
     severity: hard
----
+<!-- /kron:frontmatter -->
 
 # Refresh Token 实现选型
 

@@ -160,7 +160,7 @@ assumptions:
 ### 示例
 
 ```markdown
----
+<!-- kron:frontmatter -->
 symbol:
   - "auth.RefreshToken"
   - "auth.TokenClaims"
@@ -178,7 +178,7 @@ assumptions:
   - id: csrf-protected
     text: 续期接口已加 CSRF token 防护
     severity: hard
----
+<!-- /kron:frontmatter -->
 
 # JWT 滑动窗口续期
 
@@ -248,14 +248,14 @@ Review 范式：
 ### 多人协同 Frontmatter 扩展
 
 ```yaml
----
+<!-- kron:frontmatter -->
 status: active
 symbol: "auth.RefreshToken"
 created_by: "@alice"
 reviewers:
   - "@bob"
 updated_at: "2026-09-22T10:00:00Z"
----
+<!-- /kron:frontmatter -->
 ```
 
 - `created_by`：决策发起人
