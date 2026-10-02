@@ -1,13 +1,14 @@
-// Package cli implements Kron's CLI entry point.
+// Package cli implements Kron's CLI access layer.
 //
 // This package is part of the access layer. It accepts user input via
 // flags/args and delegates all business logic to internal/store and
 // internal/parser. It MUST NOT import any sibling access layer package
 // (cmd/kron/serve-mcp, future cmd/kron/serve-gui).
 //
-// CLI subcommands: kron init / kron add / kron lint / kron serve-mcp.
-// Query operations (list / get / update / delete / restore) belong to the
-// MCP access layer and are intentionally not exposed as CLI subcommands.
+// CLI subcommands: kron init / kron add / kron lint.
+// Query operations (list / get / update / delete / restore) and the
+// MCP stdio server belong to other access layers and are intentionally
+// not exposed as CLI subcommands — see cmd/kron/serve-mcp.
 package cli
 
 import (
@@ -47,9 +48,11 @@ func newExitError(code int, desc string) error {
 	return &exitCodeError{code: code, desc: desc}
 }
 
-// Execute parses os.Args and dispatches to the appropriate subcommand.
-// It mirrors cobra's Execute pattern using only the stdlib flag package,
-// avoiding a new top-level dependency for four simple subcommands.
+// Execute parses os.Args[2:] and dispatches to the appropriate CLI
+// subcommand. It does NOT own the top-level "kron <command>" routing;
+// cmd/kron/main.go does that, so that sibling access layers
+// (cmd/kron/serve-mcp, ...) can register their own top-level commands
+// without cli having to know about them.
 func Execute() error {
 	out := os.Stdout
 	if len(os.Args) < 2 {
@@ -64,8 +67,6 @@ func Execute() error {
 		return runAdd(os.Args[2:], out, os.Stderr)
 	case "lint":
 		return runLint(os.Args[2:], out, os.Stderr)
-	case "serve-mcp":
-		return runServeMCP(os.Args[2:], out, os.Stderr)
 	case "help", "-h", "--help":
 		printHelp(out)
 		return nil
@@ -85,6 +86,6 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  init         Create .kron/ skeleton in the current repository")
 	fmt.Fprintln(w, "  add <slug>   Scaffold a new intent file at .kron/intents/<slug>.md")
 	fmt.Fprintln(w, "  lint         Scan anchors and frontmatter; exit 0 on clean, 1 on errors")
-	fmt.Fprintln(w, "  serve-mcp    Start the MCP stdio server (phase 2 — not yet available)")
+	fmt.Fprintln(w, "  serve-mcp    Start the MCP stdio server (separate access layer; see cmd/kron/serve-mcp)")
 	fmt.Fprintln(w, "  help         Show this message")
 }

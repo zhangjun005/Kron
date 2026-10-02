@@ -225,16 +225,6 @@ func TestRunLint_JSONReporterWithError(t *testing.T) {
 	assert.Contains(t, s, `"rule": "anchor-dangling"`)
 }
 
-func TestRunServeMCP_NotAvailable(t *testing.T) {
-	var out, errOut bytes.Buffer
-	err := runServeMCP(nil, &out, &errOut)
-	require.Error(t, err)
-	var ec ExitCoder
-	require.ErrorAs(t, err, &ec)
-	assert.Equal(t, 1, ec.ExitCode())
-	assert.Contains(t, errOut.String(), "not yet available")
-}
-
 func TestItoa(t *testing.T) {
 	cases := map[int]string{
 		0:      "0",
