@@ -1,17 +1,17 @@
 # Phase 1 Docs-Only 遗留事项
 
-> 生成时间：2026-09-27  
-> 关联 commit：`ae0d244`(说服力内核) + `88b36c5`(流程沉淀)  
-> 状态：**未做，留给后续 phase**
+> 生成时间：2026-09-27
+> 关联 commit：`ae0d244`(说服力内核) + `88b36c5`(流程沉淀)
+> **状态：2026-10-03 重新评估** —— L1 已完成,本文档进入历史归档,不再引导 v1 收尾。
 
 本 phase 只改 docs，没动 `.go` 代码、frontmatter schema、lint 规则、CLI 子命令。
 由此产生 4 条遗留事项，按"是否阻塞说服力"排序。
 
 ---
 
-## L1. assumptions / expires_at schema 未落地（**最关键**）
+## L1. assumptions / expires_at schema 未落地 ✅ **已完成**
 
-### 现状
+### 原现状
 
 `docs/implementation/mcp.md` §2 中 4 个新工具契约里写了这些字段：
 
@@ -20,28 +20,27 @@
 - `kron_stale.assumption.expires_at`
 
 但 [`internal/model/intent.go`](../internal/model/intent.go) 的 `Frontmatter` 结构体**没有**这些字段。
-[`docs/how-it-works.md`](../how-it-works.md) §2 的示例 frontmatter 里有 `assumptions: [...]` + `severity: hard/soft` + `expires_at`——**示例与代码不一致**。
 
-### 后果
+### 完成情况（2026-10-03）
 
-- 4 个新工具的契约是**未来才能落地**的契约，不是"现在就能用"
-- docs 描述的"AI 主动消费"承诺，目前在数据层缺原料
-- 例子与代码不一致已经发生，违反 "implementation-status = code" 的实景原则
+`internal/model/intent.go` 已包含：
 
-### 该走的流程
+- `Assumption` 结构体（`ID` / `Text` / `Severity` / `ExpiresAt` / `VerifiedAt` / `VerifiedBy`）
+- `Severity` 枚举（`SeverityHard` / `SeveritySoft`）
+- `Frontmatter.Assumptions []Assumption` 字段
 
-[`docs/process/migrate.md`](../docs/process/migrate.md)（frontmatter schema 修改流程）。
+`internal/parser` 与 `internal/store` 已在 `ParseFrontmatter` 链路中接受 `assumptions` 字段;
+`docs/abstractDesign/intent-structure.md` §三 `assumptions` 字段策略已经写完。
+`internal/model/intent_test.go` 已有表驱动测试覆盖 hard / soft / 缺字段场景。
 
-### 估算工作量
+### 残余事项
 
-- `internal/model/intent.go`：`Frontmatter` 加 `Assumptions []Assumption`；新增 `Assumption` 结构体 + `Severity` 枚举
-- `internal/store/`: frontmatter 反序列化加字段
-- `docs/abstractDesign/intent-structure.md`：补 `assumptions[]` schema 段
-- `docs/implementation/domain-model.md`：同步 struct 定义
-- `docs/business.md` §2.3.1 表格里"severity" / "expires_at" 字段可以保留（已是 spec）
-- 测试：表驱动法覆盖 hard / soft / 缺字段 / expires_at 格式异常
+- `docs/implementation/domain-model.md` §2 的 `Frontmatter` 示例未把 `Assumptions` 字段列出
+  （spec 漂移,不影响代码;v1 收尾 PR 中同步更新即可）
+- L1 原本担心的"例子与代码不一致"风险——`docs/how-it-works.md` 与 `intent-structure.md`
+  的示例已与代码一致 ✅
 
-约 1 天工作量，1 个独立 PR。
+### 状态：**done**
 
 ---
 
@@ -145,11 +144,20 @@ cmd/kron/
 
 ## 优先级建议（按"完成说服力闭环"紧迫度）
 
+> 2026-10-03 状态变更：L1 标 done；L3 仍 P1（CLI 落地是 v1 收尾首要目标）；
+> L2 / L4 优先级不变。L3 描述的"12 工具 MCP"暂不列入 v1 收尾范围（cli.md §1 明确
+> CLI 不实现 list/get/update/delete/restore；MCP 整体属于 phase 2）。
+
 | 优先级 | L 编号 | 不做的后果 | 推荐顺序 |
 |---|---|---|---|
-| P0 | L1 | docs 与代码 schema 不一致；示范例会失效 | **立即做**（1 天） |
+| ~~P0~~ | ~~L1~~ | ~~docs 与代码 schema 不一致；示范例会失效~~ | **已完成** |
 | P1 | L3 | 别人跑 `kron serve-mcp` 直接破防；说服力归零 | phase 2 第一周 |
 | P2 | L2 | 文档健康度下降，但不影响外部说服力 | phase 2 第二周顺手 |
 | P3 | L4 | 孤立文档，但 spec 已稳 | 等 LSP / IDE / GUI phase |
+
+> **v1 收尾目标（2026-10-03 重新定义）**：完成 L3 中"**CLI 部分**"——
+> `kron init` / `kron add` / `kron lint` 三个子命令端到端可运行,lint 跑通 A/B 类规则。
+> `kron serve-mcp` 推迟到 phase 2（架构铁律 §〇·五·5: `internal/lint` 按需开,
+> CLI 独自用 lint 不下沉）。
 
 P0 + P1 都完成后，"Kron 必留"才算**端到端可演示**——不是只在 docs 写得漂亮。
