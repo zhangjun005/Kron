@@ -3,13 +3,24 @@
 package main
 
 import (
+	"errors"
 	"os"
 
 	"github.com/xxx/kron/cmd/kron/cli"
 )
 
 func main() {
-	if err := cli.Execute(); err != nil {
-		os.Exit(1)
+	err := cli.Execute()
+	if err == nil {
+		return
 	}
+
+	// Subcommands can return typed sentinel errors to influence the
+	// process exit code. cli maps these to the codes defined in
+	// docs/implementation/cli.md §4.
+	var code cli.ExitCoder
+	if errors.As(err, &code) {
+		os.Exit(code.ExitCode())
+	}
+	os.Exit(1)
 }
