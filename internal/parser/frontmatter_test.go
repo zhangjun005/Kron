@@ -46,6 +46,63 @@ func TestSplitMarkdown_EmptyBody(t *testing.T) {
 	assert.Empty(t, body)
 }
 
+// Sentinel-format tests (the preferred v1 on-disk form).
+
+func TestSplitMarkdown_Sentinel_HappyPath(t *testing.T) {
+	in := "<!-- kron:frontmatter -->\ncreated_by: \"@a\"\nupdated_at: 2026-10-01T10:00:00Z\n<!-- /kron:frontmatter -->\n# Title\n\nBody.\n"
+	fm, body, err := SplitMarkdown([]byte(in))
+	require.NoError(t, err)
+	assert.Equal(t, "created_by: \"@a\"\nupdated_at: 2026-10-01T10:00:00Z\n", string(fm))
+	assert.Equal(t, "# Title\n\nBody.\n", body)
+}
+
+func TestSplitMarkdown_Sentinel_EmptyBody(t *testing.T) {
+	in := "<!-- kron:frontmatter -->\ncreated_by: \"@a\"\n<!-- /kron:frontmatter -->\n"
+	fm, body, err := SplitMarkdown([]byte(in))
+	require.NoError(t, err)
+	assert.Contains(t, string(fm), "created_by")
+	assert.Empty(t, body)
+}
+
+func TestSplitMarkdown_Sentinel_CRLF(t *testing.T) {
+	in := "<!-- kron:frontmatter -->\r\ncreated_by: \"@a\"\r\n<!-- /kron:frontmatter -->\r\n# Title\n"
+	fm, body, err := SplitMarkdown([]byte(in))
+	require.NoError(t, err)
+	assert.Contains(t, string(fm), "created_by")
+	assert.Equal(t, "# Title\n", body)
+}
+
+func TestSplitMarkdown_Sentinel_Unterminated(t *testing.T) {
+	// Opening sentinel without closing → falls through to legacy parser,
+	// which reports an error that mentions both the legacy fence and the
+	// sentinel form (so users get a single, useful error regardless of
+	// which syntax they started writing).
+	in := "<!-- kron:frontmatter -->\ncreated_by: \"@a\"\n"
+	_, _, err := SplitMarkdown([]byte(in))
+	require.Error(t, err)
+	// The error should mention the sentinel form so the user is pointed
+	// at the right hint, not just the legacy "---" form.
+	assert.Contains(t, err.Error(), "kron:frontmatter")
+}
+
+func TestSplitMarkdown_BodyWithHorizontalRule(t *testing.T) {
+	// Body contains a "---" horizontal rule. With sentinel wrapping it
+	// MUST be ignored (this is the whole point of the migration).
+	in := "<!-- kron:frontmatter -->\ncreated_by: \"@a\"\n<!-- /kron:frontmatter -->\n# Title\n\n---\n\n## After HR\n"
+	fm, body, err := SplitMarkdown([]byte(in))
+	require.NoError(t, err)
+	assert.Contains(t, string(fm), "created_by")
+	assert.Contains(t, body, "---")
+	assert.Contains(t, body, "## After HR")
+}
+
+func TestSplitMarkdown_Sentinel_MustBeFirstLine(t *testing.T) {
+	in := "preamble\n<!-- kron:frontmatter -->\ncreated_by: \"@a\"\n<!-- /kron:frontmatter -->\n"
+	// No "---" anywhere → falls through to legacy parser → "opening fence" error.
+	_, _, err := SplitMarkdown([]byte(in))
+	require.Error(t, err)
+}
+
 func TestParseFrontmatter_Required(t *testing.T) {
 	raw := []byte("created_by: \"@a\"\nupdated_at: 2026-10-01T10:00:00Z\nstatus: active\n")
 	fm, err := ParseFrontmatter(raw)
