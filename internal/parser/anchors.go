@@ -60,8 +60,16 @@ func ScanAnchors(dir string) ([]model.Anchor, error) {
 			return nil
 		}
 		// Quick content sniff: peek at the first 512 bytes and bail
-		// if any NUL byte is present. This avoids treating binary
-		// blobs (images, archives, fixtures) as anchor carriers.
+		// if any NUL byte is present, or if a UTF-16 BOM is detected.
+		// Both indicate the file is not a plain-text source file that
+		// could carry "// @kron:intent" annotations.
+		//
+		// The NUL check is what catches UTF-8 files written by tools
+		// that re-encode ASCII as UTF-16 (PowerShell's default), since
+		// every ASCII byte is followed by a 0x00 NUL. The explicit BOM
+		// checks are belt-and-suspenders for files that open in a
+		// non-NUL-padded multibyte encoding (e.g. UTF-16 with non-ASCII
+		// characters immediately after the BOM).
 		f, err := os.Open(path)
 		if err != nil {
 			return fmt.Errorf("open %s: %w", path, err)
@@ -72,6 +80,13 @@ func ScanAnchors(dir string) ([]model.Anchor, error) {
 		n, _ := io.ReadFull(f, head[:])
 		if bytes.IndexByte(head[:n], 0) >= 0 {
 			return nil
+		}
+		if n >= 2 {
+			// UTF-16 LE: FF FE. UTF-16 BE: FE FF.
+			if (head[0] == 0xFF && head[1] == 0xFE) ||
+				(head[0] == 0xFE && head[1] == 0xFF) {
+				return nil
+			}
 		}
 
 		// Reset to the start of the file.
