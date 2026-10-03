@@ -2,16 +2,17 @@ package servemcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"sort"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/xxx/kron/internal/parser"
 	"github.com/xxx/kron/internal/store"
 )
 
-// handleImpact returns the toolHandler for kron_impact.
+// HandleImpact returns the mcp.ToolHandlerFor binding for kron_impact.
 //
 // Wire contract: see docs/implementation/mcp.md §2 (kron_impact).
 //
@@ -37,150 +38,131 @@ import (
 //     (symbol-inferred, soft — but only added if NOT already covered
 //     by an explicit depends_on for the same symbol)
 //
-// Returns ErrIntentNotFound (-32004) if slug does not exist.
-func handleImpact(root string) toolHandler {
-	return func(ctx context.Context, params json.RawMessage) (any, error) {
-		if err := assertCallerMCP(ctx); err != nil {
-			return nil, err
+// Returns ErrIntentNotFound (→ IsError=true) if slug does not exist.
+func HandleImpact(ctx context.Context, _ *mcp.CallToolRequest, in ImpactInput) (
+	*mcp.CallToolResult, ImpactOutput, error,
+) {
+	if err := assertCallerMCP(ctx); err != nil {
+		return nil, ImpactOutput{}, err
+	}
+	if in.Slug == "" {
+		return nil, ImpactOutput{}, fmt.Errorf("kron_impact requires non-empty slug")
+	}
+	if err := parser.ValidateSlug(in.Slug); err != nil {
+		return nil, ImpactOutput{}, err
+	}
+
+	root := repoRootFrom(ctx)
+	r, err := store.NewReader(root)
+	if err != nil {
+		return nil, ImpactOutput{}, fmt.Errorf("kron_impact: open store: %w", err)
+	}
+	target, err := r.Load(ctx, in.Slug)
+	if err != nil {
+		return nil, ImpactOutput{}, err
+	}
+	all, err := r.LoadAll(ctx)
+	if err != nil {
+		return nil, ImpactOutput{}, fmt.Errorf("kron_impact: load: %w", err)
+	}
+
+	// references: reverse soft-link view — which other intents
+	// have this slug in their Frontmatter.References?
+	references := make([]string, 0)
+	for _, intent := range all {
+		if intent.Slug == in.Slug {
+			continue
 		}
-		var args struct {
-			Slug string `json:"slug"`
-		}
-		if len(params) > 0 {
-			if err := json.Unmarshal(params, &args); err != nil {
-				return nil, fmt.Errorf("kron_impact: invalid params: %w", err)
+		for _, ref := range intent.Frontmatter.References {
+			if ref == in.Slug {
+				references = append(references, intent.Slug)
+				break
 			}
 		}
-		if args.Slug == "" {
-			return nil, fmt.Errorf("kron_impact requires non-empty slug")
-		}
-		if err := parser.ValidateSlug(args.Slug); err != nil {
-			return nil, err
-		}
+	}
+	sort.Strings(references)
 
-		r, err := store.NewReader(root)
-		if err != nil {
-			return nil, fmt.Errorf("kron_impact: open store: %w", err)
-		}
-		target, err := r.Load(ctx, args.Slug)
-		if err != nil {
-			return nil, err
-		}
-		all, err := r.LoadAll(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("kron_impact: load: %w", err)
-		}
+	// prerequisites: explicit depends_on (always) ∪ symbol-inferred
+	// (only when not already explicit). The "explicit wins" rule
+	// avoids double-listing: if A.depends_on B explicitly, the
+	// symbol-inferred "B" is not also added.
+	explicitDeps := make(map[string]struct{}, len(target.Frontmatter.DependsOn))
+	for _, d := range target.Frontmatter.DependsOn {
+		explicitDeps[d] = struct{}{}
+	}
+	prereqSet := make(map[string]struct{}, len(explicitDeps))
+	for d := range explicitDeps {
+		prereqSet[d] = struct{}{}
+	}
 
-		// references: reverse soft-link view — which other intents
-		// have this slug in their Frontmatter.References?
-		references := make([]string, 0)
-		for _, in := range all {
-			if in.Slug == args.Slug {
+	// Symbol-inferred: any other intent whose symbol set intersects
+	// target's symbol set becomes a candidate prerequisite.
+	targetSyms := make(map[string]struct{}, len(target.Frontmatter.Symbol))
+	for _, s := range target.Frontmatter.Symbol {
+		targetSyms[s] = struct{}{}
+	}
+	if len(targetSyms) > 0 {
+		for _, intent := range all {
+			if intent.Slug == in.Slug {
 				continue
 			}
-			for _, ref := range in.Frontmatter.References {
-				if ref == args.Slug {
-					references = append(references, in.Slug)
+			for _, s := range intent.Frontmatter.Symbol {
+				if _, ok := targetSyms[s]; ok {
+					prereqSet[intent.Slug] = struct{}{}
 					break
 				}
 			}
 		}
-		sort.Strings(references)
-
-		// prerequisites: explicit depends_on (always) ∪ symbol-inferred
-		// (only when not already explicit). The "explicit wins" rule
-		// avoids double-listing: if A.depends_on B explicitly, the
-		// symbol-inferred "B" is not also added.
-		explicitDeps := make(map[string]struct{}, len(target.Frontmatter.DependsOn))
-		for _, d := range target.Frontmatter.DependsOn {
-			explicitDeps[d] = struct{}{}
-		}
-		prereqSet := make(map[string]struct{}, len(explicitDeps))
-		for d := range explicitDeps {
-			prereqSet[d] = struct{}{}
-		}
-
-		// Symbol-inferred: any other intent whose symbol set intersects
-		// target's symbol set becomes a candidate prerequisite.
-		targetSyms := make(map[string]struct{}, len(target.Frontmatter.Symbol))
-		for _, s := range target.Frontmatter.Symbol {
-			targetSyms[s] = struct{}{}
-		}
-		if len(targetSyms) > 0 {
-			for _, in := range all {
-				if in.Slug == args.Slug {
-					continue
-				}
-				for _, s := range in.Frontmatter.Symbol {
-					if _, ok := targetSyms[s]; ok {
-						prereqSet[in.Slug] = struct{}{}
-						break
-					}
-				}
-			}
-		}
-
-		prerequisites := make([]string, 0, len(prereqSet))
-		for s := range prereqSet {
-			prerequisites = append(prerequisites, s)
-		}
-		sort.Strings(prerequisites)
-
-		// Walk the repo and filter to anchors pointing at our slug.
-		var incoming []anchorRefWire
-		anchors, err := parser.ScanAnchors(root)
-		if err != nil {
-			return nil, fmt.Errorf("kron_impact: scan anchors: %w", err)
-		}
-		for _, a := range anchors {
-			if a.Slug == args.Slug {
-				incoming = append(incoming, anchorRefWire{
-					FilePath: a.FilePath,
-					Line:     a.LineNumber,
-				})
-			}
-		}
-		if incoming == nil {
-			incoming = []anchorRefWire{}
-		}
-
-		// relativeFilePath trims the root prefix so the wire output is
-		// repo-relative. This is what most editors / agents want.
-		for i := range incoming {
-			if rel, err := filepath.Rel(root, incoming[i].FilePath); err == nil {
-				incoming[i].FilePath = rel
-			}
-		}
-
-		// Stable order for downstream tests / agents: by (file_path,
-		// line). parser.ScanAnchors walks the repo in a directory-order
-		// traversal which is usually stable but not guaranteed by the
-		// stdlib — sort defensively so kron_impact output never
-		// depends on filepath.Walk internals.
-		sort.SliceStable(incoming, func(i, j int) bool {
-			if incoming[i].FilePath != incoming[j].FilePath {
-				return incoming[i].FilePath < incoming[j].FilePath
-			}
-			return incoming[i].Line < incoming[j].Line
-		})
-
-		return impactResponse{
-			Intent:          intentSummaryFromIntent(target),
-			IncomingAnchors: incoming,
-			References:      references,
-			Prerequisites:   prerequisites,
-		}, nil
 	}
-}
 
-type impactResponse struct {
-	Intent          intentSummaryWire `json:"intent"`
-	IncomingAnchors []anchorRefWire   `json:"incoming_anchors"`
-	References      []string          `json:"references"`
-	Prerequisites   []string          `json:"prerequisites"`
-}
+	prerequisites := make([]string, 0, len(prereqSet))
+	for s := range prereqSet {
+		prerequisites = append(prerequisites, s)
+	}
+	sort.Strings(prerequisites)
 
-type anchorRefWire struct {
-	FilePath string `json:"file_path"`
-	Line     int    `json:"line"`
+	// Walk the repo and filter to anchors pointing at our slug.
+	var incoming []AnchorRef
+	anchors, err := parser.ScanAnchors(root)
+	if err != nil {
+		return nil, ImpactOutput{}, fmt.Errorf("kron_impact: scan anchors: %w", err)
+	}
+	for _, a := range anchors {
+		if a.Slug == in.Slug {
+			incoming = append(incoming, AnchorRef{
+				FilePath: a.FilePath,
+				Line:     a.LineNumber,
+			})
+		}
+	}
+	if incoming == nil {
+		incoming = []AnchorRef{}
+	}
+
+	// relativeFilePath trims the root prefix so the wire output is
+	// repo-relative. This is what most editors / agents want.
+	for i := range incoming {
+		if rel, err := filepath.Rel(root, incoming[i].FilePath); err == nil {
+			incoming[i].FilePath = rel
+		}
+	}
+
+	// Stable order for downstream tests / agents: by (file_path,
+	// line). parser.ScanAnchors walks the repo in a directory-order
+	// traversal which is usually stable but not guaranteed by the
+	// stdlib — sort defensively so kron_impact output never
+	// depends on filepath.Walk internals.
+	sort.SliceStable(incoming, func(i, j int) bool {
+		if incoming[i].FilePath != incoming[j].FilePath {
+			return incoming[i].FilePath < incoming[j].FilePath
+		}
+		return incoming[i].Line < incoming[j].Line
+	})
+
+	return nil, ImpactOutput{
+		Intent:          intentSummaryFromIntent(target),
+		IncomingAnchors: incoming,
+		References:      references,
+		Prerequisites:   prerequisites,
+	}, nil
 }

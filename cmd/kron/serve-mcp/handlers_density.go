@@ -3,18 +3,20 @@ package servemcp
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/xxx/kron/internal/parser"
 	"github.com/xxx/kron/internal/store"
 )
 
-// handleIntentDensity returns the toolHandler for kron_intent_density.
+// HandleIntentDensity returns the mcp.ToolHandlerFor binding for
+// kron_intent_density.
 //
 // Wire contract: see docs/implementation/mcp.md §2 (kron_intent_density).
 //
@@ -30,59 +32,65 @@ import (
 // skip the standard skip-list, count lines per file, keep those > 50
 // with no anchor. The 50-line threshold matches the CLI intent-coverage
 // gate; see docs/process/lint-rule.md for the rationale.
-func handleIntentDensity(root string) toolHandler {
-	return func(ctx context.Context, _ json.RawMessage) (any, error) {
-		if err := assertCallerMCP(ctx); err != nil {
-			return nil, err
-		}
-
-		r, err := store.NewReader(root)
-		if err != nil {
-			return nil, fmt.Errorf("kron_intent_density: open store: %w", err)
-		}
-		all, err := r.LoadAll(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("kron_intent_density: load: %w", err)
-		}
-
-		anchors, err := parser.ScanAnchors(root)
-		if err != nil {
-			return nil, fmt.Errorf("kron_intent_density: scan anchors: %w", err)
-		}
-
-		withAnchor := make(map[string]struct{}, len(anchors))
-		anchoredFiles := make(map[string]struct{}, len(anchors))
-		for _, a := range anchors {
-			withAnchor[a.Slug] = struct{}{}
-			anchoredFiles[a.FilePath] = struct{}{}
-		}
-
-		var withoutAnchor []string
-		for _, in := range all {
-			if _, ok := withAnchor[in.Slug]; !ok {
-				withoutAnchor = append(withoutAnchor, in.Slug)
-			}
-		}
-		sort.Strings(withoutAnchor)
-		if withoutAnchor == nil {
-			withoutAnchor = []string{}
-		}
-
-		orphans, err := scanOrphanFiles(root, anchoredFiles)
-		if err != nil {
-			return nil, fmt.Errorf("kron_intent_density: scan orphans: %w", err)
-		}
-
-		return densityResponse{
-			TotalIntents: len(all),
-			TotalAnchors: len(anchors),
-			Coverage: coverageWire{
-				IntentsWithAnchors:    len(withAnchor),
-				IntentsWithoutAnchors: withoutAnchor,
-			},
-			FilesWithoutIntent: orphans,
-		}, nil
+func HandleIntentDensity(ctx context.Context, _ *mcp.CallToolRequest, _ IntentDensityInput) (
+	*mcp.CallToolResult, IntentDensityOutput, error,
+) {
+	if err := assertCallerMCP(ctx); err != nil {
+		return nil, IntentDensityOutput{}, err
 	}
+	root := repoRootFrom(ctx)
+
+	r, err := store.NewReader(root)
+	if err != nil {
+		return nil, IntentDensityOutput{}, fmt.Errorf("kron_intent_density: open store: %w", err)
+	}
+	all, err := r.LoadAll(ctx)
+	if err != nil {
+		return nil, IntentDensityOutput{}, fmt.Errorf("kron_intent_density: load: %w", err)
+	}
+
+	anchors, err := parser.ScanAnchors(root)
+	if err != nil {
+		return nil, IntentDensityOutput{}, fmt.Errorf("kron_intent_density: scan anchors: %w", err)
+	}
+
+	withAnchor := make(map[string]struct{}, len(anchors))
+	anchoredFiles := make(map[string]struct{}, len(anchors))
+	for _, a := range anchors {
+		withAnchor[a.Slug] = struct{}{}
+		anchoredFiles[a.FilePath] = struct{}{}
+	}
+
+	var withoutAnchor []string
+	for _, intent := range all {
+		if _, ok := withAnchor[intent.Slug]; !ok {
+			withoutAnchor = append(withoutAnchor, intent.Slug)
+		}
+	}
+	sort.Strings(withoutAnchor)
+	if withoutAnchor == nil {
+		withoutAnchor = []string{}
+	}
+
+	orphans, err := scanOrphanFiles(root, anchoredFiles)
+	if err != nil {
+		return nil, IntentDensityOutput{}, fmt.Errorf("kron_intent_density: scan orphans: %w", err)
+	}
+	// Normalise nil → empty array so JSON marshal produces [] not null.
+	// SDK schema validation requires arrays, not null.
+	if orphans == nil {
+		orphans = []string{}
+	}
+
+	return nil, IntentDensityOutput{
+		TotalIntents: len(all),
+		TotalAnchors: len(anchors),
+		Coverage: Coverage{
+			IntentsWithAnchors:    len(withAnchor),
+			IntentsWithoutAnchors: withoutAnchor,
+		},
+		FilesWithoutIntent: orphans,
+	}, nil
 }
 
 // scanOrphanFiles walks root and returns the repo-relative paths of
@@ -163,16 +171,4 @@ func countLines(path string, capLines int) (int, error) {
 		}
 	}
 	return count, sc.Err()
-}
-
-type densityResponse struct {
-	TotalIntents       int          `json:"total_intents"`
-	TotalAnchors       int          `json:"total_anchors"`
-	Coverage           coverageWire `json:"coverage"`
-	FilesWithoutIntent []string     `json:"files_without_intent"`
-}
-
-type coverageWire struct {
-	IntentsWithAnchors    int      `json:"intents_with_anchors"`
-	IntentsWithoutAnchors []string `json:"intents_without_anchors"`
 }

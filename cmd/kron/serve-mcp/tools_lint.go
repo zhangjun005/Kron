@@ -2,17 +2,14 @@ package servemcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/xxx/kron/internal/lint"
 )
 
-// handleLint returns the toolHandler for kron_lint. The handler is
-// parameterised by root (the repository root) so the tool reads from
-// a fixed location per server process; it does NOT accept a root
-// parameter on the wire in v1.1 (the JSON-RPC -CWD flag is the only
-// way to set it).
+// HandleLint returns the mcp.ToolHandlerFor binding for kron_lint.
 //
 // Wire contract: see docs/implementation/mcp.md §2 (kron_lint).
 //
@@ -23,53 +20,39 @@ import (
 // named "errors" for consistency with the mcp.md contract even though
 // some entries are severity "warning". The "passed" boolean is true
 // only when no error-severity diagnostic is present.
-func handleLint(root string) toolHandler {
-	return func(ctx context.Context, _ json.RawMessage) (any, error) {
-		if err := assertCallerMCP(ctx); err != nil {
-			return nil, err
-		}
-		diags, err := lint.Run(ctx, root)
-		if err != nil {
-			return nil, fmt.Errorf("lint: %w", err)
-		}
-		return lintResponseFromDiags(diags), nil
+//
+// The handler is parameterised by the repo root, set on the ctx by
+// callerInjectMiddleware at the start of the request. This matches
+// the v1.1 behaviour where root was baked into each handleXxx(root)
+// closure; the v1.2 refactor centralises that wiring in one place
+// (the middleware) so all 12 handlers can share it.
+func HandleLint(ctx context.Context, _ *mcp.CallToolRequest, _ LintInput) (
+	*mcp.CallToolResult, LintOutput, error,
+) {
+	if err := assertCallerMCP(ctx); err != nil {
+		return nil, LintOutput{}, err
 	}
+	root := repoRootFrom(ctx)
+	diags, err := lint.Run(ctx, root)
+	if err != nil {
+		return nil, LintOutput{}, fmt.Errorf("lint: %w", err)
+	}
+	return nil, lintOutputFromDiags(diags), nil
 }
 
-// lintResponse is the on-the-wire shape for kron_lint's result.
-// JSON field order is the same as the mcp.md spec; field tags pin
-// the wire names so a rename here does not silently break MCP clients.
-type lintResponse struct {
-	Passed  bool           `json:"passed"`
-	Errors  []lintDiagWire `json:"errors"`
-	Summary lintSummary    `json:"summary"`
-}
-
-type lintDiagWire struct {
-	Rule     string `json:"rule"`
-	Where    string `json:"where"`
-	Severity string `json:"severity"`
-	Detail   string `json:"detail"`
-}
-
-type lintSummary struct {
-	Errors   int `json:"errors"`
-	Warnings int `json:"warnings"`
-}
-
-// lintResponseFromDiags converts the internal/lint.Diag slice to the
-// wire shape. Empty severities are normalised to "error" (matches the
+// lintOutputFromDiags converts internal/lint.Diag to the wire LintOutput
+// shape. Empty severities are normalised to "error" (matches the
 // internal/lint semantics of "empty is error").
-func lintResponseFromDiags(diags []lint.Diag) lintResponse {
-	out := lintResponse{
-		Errors: make([]lintDiagWire, 0, len(diags)),
+func lintOutputFromDiags(diags []lint.Diag) LintOutput {
+	out := LintOutput{
+		Errors: make([]LintDiag, 0, len(diags)),
 	}
 	for _, d := range diags {
 		sev := string(d.Severity)
 		if sev == "" {
 			sev = "error"
 		}
-		out.Errors = append(out.Errors, lintDiagWire{
+		out.Errors = append(out.Errors, LintDiag{
 			Rule:     string(d.Rule),
 			Where:    d.Where,
 			Severity: sev,

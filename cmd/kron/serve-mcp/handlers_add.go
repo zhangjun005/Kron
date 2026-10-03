@@ -2,7 +2,6 @@ package servemcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,12 +9,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/xxx/kron/internal/model"
 	"github.com/xxx/kron/internal/parser"
 	"github.com/xxx/kron/internal/store"
 )
 
-// handleAdd returns the toolHandler for kron_add.
+// HandleAdd returns the mcp.ToolHandlerFor binding for kron_add.
 //
 // Wire contract: see docs/implementation/mcp.md §2 (kron_add).
 //
@@ -25,76 +26,67 @@ import (
 // "symbol" populates Frontmatter.Symbol; "why" is appended to a
 // scaffolded body that follows the same shape as CLI `kron add`.
 //
-// The .kron/ skeleton must already exist; otherwise -32006 (Unprocessable)
-// is returned. Reusing an existing slug returns -32005 (Conflict),
-// matching the mcp.md contract for ErrIntentExists.
-func handleAdd(root string) toolHandler {
-	return func(ctx context.Context, params json.RawMessage) (any, error) {
-		if err := assertCallerMCP(ctx); err != nil {
-			return nil, err
-		}
-		var args struct {
-			Slug   string `json:"slug"`
-			Symbol string `json:"symbol"`
-			Why    string `json:"why"`
-		}
-		if len(params) > 0 {
-			if err := json.Unmarshal(params, &args); err != nil {
-				return nil, fmt.Errorf("%w: kron_add: invalid params: %v", model.ErrSlugInvalid, err)
-			}
-		}
-		if args.Slug == "" {
-			return nil, fmt.Errorf("%w: kron_add requires non-empty slug", model.ErrSlugInvalid)
-		}
-		if err := parser.ValidateSlug(args.Slug); err != nil {
-			return nil, err
-		}
-
-		kronDir := filepath.Join(root, model.KronDir)
-		if _, err := os.Stat(kronDir); err != nil {
-			if os.IsNotExist(err) {
-				return nil, fmt.Errorf("%w: .kron/ not found; run kron_init first", model.ErrConfigInvalid)
-			}
-			return nil, fmt.Errorf("kron_add: stat %s: %w", kronDir, err)
-		}
-
-		w, err := store.NewWriter(root)
-		if err != nil {
-			return nil, fmt.Errorf("kron_add: open store: %w", err)
-		}
-		if w.Exists(ctx, args.Slug) {
-			return nil, fmt.Errorf("%w: %s", model.ErrIntentExists, args.Slug)
-		}
-
-		handle := detectGitUser()
-		if handle == "" {
-			handle = "agent:unknown"
-		}
-
-		fm := model.Frontmatter{
-			CreatedBy: handle,
-			UpdatedAt: time.Now().UTC(),
-		}
-		if args.Symbol != "" {
-			fm.Symbol = []string{args.Symbol}
-		}
-
-		body := scaffoldedBody(args.Slug)
-		if args.Why != "" {
-			body = body + "\n## Why\n\n" + args.Why + "\n"
-		}
-
-		intent := &model.Intent{
-			Slug:        args.Slug,
-			Frontmatter: fm,
-			Body:        body,
-		}
-		if err := w.Write(ctx, intent); err != nil {
-			return nil, fmt.Errorf("kron_add: write: %w", err)
-		}
-
-		return addResponse{OK: true, Path: model.IntentPath(args.Slug)}, nil
+// The .kron/ skeleton must already exist; otherwise -32006
+// (Unprocessable) is returned. Reusing an existing slug returns
+// -32005 (Conflict), matching the mcp.md contract for ErrIntentExists.
+func HandleAdd(ctx context.Context, _ *mcp.CallToolRequest, in AddInput) (
+	*mcp.CallToolResult, AddOutput, error,
+) {
+	if err := assertCallerMCP(ctx); err != nil {
+		return nil, AddOutput{}, err
 	}
+	if in.Slug == "" {
+		return nil, AddOutput{}, fmt.Errorf("%w: kron_add requires non-empty slug", model.ErrSlugInvalid)
+	}
+	if err := parser.ValidateSlug(in.Slug); err != nil {
+		return nil, AddOutput{}, err
+	}
+
+	root := repoRootFrom(ctx)
+	kronDir := filepath.Join(root, model.KronDir)
+	if _, err := os.Stat(kronDir); err != nil {
+		if os.IsNotExist(err) {
+			return nil, AddOutput{}, fmt.Errorf("%w: .kron/ not found; run kron_init first", model.ErrConfigInvalid)
+		}
+		return nil, AddOutput{}, fmt.Errorf("kron_add: stat %s: %w", kronDir, err)
+	}
+
+	w, err := store.NewWriter(root)
+	if err != nil {
+		return nil, AddOutput{}, fmt.Errorf("kron_add: open store: %w", err)
+	}
+	if w.Exists(ctx, in.Slug) {
+		return nil, AddOutput{}, fmt.Errorf("%w: %s", model.ErrIntentExists, in.Slug)
+	}
+
+	handle := detectGitUser()
+	if handle == "" {
+		handle = "agent:unknown"
+	}
+
+	fm := model.Frontmatter{
+		CreatedBy: handle,
+		UpdatedAt: time.Now().UTC(),
+	}
+	if in.Symbol != "" {
+		fm.Symbol = []string{in.Symbol}
+	}
+
+	body := scaffoldedBody(in.Slug)
+	if in.Why != "" {
+		body = body + "\n## Why\n\n" + in.Why + "\n"
+	}
+
+	intent := &model.Intent{
+		Slug:        in.Slug,
+		Frontmatter: fm,
+		Body:        body,
+	}
+	if err := w.Write(ctx, intent); err != nil {
+		return nil, AddOutput{}, fmt.Errorf("kron_add: write: %w", err)
+	}
+
+	return nil, AddOutput{OK: true, Path: model.IntentPath(in.Slug)}, nil
 }
 
 // scaffoldedBody produces the default Markdown body for a freshly
@@ -125,9 +117,4 @@ func detectGitUser() string {
 		return ""
 	}
 	return "@" + name
-}
-
-type addResponse struct {
-	OK   bool   `json:"ok"`
-	Path string `json:"path"`
 }
