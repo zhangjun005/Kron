@@ -1,6 +1,10 @@
 package model
 
-import "context"
+import (
+	"context"
+	"errors"
+	"fmt"
+)
 
 // Known caller identities stored under CallerKey.
 //
@@ -63,4 +67,59 @@ func WithCaller(ctx context.Context, caller string) context.Context {
 func CallerFrom(ctx context.Context) string {
 	v, _ := ctx.Value(CallerKey).(string)
 	return v
+}
+
+// CallerKnown reports whether s is one of the five base caller identities
+// (CLI / MCP / LSP / IDE / GUI). It returns false for the empty string and
+// for derivative forms like "mcp:claude-3.7"; callers that need to match
+// derivatives should consult IsMCPCaller (or pattern match on the prefix
+// themselves).
+//
+// This is a pure string-set check. It is intended for diagnostic purposes
+// ("did the caller identity get injected at all?") and for early-fail
+// assertions in access-layer entry points, not for authorization.
+func CallerKnown(s string) bool {
+	switch s {
+	case CallerCLI, CallerMCP, CallerLSP, CallerIDE, CallerGUI:
+		return true
+	}
+	return false
+}
+
+// IsMCPCaller reports whether s represents an MCP-origin caller. This
+// includes both the base "mcp" identity and any derivative form starting
+// with "mcp:" (e.g. "mcp:claude-3.7", "mcp:cursor", even "mcp:" with an
+// empty agent suffix — the MCP server may not always know the agent
+// name). The check is string-prefix based; it does not parse or validate
+// the suffix.
+//
+// Use this in the MCP access layer when matching the caller identity
+// against the protocol; use CallerKnown when matching against the
+// abstract layer set.
+func IsMCPCaller(s string) bool {
+	if s == CallerMCP {
+		return true
+	}
+	const prefix = CallerMCP + ":"
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+}
+
+// RequireKnownCaller returns an error if ctx's caller identity is empty
+// or is not one of the five known base callers. Access layers should
+// call this at their entry point, immediately after WithCaller, so a
+// missing or malformed injection fails fast with a clear message
+// rather than propagating an empty caller to internal packages.
+//
+// This is an assertion (catches "I forgot to inject"), not an
+// authorization check. The five base callers are all equivalent in
+// terms of privilege under v1's caller model.
+func RequireKnownCaller(ctx context.Context) error {
+	c := CallerFrom(ctx)
+	if c == "" {
+		return errors.New("caller identity not injected on context; access layer must call model.WithCaller before delegating to internal packages")
+	}
+	if !CallerKnown(c) {
+		return fmt.Errorf("caller identity %q is not one of %s/%s/%s/%s/%s (or an mcp: derivative)", c, CallerCLI, CallerMCP, CallerLSP, CallerIDE, CallerGUI)
+	}
+	return nil
 }
