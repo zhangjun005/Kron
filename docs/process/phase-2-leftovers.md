@@ -47,7 +47,11 @@
   `assumptions` 字段,对每条 `Assumption` 检查 `ExpiresAt < now` + `VerifiedAt` 是否空。
   **不**集成外部测试信号(留待后续 P2)。
 
-### 状态：**open (v1.1 P1 subset,phase 2 第一周目标)**
+### 状态:**done (2026-10-03 commit 后续 commit)**
+
+实现细节:见同 commit 的 9 个 `cmd/kron/serve-mcp/handlers_*.go` 文件 +
+`handlers_test.go` 表驱动覆盖。22 个新增 + 修改的 handler / 测试 + RPC 错误码
+拆分。`go test ./...` / `go vet` / `gofmt` 全绿。
 
 ---
 

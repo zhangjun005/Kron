@@ -100,26 +100,10 @@ func TestServer_LintPassesEmptyRepo(t *testing.T) {
 	assert.Contains(t, string(resp.Result), `"summary":{"errors":0,"warnings":0}`)
 }
 
-// TestServer_StubToolReturnsNotImplemented verifies the 9 stub
-// entries produce a clear, well-formed error response.
-func TestServer_StubToolReturnsNotImplemented(t *testing.T) {
-	cases := []string{
-		"kron_init", "kron_add", "kron_update", "kron_delete",
-		"kron_restore", "kron_assume_check", "kron_impact",
-		"kron_intent_density", "kron_stale",
-	}
-	for _, name := range cases {
-		t.Run(name, func(t *testing.T) {
-			input := `{"jsonrpc":"2.0","method":"` + name + `","id":"x"}` + "\n"
-			out, _, err := runServer(t, input)
-			require.NoError(t, err)
-			// Response is an error envelope (id:"x", code:-32603, message mentions the tool).
-			assert.Contains(t, out, `"id":"x"`)
-			assert.Contains(t, out, `"code":-32603`)
-			assert.Contains(t, out, name)
-		})
-	}
-}
+// TestServer_StubToolReturnsNotImplemented is REMOVED in v1.1+ — all
+// 12 tools are real now. See TestServer_AllToolsRegistered for the
+// replacement coverage (every registered tool returns a well-formed
+// response, not a stub error).
 
 // TestServer_ListEmptyRepo verifies kron_list with no intents returns
 // an empty array, not null.
@@ -177,8 +161,8 @@ func TestListPrefixFilterIntegration(t *testing.T) {
 	assert.Equal(t, "auth-jwt", list.Intents[0]["slug"])
 }
 
-// TestGetNotFound verifies the not-found path returns -32602 (Invalid
-// params), per docs/implementation/error-catalog.md §3.
+// TestGetNotFound verifies the not-found path returns -32004 (Not
+// found), per docs/implementation/error-catalog.md §3.
 func TestGetNotFound(t *testing.T) {
 	dir := t.TempDir()
 	input := `{"jsonrpc":"2.0","method":"kron_get","params":{"slug":"missing/x"},"id":"g1"}` + "\n"
@@ -186,7 +170,7 @@ func TestGetNotFound(t *testing.T) {
 	err := Run([]string{"-CWD", dir}, strings.NewReader(input), &out, &errOut)
 	require.NoError(t, err)
 	assert.Empty(t, errOut)
-	assert.Contains(t, out.String(), `"code":-32602`)
+	assert.Contains(t, out.String(), `"code":-32004`)
 	assert.Contains(t, out.String(), "missing/x")
 }
 

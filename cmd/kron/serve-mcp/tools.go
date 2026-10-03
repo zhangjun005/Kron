@@ -22,20 +22,12 @@ import (
 // and converts.
 type toolHandler func(ctx context.Context, params json.RawMessage) (any, error)
 
-// defaultToolRegistry returns the v1.1 tool set: 3 implemented tools
-// (kron_lint, kron_list, kron_get) plus 9 stub entries that return a
-// clear "not implemented in v1.1" error so MCP clients receive a
-// well-formed response rather than a silent method-not-found.
+// defaultToolRegistry returns the v1.1+ tool set: 12 tools (3 P0
+// read-only + 9 full CRUD + extension tools).
 //
 // See docs/implementation/mcp.md §1 for the full v1 tool list and
 // docs/process/mcp-tool.md §2 for the workflow that adds a new tool.
 func defaultToolRegistry(root string) map[string]toolHandler {
-	stub := func(name string) toolHandler {
-		return func(_ context.Context, _ json.RawMessage) (any, error) {
-			return nil, fmt.Errorf("%w: %s (v1.1 P0 subset is kron_lint, kron_list, kron_get; see docs/implementation/mcp.md)", errToolNotImplemented, name)
-		}
-	}
-
 	r := make(map[string]toolHandler, 12)
 
 	// P0 — read-only / diagnostic. Implemented in v1.1.
@@ -43,29 +35,21 @@ func defaultToolRegistry(root string) map[string]toolHandler {
 	r["kron_list"] = handleList(root)
 	r["kron_get"] = handleGet(root)
 
-	// Phase 2 next step — full CRUD + extension tools. Each entry is a
-	// stub that fails fast with a clear message; the v1.1 tool list
-	// is fixed at 3 to keep the surface small enough to verify end-to-end
-	// before broadening it.
-	r["kron_init"] = stub("kron_init")
-	r["kron_add"] = stub("kron_add")
-	r["kron_update"] = stub("kron_update")
-	r["kron_delete"] = stub("kron_delete")
-	r["kron_restore"] = stub("kron_restore")
-	r["kron_assume_check"] = stub("kron_assume_check")
-	r["kron_impact"] = stub("kron_impact")
-	r["kron_intent_density"] = stub("kron_intent_density")
-	r["kron_stale"] = stub("kron_stale")
+	// Phase 2 (v1.1 P1) — full CRUD + extension tools. Each handler
+	// delegates to internal/store and internal/parser; none of them
+	// know about the JSON-RPC envelope (that mapping lives in rpc.go).
+	r["kron_init"] = handleInit(root)
+	r["kron_add"] = handleAdd(root)
+	r["kron_update"] = handleUpdate(root)
+	r["kron_delete"] = handleDelete(root)
+	r["kron_restore"] = handleRestore(root)
+	r["kron_assume_check"] = handleAssumeCheck(root)
+	r["kron_impact"] = handleImpact(root)
+	r["kron_intent_density"] = handleIntentDensity(root)
+	r["kron_stale"] = handleStale(root)
 
 	return r
 }
-
-// errToolNotImplemented is the canonical sentinel used by stub
-// handlers. The wire-level error message is the human-readable form;
-// MCP clients that care about distinguishing "real error" from
-// "not yet wired" can string-match on it. This is intentional —
-// stubs are not stable API; they get replaced by real handlers.
-var errToolNotImplemented = fmt.Errorf("tool not implemented in v1.1")
 
 // assertCallerMCP is a defensive guard every real (non-stub) tool
 // handler should call at entry. The dispatcher injects the caller

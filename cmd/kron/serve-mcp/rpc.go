@@ -12,13 +12,20 @@ import (
 )
 
 // JSON-RPC 2.0 error codes. The full spec also allows server-defined
-// codes in the range -32000 to -32099; we don't use them in v1.1.
+// codes in the range -32000 to -32099; we use the upper half for
+// Kron-domain codes (Not found / Conflict / Unprocessable) and reserve
+// the standard spec codes for transport-level errors.
 const (
 	codeParseError     = -32700
 	codeInvalidRequest = -32600
 	codeMethodNotFound = -32601
 	codeInvalidParams  = -32602
 	codeInternalError  = -32603
+
+	// Kron-domain codes (server-defined range -32000..-32099).
+	codeNotFound            = -32004
+	codeConflict            = -32005
+	codeUnprocessableEntity = -32006
 )
 
 // request is the wire envelope for a single JSON-RPC 2.0 call.
@@ -187,19 +194,29 @@ func (s *server) writeError(enc *json.Encoder, id json.RawMessage, code int, msg
 // else is treated as an internal failure (-32603).
 //
 // The mapping is documented in docs/implementation/error-catalog.md §3
-// and must stay aligned with that table.
+// and must stay aligned with that table. The semantic split (decision
+// 2026-10-03) follows:
+//
+//	-32602 Invalid params           : JSON unmarshal failed / missing required field
+//	-32603 Internal error            : I/O failure, panic-recovered error, anything unexpected
+//	-32004 Not found                 : model.ErrIntentNotFound (slug does not exist)
+//	-32005 Conflict                  : model.ErrIntentExists (slug collision / restore conflict)
+//	-32006 Unprocessable entity      : model.ErrFrontmatterInvalid, model.ErrConfigInvalid
+//	                                     (request shape OK, but the data fails domain validation)
 func classifyError(err error) int {
 	switch {
 	case err == nil:
 		return 0
-	case errors.Is(err, model.ErrIntentNotFound),
-		errors.Is(err, model.ErrIntentExists),
-		errors.Is(err, model.ErrSlugInvalid):
+	case errors.Is(err, model.ErrIntentNotFound):
+		return codeNotFound
+	case errors.Is(err, model.ErrIntentExists):
+		return codeConflict
+	case errors.Is(err, model.ErrSlugInvalid):
 		return codeInvalidParams
 	case errors.Is(err, model.ErrAnchorDangling),
 		errors.Is(err, model.ErrFrontmatterInvalid),
 		errors.Is(err, model.ErrConfigInvalid):
-		return codeInternalError
+		return codeUnprocessableEntity
 	default:
 		return codeInternalError
 	}
