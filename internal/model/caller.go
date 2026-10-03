@@ -1,3 +1,34 @@
+// Package model defines Kron's core domain types: Intent, Config, Frontmatter,
+// and the caller-identity API used to attribute work to the access layer that
+// triggered it.
+//
+// # Caller identity: v1 status (2026-10-04)
+//
+// The caller API in this file (WithCaller / CallerFrom / CallerKnown / IsMCPCaller
+// / RequireKnownCaller / CallerKey) is **protocol scaffolding for v1.2+**, NOT a
+// consumed v1 feature. As of 2026-10-04:
+//
+//   - **MCP access layer** (cmd/kron/serve-mcp) DOES inject caller via
+//     WithCaller and DOES read it back via assertCallerMCP at every handler
+//     entry. The read is a defensive dispatcher-bug check, not a control flow
+//     decision.
+//   - **CLI access layer** (cmd/kron/cli) does NOT inject caller; init/add/lint
+//     pass context.Background() straight to internal/store and internal/lint.
+//   - **internal/store, internal/lint, internal/parser** all take ctx but do
+//     not call CallerFrom; ctx is reserved for "future cancellation and
+//     future audit / lint output attribution" (see _ = ctx comments in
+//     store/reader.go, store/writer.go, lint/lint.go).
+//   - **RequireKnownCaller** is defined but has zero production callers.
+//
+// Net: caller identity flows in only on the MCP wire path; it is not yet
+// surfaced in any user-visible output, and is not used for authorization
+// (per architecture.md §2.3). A future v1.2+ phase will pick a concrete
+// consumer (lint output attribution / audit log) and either wire CLI to
+// inject it OR remove the unused half. Until then the API is preserved
+// unchanged for forward compatibility.
+//
+// See docs/process/mcp-protocol.md for the related MCP protocol-layer gap
+// analysis.
 package model
 
 import (
