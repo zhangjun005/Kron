@@ -33,7 +33,8 @@ kron/
 ├── internal/
 │   ├── model/             ← domain types (Intent, Config)
 │   ├── store/             ← file I/O, frontmatter parsing
-│   └── parser/            ← markdown/CLI argument parsing
+│   ├── parser/            ← markdown/CLI argument parsing
+│   └── lint/              ← (proposed) scan + validate组合；phase 2 第 1 步开包
 ├── docs/
 │   ├── article.md
 │   ├── business.md

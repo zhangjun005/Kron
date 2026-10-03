@@ -28,7 +28,8 @@ cmd/kron/        ← thin CLI entry; dispatches to subcommands
 internal/        ← bottom-layer packages only, no access-layer code
 ├── model/
 ├── store/
-└── parser/
+├── parser/
+└── lint/        ← (proposed, phase 2 第 1 步开包)
 
 docs/             ← design notes
 .cursor/skills/   ← detailed style rules (auto-loaded)

@@ -106,7 +106,7 @@ Position encoding、文档同步协议、capabilities。下沉到 `internal/` �
 | `internal/model` | 对象层：纯数据结构 + 校验方法 | v1 必须 |
 | `internal/store` | 业务层：文件 I/O + YAML 序列化 | v1 必须 |
 | `internal/parser` | 业务层：输入解析（slug、markdown 文本、锚点语法、相对链接） | v1 必须 |
-| `internal/lint` | 业务层：扫描 + 校验组合（两个以上访问层用到时才开） | 当 CLI、MCP、IDE 都需要 lint 时开 |
+| `internal/lint` | 业务层：扫描 + 校验组合（CLI 的 `kron lint` 与 MCP 的 `kron_lint` 共享引擎） | **已论证**（见 commit `propose: internal/lint/`）；Phase 2 第 1 步落地，CLI 改造之前必须先实开 |
 | `internal/...` | **不**预设更多 | 每个新 `internal/` 子包都要写"为什么开"的 commit 论证 |
 
 ---
