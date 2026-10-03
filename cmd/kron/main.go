@@ -29,7 +29,10 @@ func main() {
 	var err error
 	switch os.Args[1] {
 	case "serve-mcp":
-		err = servemcp.Run(os.Args[2:], os.Stdout, os.Stderr)
+		// The MCP server reads JSON-RPC from stdin and writes responses
+		// to stdout. It is the only access layer that takes over stdio
+		// directly; CLI commands keep stdio untouched.
+		err = servemcp.Run(os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
 	default:
 		err = runCLI(os.Args[1:])
 	}
