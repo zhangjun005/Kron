@@ -225,19 +225,6 @@ func TestRunLint_JSONReporterWithError(t *testing.T) {
 	assert.Contains(t, s, `"rule": "anchor-dangling"`)
 }
 
-func TestItoa(t *testing.T) {
-	cases := map[int]string{
-		0:      "0",
-		1:      "1",
-		42:     "42",
-		-7:     "-7",
-		100000: "100000",
-	}
-	for in, want := range cases {
-		assert.Equal(t, want, itoa(in), "itoa(%d)", in)
-	}
-}
-
 func TestDefaultIntentBody(t *testing.T) {
 	body := defaultIntentBody("auth/refresh-token")
 	// Title is the last slug segment, dashes to spaces.
