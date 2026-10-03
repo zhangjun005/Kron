@@ -195,9 +195,6 @@ func TestReader_LoadAll_Lexicographic(t *testing.T) {
 	writeFile(t, dir, ".kron/intents/middle.md", sampleIntent)
 	// A non-md file (should be skipped):
 	writeFile(t, dir, ".kron/intents/README.txt", "ignore me")
-	// A subdirectory (should be skipped):
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".kron/intents/sub"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kron/intents/sub/inner.md"), []byte(sampleIntent), 0o644))
 
 	r, err := NewReader(dir)
 	require.NoError(t, err)
@@ -212,6 +209,39 @@ func TestReader_LoadAll_Lexicographic(t *testing.T) {
 	}
 	sort.Strings(got) // sanity
 	assert.Equal(t, []string{"alpha", "middle", "zeta"}, got)
+}
+
+func TestReader_LoadAll_RecursiveSubdirs(t *testing.T) {
+	// Added 2026-10-03 alongside the RFC 2026-10-03-frontmatter-references
+	// landing. LoadAll now walks subdirectories because intent slugs
+	// may contain "/" (e.g. "auth/jwt-sliding-window" → auth/jwt-sliding-window.md
+	// under .kron/intents/). A subdirectory whose name is not a valid
+	// slug prefix is pruned (its files are still walked; see below).
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/intents/auth/jwt.md", sampleIntent)
+	writeFile(t, dir, ".kron/intents/auth/refresh.md", sampleIntent)
+	writeFile(t, dir, ".kron/intents/payments/tencent-adapter.md", sampleIntent)
+	// Top-level file with no slash, still works.
+	writeFile(t, dir, ".kron/intents/single-region-deployment.md", sampleIntent)
+
+	r, err := NewReader(dir)
+	require.NoError(t, err)
+
+	intents, err := r.LoadAll(context.Background())
+	require.NoError(t, err)
+	require.Len(t, intents, 4)
+
+	got := make([]string, 0, len(intents))
+	for _, in := range intents {
+		got = append(got, in.Slug)
+	}
+	sort.Strings(got)
+	assert.Equal(t, []string{
+		"auth/jwt",
+		"auth/refresh",
+		"payments/tencent-adapter",
+		"single-region-deployment",
+	}, got)
 }
 
 func TestReader_Exists(t *testing.T) {

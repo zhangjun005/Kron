@@ -315,7 +315,6 @@ func (s *Store) WriteIntent(caller string, slug string, intent *model.Intent) er
 |---|---|---|
 | 守护进程、文件监听、状态机、双源同步 | v1 范围外 | — |
 | CLI `list` / `get` / `update` / `delete` / `restore` | 由 MCP 工具集覆盖 | — |
-| `parent` / `depends_on` 拓扑建模 | 目录 + 相对链接已足够 | — |
 | 健康度诊断（过期 / 孤儿 / 冲突检测） | `requirements.md` 未明确要求 | — |
 | 导入迁移、`config.toml` 字段扩展 | v1 仅 `intents_dir` | — |
 | `kron add` stdin / 外部模板支持 | 脚手架职责，复杂输入留给编辑器或 GUI | — |

@@ -81,8 +81,8 @@
 
 ### Frontmatter
 
-> **本文档保留的 frontmatter 仅用于元数据，不表达层级或依赖关系。**
-> 层级靠目录，依赖靠相对链接。
+> **本文档保留的 frontmatter 仅用于元数据，层级靠目录表达。**
+> 意图间的**显式依赖**和**软引用**靠结构化字段（见下方"关系字段"小节），不是 markdown 相对链接。
 
 **建议字段：**
 - `symbol`：单字符串或字符串列表；关联的代码符号（函数 / 结构体 / 接口名）
@@ -91,6 +91,8 @@
 - `reviewers`：（可选，多人协作时使用）签名列表，`@<github_handle>` 数组，声明对该意图决策进行过 Review 的人员
 - `status`：（可选）`draft` / `active` / `superseded`，详见下方"status 字段策略"
 - `assumptions`：（可选）可验证前提列表，详见下方"Assumptions 字段策略"
+- `references`：（可选，v1.2+）软引用关系列表，详见下方"关系字段"小节
+- `depends_on`：（可选，v1.2+）硬依赖关系列表，详见下方"关系字段"小节
 
 ### `status` 字段策略
 
@@ -135,6 +137,43 @@ assumptions:
 - 到期不报错，只提醒"该重新审这条假设了"
 
 `id` 命名建议：kebab-case，如 `single-region`、`blacklist-fits-ram`、`clock-skew-30s`。
+
+### 关系字段（`references` / `depends_on`，v1.2+）
+
+> **动机**：markdown 相对链接只对人类阅读有意义，工具链（lint / MCP / IDE）看不见。结构化字段把"这条 intent 与哪些其他 intent 有关系"变成机器可消费的事实。详见 [`docs/rfc/2026-10-03-frontmatter-references.md`](../../rfc/2026-10-03-frontmatter-references.md)（RFC 提案）+ [`architecture.md`](../abstractDesign/architecture.md)（架构依据）。
+
+**两个字段，语义不同**：
+
+| 字段 | 类型 | 语义 | 对称性 | 工具表现 |
+|---|---|---|---|---|
+| `references` | `[]string`（slug） | 软引用 / see-also / 推荐阅读 | 对称（双向记录均可） | `kron_lint`: 悬空 → warning；`kron_impact`: 列入 `references` |
+| `depends_on` | `[]string`（slug） | 硬依赖 / 理解本 intent 前必须先读 | 反对称（A→B 不蕴含 B→A） | `kron_lint`: 悬空 → **error**；`kron_delete`: 列出 dependents（soft warn，不阻塞）；`kron_impact`: 列入 `prerequisites` |
+
+**示例**：
+
+```yaml
+<!-- kron:frontmatter -->
+symbol: ["auth.RefreshToken"]
+created_by: "@zhangjun005"
+updated_at: "2026-10-03T10:00:00Z"
+
+references:                          # 软：灵感来源 / 推荐阅读
+  - oauth2-best-practices
+  - session-timeout-ux
+depends_on:                          # 硬：必须先读才能理解本 intent
+  - auth/token-storage
+  - auth/csrf-protected
+<!-- /kron:frontmatter -->
+```
+
+**校验规则**：
+
+- 每个条目必须是合法 slug（见 [`parser.ValidateSlug`](../../implementation/domain-model.md)）——kebab-case 段、可含 `/` 分组、不可含 `..` / 不可 `.md` 后缀。
+- 自引用（A.references 含 A） → 错误。`kron_update` 写时校验；`kron_lint` 扫时校验。
+- `depends_on` 形成环（A→B→A） → `kron_lint` 报 `depends-on-cycle` 错误。
+- 引用目标不存在 → soft = warning；hard = error（见上表）。
+- **不需要双向记录**：A.depends_on B 不要求 B.depends_on A。
+- **不替代 markdown 相对链接**：链接保留作人类阅读；字段是给工具的。
 
 ### 正文骨架
 

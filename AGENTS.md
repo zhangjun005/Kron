@@ -166,7 +166,6 @@ CLI explicitly does NOT implement `list` / `get` / `update` / `delete` / `restor
 - Adding config fields beyond `intents_dir` — see architecture.md §3.5 (zero-config).
 - Adding `--path` / stdin / external-template flags to existing commands without consulting `docs/process/cli-flag.md`.
 - Implementing `serve-lsp`, IDE plugin, GUI, hard-delete / GC — 这些都不在 v1 必需范围。
-- Adding `parent` / `depends_on` to frontmatter — directory + relative links cover it (see intent-structure.md).
 - Adding new lint rules without following `docs/process/lint-rule.md`.
 - Modifying frontmatter schema without following `docs/process/migrate.md`.
 - Adding new `internal/` packages without following `docs/process/internal-pkg.md`.
@@ -188,6 +187,11 @@ updated_at: "2026-09-22T10:00:00Z"
 #     text: 服务仅部署在单 region，无跨区时钟漂移问题
 #     severity: hard
 #     expires_at: "2026-12-31"
+# optional: structural relations (v1.2+; see docs/rfc/2026-10-03-frontmatter-references.md)
+# references:                          # soft links (see-also / recommended reading)
+#   - oauth2-best-practices
+# depends_on:                          # hard dependencies (must-read-before)
+#   - auth/token-storage
 <!-- /kron:frontmatter -->
 
 # Intent title
@@ -202,6 +206,7 @@ updated_at: "2026-09-22T10:00:00Z"
 ```
 
 > **边界假设写在 frontmatter 的 `assumptions` 字段里**（见 [`docs/abstractDesign/intent-structure.md`](docs/abstractDesign/intent-structure.md) §三），不在正文重复。
+> **意图间引用/依赖写在 `references` / `depends_on` 字段里**（v1.2+），不在正文 markdown 链接——结构化字段是机器可消费的（`kron_lint` 校验、`kron_impact` 报告、`kron_delete` 提示 dependents）。markdown 链接仍可用于人类阅读。
 
 Status lifecycle (managed via `status` field when needed):
 - `draft` → `active` → `superseded`

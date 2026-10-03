@@ -161,4 +161,144 @@ func TestRuleConstantsAreStable(t *testing.T) {
 	// lint consumers (CI, editor plugins) depend on these string values.
 	assert.Equal(t, Rule("anchor-dangling"), RuleAnchorDangling)
 	assert.Equal(t, Rule("frontmatter-invalid"), RuleFrontmatterInvalid)
+	assert.Equal(t, Rule("dangling-reference"), RuleDanglingReference)
+	assert.Equal(t, Rule("dangling-depends-on"), RuleDanglingDependsOn)
+	assert.Equal(t, Rule("depends-on-cycle"), RuleDependsOnCycle)
+	assert.Equal(t, Rule("self-reference"), RuleSelfReference)
+}
+
+// --- C-class rules (intent → intent frontmatter relations) -----------
+//
+// Helper: build a 2-intent repo where target exists, then assert the
+// expected diags. Kept local to this file so lint tests don't grow
+// inter-file dependencies.
+
+func TestRun_DanglingReference(t *testing.T) {
+	// target references a slug that does not exist → warning, not error.
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/intents/a.md", `<!-- kron:frontmatter -->
+created_by: "@alice"
+updated_at: 2026-10-03T10:00:00Z
+references:
+  - ghost/never-existed
+  - b
+<!-- /kron:frontmatter -->
+
+# A
+`)
+
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	// Need intent `b` to exist so LoadAll succeeds.
+	writeFile(t, dir, ".kron/intents/b.md", sampleIntent)
+
+	diags, err = Run(context.Background(), dir)
+	require.NoError(t, err)
+	require.Len(t, diags, 1)
+	assert.Equal(t, RuleDanglingReference, diags[0].Rule)
+	assert.Equal(t, SeverityWarning, diags[0].Severity)
+	assert.Equal(t, "a", diags[0].Where)
+	assert.Contains(t, diags[0].Detail, "ghost/never-existed")
+}
+
+func TestRun_DanglingDependsOn(t *testing.T) {
+	// target depends_on a slug that does not exist → error.
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/intents/a.md", `<!-- kron:frontmatter -->
+created_by: "@alice"
+updated_at: 2026-10-03T10:00:00Z
+depends_on:
+  - ghost/missing
+<!-- /kron:frontmatter -->
+
+# A
+`)
+
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	require.Len(t, diags, 1)
+	assert.Equal(t, RuleDanglingDependsOn, diags[0].Rule)
+	assert.Equal(t, SeverityError, diags[0].Severity)
+	assert.Equal(t, "a", diags[0].Where)
+	assert.Contains(t, diags[0].Detail, "ghost/missing")
+}
+
+func TestRun_DependsOnCycle(t *testing.T) {
+	// A.depends_on B AND B.depends_on A → cycle, error.
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/intents/a.md", `<!-- kron:frontmatter -->
+created_by: "@alice"
+updated_at: 2026-10-03T10:00:00Z
+depends_on:
+  - b
+<!-- /kron:frontmatter -->
+
+# A
+`)
+	writeFile(t, dir, ".kron/intents/b.md", `<!-- kron:frontmatter -->
+created_by: "@alice"
+updated_at: 2026-10-03T10:00:00Z
+depends_on:
+  - a
+<!-- /kron:frontmatter -->
+
+# B
+`)
+
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	require.NotEmpty(t, diags)
+
+	var cycleDiag *Diag
+	for i := range diags {
+		if diags[i].Rule == RuleDependsOnCycle {
+			cycleDiag = &diags[i]
+			break
+		}
+	}
+	require.NotNil(t, cycleDiag, "expected at least one depends-on-cycle diag, got %+v", diags)
+	assert.Equal(t, SeverityError, cycleDiag.Severity)
+	assert.Contains(t, cycleDiag.Detail, "a")
+	assert.Contains(t, cycleDiag.Detail, "b")
+}
+
+func TestRun_SelfReference(t *testing.T) {
+	// A.references contains A → self-reference, error.
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/intents/a.md", `<!-- kron:frontmatter -->
+created_by: "@alice"
+updated_at: 2026-10-03T10:00:00Z
+references:
+  - a
+<!-- /kron:frontmatter -->
+
+# A
+`)
+
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	require.Len(t, diags, 1)
+	assert.Equal(t, RuleSelfReference, diags[0].Rule)
+	assert.Equal(t, SeverityError, diags[0].Severity)
+}
+
+func TestRun_ValidReferences_NoDiags(t *testing.T) {
+	// A.references B and A.depends_on B; both exist → no diags.
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/intents/a.md", `<!-- kron:frontmatter -->
+created_by: "@alice"
+updated_at: 2026-10-03T10:00:00Z
+references:
+  - b
+depends_on:
+  - b
+<!-- /kron:frontmatter -->
+
+# A
+`)
+	writeFile(t, dir, ".kron/intents/b.md", sampleIntent)
+
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	assert.Empty(t, diags)
 }

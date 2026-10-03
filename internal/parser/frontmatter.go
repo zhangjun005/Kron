@@ -155,12 +155,39 @@ func splitFence(data []byte) (fmRaw []byte, body string, err error) {
 	return fmRaw, string(rest), nil
 }
 
+// knownFrontmatterFields enumerates every YAML key that ParseFrontmatter
+// will accept. We use this set with yaml.Decoder.KnownFields(true) so
+// that schema drift (typo'd field names, accidentally-injected fields)
+// surfaces here rather than being silently dropped. Adding a new
+// frontmatter field requires adding it to BOTH model.Frontmatter and
+// this set; a missing entry here is a parse-time error, not a silent
+// data loss.
+//
+// Kept in this file (rather than in internal/model) so the validation
+// policy and the field list live next to the decoder that uses them.
+var knownFrontmatterFields = map[string]struct{}{
+	"symbol":      {},
+	"created_by":  {},
+	"updated_at":  {},
+	"reviewers":   {},
+	"status":      {},
+	"assumptions": {},
+	"references":  {},
+	"depends_on":  {},
+}
+
 // ParseFrontmatter decodes raw YAML into a model.Frontmatter.
 //
 // Unknown fields are rejected: schema drift surfaces here rather than
-// silently dropping data. Required fields (created_by, updated_at) are
-// validated; missing required fields are returned as errors so callers
-// can wrap with model.ErrFrontmatterInvalid.
+// silently dropping data. The known-field whitelist above is the
+// single source of truth; add a new field by extending model.Frontmatter
+// AND this set in the same commit.
+//
+// Required fields (created_by, updated_at) are validated; missing
+// required fields are returned as errors so callers can wrap with
+// model.ErrFrontmatterInvalid. References and depends_on entries are
+// validated as slugs (parser.ValidateSlug) and must not include the
+// owning intent's own slug (self-reference is a schema error).
 func ParseFrontmatter(raw []byte) (model.Frontmatter, error) {
 	var fm model.Frontmatter
 	if len(bytes.TrimSpace(raw)) == 0 {
@@ -219,7 +246,8 @@ func SerializeMarkdown(intent *model.Intent) ([]byte, error) {
 
 // validateFrontmatter checks required-field presence and value shape.
 // It does NOT validate slug (caller's responsibility) or check for
-// cross-references (lint's job).
+// cross-references (lint's job) or self-references (store.Load's job,
+// where the owner slug is in scope).
 func validateFrontmatter(fm *model.Frontmatter) error {
 	if strings.TrimSpace(fm.CreatedBy) == "" {
 		return errors.New("created_by is required")
@@ -244,6 +272,33 @@ func validateFrontmatter(fm *model.Frontmatter) error {
 			return fmt.Errorf("assumptions[%d].severity is required", i)
 		default:
 			return fmt.Errorf("assumptions[%d].severity %q is invalid", i, a.Severity)
+		}
+	}
+	if err := validateSlugList("references", fm.References); err != nil {
+		return err
+	}
+	if err := validateSlugList("depends_on", fm.DependsOn); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateSlugList checks that every entry in refs parses as a valid
+// intent slug. The field name is included in error messages so the
+// user knows which list broke. Empty strings and whitespace-only
+// entries are rejected (we don't want to silently accept "" as a
+// reference to a not-yet-decided intent).
+//
+// Self-reference (an entry equal to the owner slug) is NOT caught
+// here — that check needs the owner slug, which only store.Load /
+// lint know. See internal/lint for the cross-file cycle check.
+func validateSlugList(field string, refs []string) error {
+	for i, r := range refs {
+		if strings.TrimSpace(r) == "" {
+			return fmt.Errorf("%s[%d] is empty", field, i)
+		}
+		if err := ValidateSlug(r); err != nil {
+			return fmt.Errorf("%s[%d]: %w", field, i, err)
 		}
 	}
 	return nil

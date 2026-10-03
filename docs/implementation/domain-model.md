@@ -25,12 +25,14 @@ type Intent struct {
 
 ```go
 type Frontmatter struct {
-    Symbol      []string    `yaml:"symbol,omitempty"`     // 关联代码符号列表
-    CreatedBy   string      `yaml:"created_by"`           // "@user" 或 "agent:<model>"
-    UpdatedAt   time.Time   `yaml:"updated_at"`           // ISO 8601
-    Reviewers   []string    `yaml:"reviewers,omitempty"`  // 可选；多协作项目使用
-    Status      Status      `yaml:"status,omitempty"`     // draft / active / superseded
-    Assumptions []Assumption `yaml:"assumptions,omitempty"` // 可选；可验证前提
+	Symbol      []string    `yaml:"symbol,omitempty"`     // 关联代码符号列表
+	CreatedBy   string      `yaml:"created_by"`           // "@user" 或 "agent:<model>"
+	UpdatedAt   time.Time   `yaml:"updated_at"`           // ISO 8601
+	Reviewers   []string    `yaml:"reviewers,omitempty"`  // 可选；多协作项目使用
+	Status      Status      `yaml:"status,omitempty"`     // draft / active / superseded
+	Assumptions []Assumption `yaml:"assumptions,omitempty"` // 可选；可验证前提
+	References  []string    `yaml:"references,omitempty"`  // 可选；软引用关系（v1.2+）
+	DependsOn   []string    `yaml:"depends_on,omitempty"` // 可选；硬依赖关系（v1.2+）
 }
 ```
 
@@ -38,6 +40,15 @@ type Frontmatter struct {
 `Assumptions` 完全可选；不填 = "该 intent 无显式假设"（见 [intent-structure.md §三](../abstractDesign/intent-structure.md)）。
 每个 `Assumption` 必须有 `id` / `text` / `severity` 三个字段；`severity` 取值 `hard` / `soft`。
 `expires_at` / `verified_at` / `verified_by` 全部可选。
+
+**`References` / `DependsOn`（v1.2+，2026-10-03 落地）**：
+
+| 字段 | 类型 | 语义 | lint 表现 | MCP 表现 |
+|---|---|---|---|---|
+| `References` | `[]string` (slug) | 软引用 / see-also | `dangling-reference` (warning) | `kron_impact.references` (反向)、`kron_get.references` |
+| `DependsOn` | `[]string` (slug) | 硬依赖 | `dangling-depends-on` (error) + `depends-on-cycle` (error) + `self-reference` (error) | `kron_impact.prerequisites` + `kron_delete.dependents` (soft warn) |
+
+字段细节、示例、校验细节：[intent-structure.md §三 "关系字段"](../abstractDesign/intent-structure.md) + [RFC 2026-10-03-frontmatter-references](../rfc/2026-10-03-frontmatter-references.md)。
 
 ---
 

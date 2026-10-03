@@ -52,7 +52,7 @@ MCP 必须覆盖**增删改查 + 校验**完整意图生命周期。v1 扩展 4 
 |---|---|
 | 入参 | `prefix` (string, optional) |
 | 出参 | `{ intents: IntentSummary[] }` |
-| `IntentSummary` 结构 | `slug`, `symbol`, `status`, `updated_at` |
+| `IntentSummary` 结构 | `slug`, `symbol`, `status`, `updated_at`, `assumes` (optional) |
 
 ### `kron_get`
 
@@ -60,27 +60,34 @@ MCP 必须覆盖**增删改查 + 校验**完整意图生命周期。v1 扩展 4 
 |---|---|
 | 入参 | `slug` (string, required) |
 | 出参 | `{ intent: Intent }` |
+| `Intent` 结构 | `slug`, `frontmatter` (含 `symbol` / `created_by` / `updated_at` / `reviewers` / `status` / `assumptions` / **`references`** / **`depends_on`**), `body`, `source_path` |
 | 错误码 | `ErrIntentNotFound` |
+
+> **v1.2 变更**：`frontmatter` 新增 `references` 和 `depends_on` 两个字段。详见 [RFC 2026-10-03-frontmatter-references](../rfc/2026-10-03-frontmatter-references.md)。
 
 ### `kron_update`
 
 | 字段 | 值 |
 |---|---|
-| 入参 | `slug` (string, required)<br>`symbol` (string, optional)<br>`body` (string, optional)<br>`status` (string, optional) |
+| 入参 | `slug` (string, required)<br>`symbol` (string, optional)<br>`body` (string, optional)<br>`status` (string, optional)<br>**`references`** (string[], optional, v1.2+)<br>**`depends_on`** (string[], optional, v1.2+) |
 | 出参 | `{ ok: bool, path: string }` |
-| 错误码 | `ErrIntentNotFound` |
+| 错误码 | `ErrIntentNotFound` / `ErrFrontmatterInvalid` (含 self-reference / invalid slug) |
+
+> **PATCH 语义**：`references` / `depends_on` 与 `reviewers` 行为一致——`null`/`absent` = no change；`[]` = clear；`[...]` = replace。
 
 ### `kron_delete`
 
 | 字段 | 值 |
 |---|---|
 | 入参 | `slug` (string, required) |
-| 出参 | `{ ok: bool, trashed_path: string }` |
+| 出参 | `{ ok: bool, trashed_path: string, dependents: [slug] }` |
 | 错误码 | `ErrIntentNotFound` |
 
 **软删除机制**：
 - 不真正删除文件，移动到 `.kron/.trash/<slug>.md`
 - `.kron/.trash/` 与 `.kron/intents/` 平级
+
+> **v1.2 变更**：`dependents` 列出删除前**所有**依赖此 intent 的其他 intent slug（来自它们的 `depends_on` 字段）。**soft warn，不强制 block**——参见 RFC §5.3。
 
 ### `kron_restore`
 
@@ -118,11 +125,14 @@ v1 简化：仅列清单，不做 diff 对比（留 TODO）。
 | 字段 | 值 |
 |---|---|
 | 入参 | `slug` (string, required) |
-| 出参 | `{ intent: IntentSummary, incoming_anchors: [Anchor], depends_on_intents: [string] }` |
+| 出参 | `{ intent: IntentSummary, incoming_anchors: [Anchor], references: [string], prerequisites: [string] }` |
 | 错误码 | `ErrIntentNotFound` |
 
-**说明**：`incoming_anchors` 是反向 anchor 扫描结果（哪些源文件依赖这个意图）；
-`depends_on_intents` 是按共享 `symbol` 推断的横向关系。
+**说明**：
+- `incoming_anchors` 是反向 anchor 扫描结果（哪些源文件依赖这个意图）；
+- **`references`（v1.2+）**：反向软链接视图——列出**所有**在 `references` 中包含本 intent slug 的其他 intent；
+- **`prerequisites`（v1.2+）**：本 intent 的前置依赖——`depends_on` 显式优先 ∪ symbol 推断（被显式覆盖的 symbol 推断不再重复出现）。
+
 **触发场景**：AI Agent 准备修改某个意图前自动调——把"意图 × 调用树"视图的数据基础变成可执行 API。
 
 ### `kron_intent_density`

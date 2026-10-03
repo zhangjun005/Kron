@@ -19,6 +19,26 @@ const (
 	// Always severity: error. Per-file isolation is a Phase 2 follow-up;
 	// v1 reports the first failing load as a single repo-wide Diag.
 	RuleFrontmatterInvalid Rule = "frontmatter-invalid"
+
+	// RuleDanglingReference reports that an intent's Frontmatter.References
+	// lists a slug that does not resolve to an existing .kron/intents/<slug>.md.
+	// Severity: warning (soft link — informational, not load-bearing).
+	RuleDanglingReference Rule = "dangling-reference"
+
+	// RuleDanglingDependsOn reports that an intent's Frontmatter.DependsOn
+	// lists a slug that does not resolve to an existing .kron/intents/<slug>.md.
+	// Severity: error (hard dependency — broken link breaks comprehension).
+	RuleDanglingDependsOn Rule = "dangling-depends-on"
+
+	// RuleDependsOnCycle reports a cycle in the depends_on graph
+	// (A.depends_on B AND B.depends_on A, or any longer cycle).
+	// Severity: error (cycles are nonsensical — neither intent can be
+	// "read first").
+	RuleDependsOnCycle Rule = "depends-on-cycle"
+
+	// RuleSelfReference reports that an intent lists its own slug in
+	// either References or DependsOn. Severity: error.
+	RuleSelfReference Rule = "self-reference"
 )
 
 // Severity ranks a Diag's importance. Empty is treated as error by

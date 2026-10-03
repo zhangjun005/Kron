@@ -14,14 +14,15 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/xxx/kron/internal/parser"
 	"github.com/xxx/kron/internal/store"
 )
 
 // Run walks the repository rooted at root and returns every diagnostic
-// produced by v1's two mandatory rule classes. ctx is reserved for
-// future cancellation; v1 does not read it.
+// produced by v1's mandatory rule classes. ctx is reserved for future
+// cancellation; v1 does not read it.
 //
 // Errors are returned only for scope-cream failures: a missing root,
 // an I/O error walking the source tree, or a catastrophic parse failure
@@ -30,6 +31,18 @@ import (
 //
 // root may be absolute; ScanAnchors and store.NewReader both call
 // filepath.Abs internally.
+//
+// Rule classes (May 2026 schema):
+//
+//	A-class: anchor-dangling (source code → intent)
+//	B-class: frontmatter-invalid (intent .md is unparseable)
+//	C-class: dangling-reference, dangling-depends-on, depends-on-cycle,
+//	         self-reference (intent → intent frontmatter relations)
+//
+// C-class rules require all intents to be loaded successfully; when
+// LoadAll fails, the per-intent C-class checks are skipped (the
+// frontmatter-invalid Diag already explains why) but A-class diags
+// (which don't need intent data) are still produced.
 func Run(ctx context.Context, root string) ([]Diag, error) {
 	_ = ctx // reserved for cancellation; no-op in v1
 
@@ -60,10 +73,11 @@ func Run(ctx context.Context, root string) ([]Diag, error) {
 		}
 	}
 
-	// B-class: store.LoadAll is fail-fast on the first bad file, so any
-	// failure becomes a single repo-wide Diag rather than a Go error.
-	// Phase 2 P2-2 will relax LoadAll to per-file isolation; until then,
-	// one Diag per affected repository is the best we can do.
+	// B + C-class: load every intent, then run the frontmatter-relation
+	// rules on each. A failure to load any single intent (LoadAll is
+	// fail-fast) becomes a single repo-wide Diag and the per-intent
+	// C-class checks are skipped — but the A-class results above are
+	// still meaningful and have already been appended.
 	intents, loadErr := r.LoadAll(ctx)
 	if loadErr != nil {
 		diags = append(diags, Diag{
@@ -72,12 +86,129 @@ func Run(ctx context.Context, root string) ([]Diag, error) {
 			Detail:   loadErr.Error(),
 			Severity: SeverityError,
 		})
-		// Anchor diags are still meaningful even if intent loading failed,
-		// so we do not return here.
+		return diags, nil
 	}
-	_ = intents // future: per-intent body checks live here
+
+	// C-class: per-intent checks for references / depends_on / cycles.
+	// We build a slug set once for the dangling checks; we build a
+	// depends_on adjacency map once for the cycle check.
+	knownSlugs := make(map[string]struct{}, len(intents))
+	for _, in := range intents {
+		knownSlugs[in.Slug] = struct{}{}
+	}
+
+	// dependsOnAdj[from] = list of to-slugs this intent depends on.
+	dependsOnAdj := make(map[string][]string, len(intents))
+	for _, in := range intents {
+		dependsOnAdj[in.Slug] = in.Frontmatter.DependsOn
+	}
+
+	// Cycle detection: for each intent, DFS through depends_onAdj
+	// looking for a back-edge to the start node. Emits one Diag per
+	// cycle entry point (the first time a node in the cycle is visited
+	// as a start). This may report overlapping cycles; v1 prefers
+	// clarity over deduplication.
+	for _, in := range intents {
+		if cycle := detectDependsOnCycle(in.Slug, dependsOnAdj); cycle != nil {
+			diags = append(diags, Diag{
+				Rule:     RuleDependsOnCycle,
+				Where:    in.Slug,
+				Detail:   fmt.Sprintf("depends_on cycle: %s", strings.Join(cycle, " -> ")),
+				Severity: SeverityError,
+			})
+		}
+	}
+
+	// Per-intent checks: self-reference + dangling reference/depends_on.
+	for _, in := range intents {
+		for _, ref := range in.Frontmatter.References {
+			if ref == in.Slug {
+				diags = append(diags, Diag{
+					Rule:     RuleSelfReference,
+					Where:    in.Slug,
+					Detail:   fmt.Sprintf("references contains self (%q)", ref),
+					Severity: SeverityError,
+				})
+				continue
+			}
+			if _, ok := knownSlugs[ref]; !ok {
+				diags = append(diags, Diag{
+					Rule:     RuleDanglingReference,
+					Where:    in.Slug,
+					Detail:   fmt.Sprintf("references non-existent intent %q", ref),
+					Severity: SeverityWarning,
+				})
+			}
+		}
+		for _, dep := range in.Frontmatter.DependsOn {
+			if dep == in.Slug {
+				diags = append(diags, Diag{
+					Rule:     RuleSelfReference,
+					Where:    in.Slug,
+					Detail:   fmt.Sprintf("depends_on contains self (%q)", dep),
+					Severity: SeverityError,
+				})
+				continue
+			}
+			if _, ok := knownSlugs[dep]; !ok {
+				diags = append(diags, Diag{
+					Rule:     RuleDanglingDependsOn,
+					Where:    in.Slug,
+					Detail:   fmt.Sprintf("depends_on non-existent intent %q", dep),
+					Severity: SeverityError,
+				})
+			}
+		}
+	}
 
 	return diags, nil
+}
+
+// detectDependsOnCycle returns a path describing the cycle reachable
+// from start via the depends_onAdj adjacency map, or nil if no cycle
+// is reachable from start. The returned path starts and ends at start
+// (e.g. ["A", "B", "C", "A"] for A->B->C->A).
+//
+// Algorithm: standard iterative DFS with a per-path "on stack" set.
+// We use iterative (not recursive) to avoid blowing the goroutine
+// stack on pathological input (an intent with thousands of depends_on
+// entries pointing at long chains).
+func detectDependsOnCycle(start string, adj map[string][]string) []string {
+	type frame struct {
+		node string
+		idx  int // next child index to explore
+	}
+	path := make([]string, 0, 8)
+	onPath := make(map[string]int, 8) // node -> position in path, or absent
+	stack := []frame{{node: start}}
+
+	for len(stack) > 0 {
+		top := &stack[len(stack)-1]
+		if top.idx == 0 {
+			// First visit to this node on the current path.
+			onPath[top.node] = len(path)
+			path = append(path, top.node)
+		}
+		children, hasChildren := adj[top.node]
+		if !hasChildren || top.idx >= len(children) {
+			// Done with this node; pop.
+			delete(onPath, top.node)
+			path = path[:len(path)-1]
+			stack = stack[:len(stack)-1]
+			continue
+		}
+		next := children[top.idx]
+		top.idx++
+		if pos, seen := onPath[next]; seen {
+			// Found a cycle: extract the loop portion of the path
+			// from `pos` onward, then append `next` to close it.
+			cycle := append([]string{}, path[pos:]...)
+			cycle = append(cycle, next)
+			return cycle
+		}
+		stack = append(stack, frame{node: next})
+	}
+	return nil
 }
 
 // HasErrors reports whether diags contains any diagnostic with error

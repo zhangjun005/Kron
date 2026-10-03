@@ -112,6 +112,28 @@ type Frontmatter struct {
 	// Assumptions are verifiable preconditions that govern this intent's validity.
 	// Optional; empty means this intent has no explicit assumptions.
 	Assumptions []Assumption `yaml:"assumptions,omitempty"`
+
+	// References are soft links to other intents (see-also / inspiration /
+	// recommended reading order). Symmetric in practice — direction is
+	// purely a presentation choice. Deletion of a referenced target does
+	// NOT fail this intent; lint reports a "dangling-reference" warning.
+	//
+	// Slug form only (no .md extension); example: "auth/jwt".
+	// Optional.
+	//
+	// See docs/rfc/2026-10-03-frontmatter-references.md for motivation.
+	References []string `yaml:"references,omitempty"`
+
+	// DependsOn lists hard dependencies — intents that must be read
+	// before this one can be correctly interpreted. Asymmetric: A
+	// depends_on B does NOT imply B depends_on A.
+	//
+	// Deletion of a depended-on target: lint surfaces a
+	// "dangling-depends-on" error, and kron_delete returns the list of
+	// dependents in its response (soft warning, not a hard block in v1).
+	//
+	// Slug form only; must not include the intent's own slug. Optional.
+	DependsOn []string `yaml:"depends_on,omitempty"`
 }
 
 // Intent is one design intent, persisted as .kron/intents/<slug>.md.
