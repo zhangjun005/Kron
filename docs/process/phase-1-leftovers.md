@@ -35,12 +35,11 @@
 
 ### 残余事项
 
-- `docs/implementation/domain-model.md` §2 的 `Frontmatter` 示例未把 `Assumptions` 字段列出
-  （spec 漂移,不影响代码;v1 收尾 PR 中同步更新即可）
-- L1 原本担心的"例子与代码不一致"风险——`docs/how-it-works.md` 与 `intent-structure.md`
-  的示例已与代码一致 ✅
+- ~~`docs/implementation/domain-model.md` §2 的 `Frontmatter` 示例未把 `Assumptions` 字段列出~~ ✅ **已修复**
+  - commit `7a7db14 docs: sync domain-model Frontmatter + L3 status with v1 closure` 已补齐 §2 的 `Assumptions` 字段 + §5 独立小节
+- L1 原本担心的"例子与代码不一致"风险——`docs/how-it-works.md` 与 `intent-structure.md` 的示例已与代码一致 ✅
 
-### 状态：**done**
+### 状态：**done**（2026-10-03 复核：残余事项已全部关闭）
 
 ---
 
