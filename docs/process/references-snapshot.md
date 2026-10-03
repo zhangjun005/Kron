@@ -5,6 +5,8 @@
 > 重新生成方法见下方"如何重新生成此文件"。
 >
 > **注意**：2026-09-27 本批改动（MCP 工具集 8 → 12、新增 [`view-call-tree-intent.md`](../abstractDesign/view-call-tree-intent.md) 与 [`mcp-tool.md`](./mcp-tool.md)）后，**§一 §二 数据已过期**；见 §四 末"已修复的陈旧引用（待重生成）"。
+>
+> **2026-10-03 追加**：phase 2 L1（MCP 9 handler 实现 + `phase-2-leftovers.md` 新建）提交 commit `8e04914`。L1 主要影响 internal 代码，**对文档引用关系图谱的直接影响为零**（未新增文档、未删除文档）。新增待重生成项见 §4.2。
 
 ---
 
@@ -196,6 +198,16 @@
 | [`docs/process/README.md`](./README.md) | 文档地图补 mcp-tool.md | (无新增引用) |
 
 > 重生成命令：见 §五 `scripts/regen-refs-snapshot.sh`（当前未落地，按 §五 手工流程执行）。
+
+### 4.2 2026-10-03 phase 2 L1 后续待重生成项
+
+phase 2 L1（commit `8e04914`，9 个 MCP handler 实现）**对文档引用图谱的直接影响**：
+
+| 文件 | 改动 | 重生成后 §一 期望新增行 |
+|---|---|---|
+| **新增** [`docs/process/phase-2-leftovers.md`](./phase-2-leftovers.md) | (整篇新文件) | 当前入度 0；如 phase-1-leftovers 在主仓被引则同源 |
+| [`docs/process/README.md`](./README.md) | 若需要将 phase-2-leftovers.md 加入"流程文档索引"则 +1 行 | (待 review) |
+| [`AGENTS.md`](../../AGENTS.md) | 未变 — `phase-2-leftovers.md` 不在 AGENTS.md 的 Off-limits / Workflow 引用中 | (无)
 
 ---
 
