@@ -26,10 +26,10 @@ func TestCallerKnown(t *testing.T) {
 		{"cli:stdin", false},
 
 		// Typos and unknowns.
-		{"CLI", false},        // case-sensitive
+		{"CLI", false}, // case-sensitive
 		{"unknown", false},
-		{" cli", false},       // leading space
-		{"mcp ", false},       // trailing space
+		{" cli", false}, // leading space
+		{"mcp ", false}, // trailing space
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
@@ -45,18 +45,18 @@ func TestIsMCPCaller(t *testing.T) {
 		in   string
 		want bool
 	}{
-		{CallerMCP, true},                  // base identity
-		{"mcp:claude-3.7", true},            // canonical derivative
-		{"mcp:cursor", true},                // short derivative
-		{"mcp:", true},                      // bare prefix is still derivative-shaped
+		{CallerMCP, true},        // base identity
+		{"mcp:claude-3.7", true}, // canonical derivative
+		{"mcp:cursor", true},     // short derivative
+		{"mcp:", true},           // bare prefix is still derivative-shaped
 		{CallerCLI, false},
 		{CallerLSP, false},
 		{CallerIDE, false},
 		{CallerGUI, false},
-		{"", false},                         // empty is not MCP
-		{"mcp", true},                       // same as CallerMCP
-		{"mcpx:foo", false},                 // different prefix
-		{"cli:mcp", false},                  // "mcp" suffix does not promote
+		{"", false},         // empty is not MCP
+		{"mcp", true},       // same as CallerMCP
+		{"mcpx:foo", false}, // different prefix
+		{"cli:mcp", false},  // "mcp" suffix does not promote
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
