@@ -130,6 +130,10 @@ type intentWire struct {
 // intentFrontmatterWire is the on-the-wire frontmatter shape. We
 // keep the same field names as the YAML (snake_case) so a client
 // reading one can read the other without renaming.
+//
+// References and DependsOn are echoed here for kron_get; kron_list's
+// summary (intentSummaryWire) intentionally omits them to keep the
+// list response small. See docs/implementation/mcp.md §2.
 type intentFrontmatterWire struct {
 	Symbol      []string     `json:"symbol,omitempty"`
 	CreatedBy   string       `json:"created_by"`
@@ -137,6 +141,8 @@ type intentFrontmatterWire struct {
 	Reviewers   []string     `json:"reviewers,omitempty"`
 	Status      string       `json:"status,omitempty"`
 	Assumptions []assumeWire `json:"assumptions,omitempty"`
+	References  []string     `json:"references,omitempty"`
+	DependsOn   []string     `json:"depends_on,omitempty"`
 }
 
 // assumeWire is the on-the-wire assumption shape. Assumes without a
@@ -172,6 +178,8 @@ func intentFromModel(in *model.Intent) intentWire {
 			Reviewers:   in.Frontmatter.Reviewers,
 			Status:      string(in.Frontmatter.Status),
 			Assumptions: assumesToWire(in.Frontmatter.Assumptions),
+			References:  in.Frontmatter.References,
+			DependsOn:   in.Frontmatter.DependsOn,
 		},
 		Body:       in.Body,
 		SourcePath: in.SourcePath,

@@ -19,13 +19,23 @@ import (
 //	out: {
 //	  intent: IntentSummary,
 //	  incoming_anchors:    [{file_path, line}],
-//	  depends_on_intents:  [slug]   // slugs whose Symbol set intersects this intent's
+//	  references:          [slug]   // symmetric soft links (other intents' references to this one)
+//	  prerequisites:       [slug]   // depends_on union, with symbol-inferred dependencies
+//	                              // filtered out when an explicit depends_on exists for the
+//	                              // same symbol (explicit wins)
 //	}
 //
 // Incoming anchors are gathered by walking the repo and finding every
-// @kron:intent <slug> line that references this intent. "Depends on" is
-// inferred from shared symbols: any other intent whose Frontmatter.Symbol
-// contains any symbol this intent lists is a candidate.
+// @kron:intent <slug> line that references this intent.
+//
+// "References" is the reverse view: which other intents list this
+// intent in their Frontmatter.References. Symmetric / soft.
+//
+// "Prerequisites" is the union of:
+//   - this intent's own Frontmatter.DependsOn (hard, explicit)
+//   - slugs whose Frontmatter.Symbol set intersects this intent's
+//     (symbol-inferred, soft — but only added if NOT already covered
+//     by an explicit depends_on for the same symbol)
 //
 // Returns ErrIntentNotFound (-32004) if slug does not exist.
 func handleImpact(root string) toolHandler {
@@ -61,13 +71,41 @@ func handleImpact(root string) toolHandler {
 			return nil, fmt.Errorf("kron_impact: load: %w", err)
 		}
 
-		// Build a symbol → slugs reverse index. We only need slugs
-		// that overlap with target's symbol set.
+		// references: reverse soft-link view — which other intents
+		// have this slug in their Frontmatter.References?
+		references := make([]string, 0)
+		for _, in := range all {
+			if in.Slug == args.Slug {
+				continue
+			}
+			for _, ref := range in.Frontmatter.References {
+				if ref == args.Slug {
+					references = append(references, in.Slug)
+					break
+				}
+			}
+		}
+		sort.Strings(references)
+
+		// prerequisites: explicit depends_on (always) ∪ symbol-inferred
+		// (only when not already explicit). The "explicit wins" rule
+		// avoids double-listing: if A.depends_on B explicitly, the
+		// symbol-inferred "B" is not also added.
+		explicitDeps := make(map[string]struct{}, len(target.Frontmatter.DependsOn))
+		for _, d := range target.Frontmatter.DependsOn {
+			explicitDeps[d] = struct{}{}
+		}
+		prereqSet := make(map[string]struct{}, len(explicitDeps))
+		for d := range explicitDeps {
+			prereqSet[d] = struct{}{}
+		}
+
+		// Symbol-inferred: any other intent whose symbol set intersects
+		// target's symbol set becomes a candidate prerequisite.
 		targetSyms := make(map[string]struct{}, len(target.Frontmatter.Symbol))
 		for _, s := range target.Frontmatter.Symbol {
 			targetSyms[s] = struct{}{}
 		}
-		var dependsOn []string
 		if len(targetSyms) > 0 {
 			for _, in := range all {
 				if in.Slug == args.Slug {
@@ -75,13 +113,18 @@ func handleImpact(root string) toolHandler {
 				}
 				for _, s := range in.Frontmatter.Symbol {
 					if _, ok := targetSyms[s]; ok {
-						dependsOn = append(dependsOn, in.Slug)
+						prereqSet[in.Slug] = struct{}{}
 						break
 					}
 				}
 			}
-			sort.Strings(dependsOn)
 		}
+
+		prerequisites := make([]string, 0, len(prereqSet))
+		for s := range prereqSet {
+			prerequisites = append(prerequisites, s)
+		}
+		sort.Strings(prerequisites)
 
 		// Walk the repo and filter to anchors pointing at our slug.
 		var incoming []anchorRefWire
@@ -109,18 +152,32 @@ func handleImpact(root string) toolHandler {
 			}
 		}
 
+		// Stable order for downstream tests / agents: by (file_path,
+		// line). parser.ScanAnchors walks the repo in a directory-order
+		// traversal which is usually stable but not guaranteed by the
+		// stdlib — sort defensively so kron_impact output never
+		// depends on filepath.Walk internals.
+		sort.SliceStable(incoming, func(i, j int) bool {
+			if incoming[i].FilePath != incoming[j].FilePath {
+				return incoming[i].FilePath < incoming[j].FilePath
+			}
+			return incoming[i].Line < incoming[j].Line
+		})
+
 		return impactResponse{
-			Intent:           intentSummaryFromIntent(target),
-			IncomingAnchors:  incoming,
-			DependsOnIntents: dependsOn,
+			Intent:          intentSummaryFromIntent(target),
+			IncomingAnchors: incoming,
+			References:      references,
+			Prerequisites:   prerequisites,
 		}, nil
 	}
 }
 
 type impactResponse struct {
-	Intent           intentSummaryWire `json:"intent"`
-	IncomingAnchors  []anchorRefWire   `json:"incoming_anchors"`
-	DependsOnIntents []string          `json:"depends_on_intents"`
+	Intent          intentSummaryWire `json:"intent"`
+	IncomingAnchors []anchorRefWire   `json:"incoming_anchors"`
+	References      []string          `json:"references"`
+	Prerequisites   []string          `json:"prerequisites"`
 }
 
 type anchorRefWire struct {
