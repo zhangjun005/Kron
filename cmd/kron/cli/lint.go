@@ -26,11 +26,12 @@ func runLint(args []string, out, errOut io.Writer) error {
 	fs := flag.NewFlagSet("lint", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "Usage: kron lint [-CWD <root>] [-reporter text|json]")
+		fmt.Fprintln(errOut, "Usage: kron lint [-CWD <root>] [-reporter text|json] [-stale-days N]")
 		fs.PrintDefaults()
 	}
 	cwd := fs.String("CWD", "", "Repository root (default: current working directory)")
 	reporter := fs.String("reporter", "text", "Output format: text (default) or json")
+	staleDays := fs.Int("stale-days", 0, "Staleness threshold in days for active intents (default 90; -1 disables S-class rules)")
 	if err := fs.Parse(args); err != nil {
 		return errUsage
 	}
@@ -41,7 +42,9 @@ func runLint(args []string, out, errOut io.Writer) error {
 		return newExitError(exitInternal, err.Error())
 	}
 
-	diags, err := lint.Run(context.Background(), root)
+	diags, err := lint.RunWith(context.Background(), root, lint.RunOptions{
+		StaleDaysThreshold: *staleDays,
+	})
 	if err != nil {
 		fmt.Fprintln(errOut, "kron lint:", err)
 		return newExitError(exitInternal, err.Error())

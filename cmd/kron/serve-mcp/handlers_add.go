@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/xxx/kron/internal/identity"
 	"github.com/xxx/kron/internal/model"
 	"github.com/xxx/kron/internal/parser"
 	"github.com/xxx/kron/internal/store"
@@ -59,10 +59,11 @@ func HandleAdd(ctx context.Context, _ *mcp.CallToolRequest, in AddInput) (
 		return nil, AddOutput{}, fmt.Errorf("%w: %s", model.ErrIntentExists, in.Slug)
 	}
 
-	handle := detectGitUser()
-	if handle == "" {
-		handle = "agent:unknown"
-	}
+	// Identity is resolved via internal/identity: prefer an explicit
+	// client-derived handle, fall back to git config user.name, fall
+	// back to "agent:unknown". Identity is an attribute, not an
+	// authz gate (architecture.md §2.3).
+	handle := identity.Handle("", identity.GitUser())
 
 	fm := model.Frontmatter{
 		CreatedBy: handle,
@@ -91,8 +92,8 @@ func HandleAdd(ctx context.Context, _ *mcp.CallToolRequest, in AddInput) (
 
 // scaffoldedBody produces the default Markdown body for a freshly
 // scaffolded intent. Mirrors the CLI `kron add` skeleton from
-// cmd/kron/cli/add.go:defaultIntentBody, minus the trailing frontmatter
-// reminder (which is on the frontmatter side, not the body).
+// cmd/kron/cli/add.go (which also delegates the body template
+// responsibility up the stack when the template becomes shareable).
 func scaffoldedBody(slug string) string {
 	title := slug
 	if i := strings.LastIndex(slug, "/"); i >= 0 {
@@ -101,20 +102,4 @@ func scaffoldedBody(slug string) string {
 	title = strings.ReplaceAll(title, "-", " ")
 
 	return fmt.Sprintf("# %s\n\n> One-line summary of this intent's decision.\n\n## Why\n\nRecord the reason for this decision.\n\n## Trade-offs\n\nWhat was chosen and what was given up.\n", title)
-}
-
-// detectGitUser mirrors cmd/kron/cli/add.go:detectGitUser. Copied here
-// because cmd/kron/cli is a sibling access layer and cannot be imported
-// (architecture.md §〇 铁律 #3).
-func detectGitUser() string {
-	cmd := exec.Command("git", "config", "user.name")
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	name := strings.TrimSpace(string(out))
-	if name == "" {
-		return ""
-	}
-	return "@" + name
 }

@@ -3,11 +3,10 @@ package servemcp
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/xxx/kron/internal/model"
+	"github.com/xxx/kron/internal/lint"
 	"github.com/xxx/kron/internal/store"
 )
 
@@ -21,14 +20,16 @@ import (
 //	  expired_assumptions:   [{slug, assumption_id, expires_at, days_overdue}]
 //	}
 //
-// superseded_candidates: intents whose status is "active" but whose
-// updated_at is older than days_threshold days (i.e. they look stale
-// and may be worth superseding).
+// superseded_candidates: active intents whose UpdatedAt is older than
+// days_threshold days. Same definition as lint.RuleStaleSupersededCandidate.
 //
-// expired_assumptions: hard-severity assumptions with an ExpiresAt
-// in the past and no verified_at (or verified_at before the expiry).
-// Soft assumptions are intentionally excluded — the spec only counts
-// "硬假设" (hard assumptions) for staleness alerts.
+// expired_assumptions: hard-severity assumptions with ExpiresAt in the
+// past and no verified_at (or verified_at before the expiry). Same
+// definition as lint.RuleExpiredHardAssumption.
+//
+// Implementation is a thin projection over internal/lint.ComputeStaleReport:
+// the staleness rules live in internal/lint so `kron lint` and
+// `kron_stale` produce the same view from the same walk.
 func HandleStale(ctx context.Context, _ *mcp.CallToolRequest, in StaleInput) (
 	*mcp.CallToolResult, StaleOutput, error,
 ) {
@@ -37,8 +38,9 @@ func HandleStale(ctx context.Context, _ *mcp.CallToolRequest, in StaleInput) (
 	}
 	root := repoRootFrom(ctx)
 
-	if in.DaysThreshold <= 0 {
-		in.DaysThreshold = 90
+	threshold := in.DaysThreshold
+	if threshold <= 0 {
+		threshold = lint.StaleDaysDefault
 	}
 
 	r, err := store.NewReader(root)
@@ -50,48 +52,17 @@ func HandleStale(ctx context.Context, _ *mcp.CallToolRequest, in StaleInput) (
 		return nil, StaleOutput{}, fmt.Errorf("kron_stale: load: %w", err)
 	}
 
-	now := time.Now().UTC()
-	cutoff := now.AddDate(0, 0, -in.DaysThreshold)
+	report := lint.ComputeStaleReport(all, lint.RunOptions{
+		StaleDaysThreshold: threshold,
+	})
 
-	var superseded []string
-	var expired []ExpiredAssumption
-
-	for _, intent := range all {
-		if intent.Frontmatter.Status == model.StatusActive &&
-			!intent.Frontmatter.UpdatedAt.IsZero() &&
-			intent.Frontmatter.UpdatedAt.Before(cutoff) {
-			superseded = append(superseded, intent.Slug)
-		}
-
-		for _, a := range intent.Frontmatter.Assumptions {
-			if a.Severity != model.SeverityHard || a.ExpiresAt == "" {
-				continue
-			}
-			exp, err := time.Parse(time.RFC3339, a.ExpiresAt)
-			if err != nil || !exp.Before(now) {
-				continue
-			}
-			// Verified after expiry? Then not stale.
-			if a.VerifiedAt != "" {
-				if v, err := time.Parse(time.RFC3339, a.VerifiedAt); err == nil && v.After(exp) {
-					continue
-				}
-			}
-			daysOverdue := int(now.Sub(exp).Hours() / 24)
-			expired = append(expired, ExpiredAssumption{
-				Slug:         intent.Slug,
-				AssumptionID: a.ID,
-				ExpiresAt:    a.ExpiresAt,
-				DaysOverdue:  daysOverdue,
-			})
-		}
-	}
-
+	superseded := report.SupersededCandidates
 	if superseded == nil {
 		superseded = []string{}
 	}
+	expired := report.ExpiredAssumptions
 	if expired == nil {
-		expired = []ExpiredAssumption{}
+		expired = []lint.ExpiredAssumption{}
 	}
 
 	return nil, StaleOutput{

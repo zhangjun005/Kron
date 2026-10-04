@@ -2,12 +2,16 @@ package lint
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/xxx/kron/internal/store"
 )
 
 // writeFile creates a file at <root>/<rel> with content, creating
@@ -165,6 +169,8 @@ func TestRuleConstantsAreStable(t *testing.T) {
 	assert.Equal(t, Rule("dangling-depends-on"), RuleDanglingDependsOn)
 	assert.Equal(t, Rule("depends-on-cycle"), RuleDependsOnCycle)
 	assert.Equal(t, Rule("self-reference"), RuleSelfReference)
+	assert.Equal(t, Rule("stale-superseded-candidate"), RuleStaleSupersededCandidate)
+	assert.Equal(t, Rule("expired-hard-assumption"), RuleExpiredHardAssumption)
 }
 
 // --- C-class rules (intent → intent frontmatter relations) -----------
@@ -302,3 +308,211 @@ depends_on:
 	require.NoError(t, err)
 	assert.Empty(t, diags)
 }
+
+// --- S-class rules (lifecycle staleness) ------------------------------
+//
+// Use opts.WithNow to pin the reference time so we don't depend on
+// real wall-clock arithmetic (e.g., "100 days before time.Now()"
+// would silently shift assertions across CI runs).
+
+func TestRun_StaleSupersededCandidate_Fires(t *testing.T) {
+	// An active intent whose UpdatedAt is older than the threshold
+	// must be reported as a superseded candidate.
+	dir := t.TempDir()
+	// updated_at 200 days in the past; threshold 90 → stale.
+	oldTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	now := oldTime.AddDate(0, 0, 200)
+	writeFile(t, dir, ".kron/intents/old-active.md", fmt.Sprintf(`<!-- kron:frontmatter -->
+created_by: "@alice"
+updated_at: %s
+status: active
+<!-- /kron:frontmatter -->
+
+# Old active
+`, oldTime.Format(time.RFC3339)))
+
+	diags, err := RunWith(context.Background(), dir, RunOptions{}.WithNow(now))
+	require.NoError(t, err)
+	require.Len(t, diags, 1)
+	assert.Equal(t, RuleStaleSupersededCandidate, diags[0].Rule)
+	assert.Equal(t, SeverityWarning, diags[0].Severity)
+	assert.Equal(t, "old-active", diags[0].Where)
+}
+
+func TestRun_StaleSupersededCandidate_SkipsDraftAndSuperseded(t *testing.T) {
+	// Draft and Superseded statuses are not flagged, even if old.
+	dir := t.TempDir()
+	oldTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	now := oldTime.AddDate(0, 0, 200)
+	for _, status := range []string{"draft", "superseded"} {
+		writeFile(t, dir, fmt.Sprintf(".kron/intents/%s.md", status), fmt.Sprintf(`<!-- kron:frontmatter -->
+created_by: "@alice"
+updated_at: %s
+status: %s
+<!-- /kron:frontmatter -->
+
+# %s
+`, oldTime.Format(time.RFC3339), status, status))
+	}
+	diags, err := RunWith(context.Background(), dir, RunOptions{}.WithNow(now))
+	require.NoError(t, err)
+	assert.Empty(t, diags, "draft and superseded statuses must not trigger the staleness rule")
+}
+
+func TestRun_StaleSupersededCandidate_DisabledByNegativeThreshold(t *testing.T) {
+	// Negative StaleDaysThreshold opts the whole S-class out.
+	dir := t.TempDir()
+	oldTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	now := oldTime.AddDate(0, 0, 200)
+	writeFile(t, dir, ".kron/intents/old.md", fmt.Sprintf(`<!-- kron:frontmatter -->
+created_by: "@alice"
+updated_at: %s
+status: active
+<!-- /kron:frontmatter -->
+
+# Old
+`, oldTime.Format(time.RFC3339)))
+	diags, err := RunWith(context.Background(), dir, RunOptions{StaleDaysThreshold: -1}.WithNow(now))
+	require.NoError(t, err)
+	assert.Empty(t, diags)
+}
+
+func TestRun_ExpiredHardAssumption_Fires(t *testing.T) {
+	// A hard assumption with ExpiresAt in the past and no
+	// post-expiry verification must be reported.
+	dir := t.TempDir()
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	expiry := now.AddDate(0, 0, -30) // 30 days ago
+	writeFile(t, dir, ".kron/intents/has-expiry.md", fmt.Sprintf(`<!-- kron:frontmatter -->
+created_by: "@alice"
+updated_at: 2026-01-01T00:00:00Z
+assumptions:
+  - id: region-stays-single
+    text: single region
+    severity: hard
+    expires_at: %s
+<!-- /kron:frontmatter -->
+
+# Has expiry
+`, expiry.Format(time.RFC3339)))
+
+	diags, err := RunWith(context.Background(), dir, RunOptions{}.WithNow(now))
+	require.NoError(t, err)
+	require.Len(t, diags, 1)
+	assert.Equal(t, RuleExpiredHardAssumption, diags[0].Rule)
+	assert.Equal(t, SeverityWarning, diags[0].Severity)
+	assert.Equal(t, "has-expiry", diags[0].Where)
+	assert.Contains(t, diags[0].Detail, "region-stays-single")
+}
+
+func TestRun_ExpiredHardAssumption_VerifiedAfterExpiry_NoDiag(t *testing.T) {
+	// If VerifiedAt is after the expiry, the assumption is current.
+	dir := t.TempDir()
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	expiry := now.AddDate(0, 0, -30)
+	verified := now.AddDate(0, 0, -10) // after expiry
+	writeFile(t, dir, ".kron/intents/recently-verified.md", fmt.Sprintf(`<!-- kron:frontmatter -->
+created_by: "@alice"
+updated_at: 2026-01-01T00:00:00Z
+assumptions:
+  - id: region-stays-single
+    text: single region
+    severity: hard
+    expires_at: %s
+    verified_at: %s
+    verified_by: "@alice"
+<!-- /kron:frontmatter -->
+
+# Verified after expiry
+`, expiry.Format(time.RFC3339), verified.Format(time.RFC3339)))
+
+	diags, err := RunWith(context.Background(), dir, RunOptions{}.WithNow(now))
+	require.NoError(t, err)
+	assert.Empty(t, diags)
+}
+
+func TestRun_ExpiredHardAssumption_SoftAssumptionSkipped(t *testing.T) {
+	// Soft assumptions past expiry do NOT trigger the rule.
+	dir := t.TempDir()
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	expiry := now.AddDate(0, 0, -30)
+	writeFile(t, dir, ".kron/intents/soft-only.md", fmt.Sprintf(`<!-- kron:frontmatter -->
+created_by: "@alice"
+updated_at: 2026-01-01T00:00:00Z
+assumptions:
+  - id: dau-under-10k
+    text: DAU under 10k
+    severity: soft
+    expires_at: %s
+<!-- /kron:frontmatter -->
+
+# Soft
+`, expiry.Format(time.RFC3339)))
+
+	diags, err := RunWith(context.Background(), dir, RunOptions{}.WithNow(now))
+	require.NoError(t, err)
+	assert.Empty(t, diags)
+}
+
+func TestComputeStaleReport_MatchesDiagsView(t *testing.T) {
+	// ComputeStaleReport's structured view must agree with the
+	// Diag-shaped view produced by runStalenessRules for the same
+	// input. This is the contract MCP kron_stale and CLI kron lint
+	// rely on.
+	dir := t.TempDir()
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	oldTime := now.AddDate(0, 0, -200)
+	expiry := now.AddDate(0, 0, -30)
+	writeFile(t, dir, ".kron/intents/stale-active.md", fmt.Sprintf(`<!-- kron:frontmatter -->
+created_by: "@alice"
+updated_at: %s
+status: active
+<!-- /kron:frontmatter -->
+
+# Stale active
+`, oldTime.Format(time.RFC3339)))
+	writeFile(t, dir, ".kron/intents/has-expiry.md", fmt.Sprintf(`<!-- kron:frontmatter -->
+created_by: "@alice"
+updated_at: 2026-01-01T00:00:00Z
+assumptions:
+  - id: x
+    text: x
+    severity: hard
+    expires_at: %s
+<!-- /kron:frontmatter -->
+
+# Has expiry
+`, expiry.Format(time.RFC3339)))
+
+	opts := RunOptions{}.WithNow(now)
+	diags, err := RunWith(context.Background(), dir, opts)
+	require.NoError(t, err)
+
+	// Recompute via store.LoadAll + ComputeStaleReport.
+	r, err := store.NewReader(dir)
+	require.NoError(t, err)
+	all, err := r.LoadAll(context.Background())
+	require.NoError(t, err)
+	report := ComputeStaleReport(all, opts)
+
+	// Slug from S1 in diags matches SupersededCandidates.
+	var diagsStale []string
+	for _, d := range diags {
+		if d.Rule == RuleStaleSupersededCandidate {
+			diagsStale = append(diagsStale, d.Where)
+		}
+	}
+	assert.Equal(t, report.SupersededCandidates, diagsStale)
+
+	// ExpiredAssumptions count matches diags count for S2.
+	var diagsS2 int
+	for _, d := range diags {
+		if d.Rule == RuleExpiredHardAssumption {
+			diagsS2++
+		}
+	}
+	assert.Len(t, report.ExpiredAssumptions, diagsS2)
+}
+
+// DO NOT REMOVE the closing blank line below; it keeps the file
+// terminating with a newline as gofmt requires.
