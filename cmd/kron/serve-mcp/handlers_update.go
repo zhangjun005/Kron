@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"gopkg.in/yaml.v3"
 
 	"github.com/xxx/kron/internal/model"
 	"github.com/xxx/kron/internal/parser"
@@ -79,10 +78,10 @@ func HandleUpdate(ctx context.Context, _ *mcp.CallToolRequest, in UpdateInput) (
 		intent.Body = *in.Body
 	}
 	if in.References != nil {
-		intent.Frontmatter.References = dedupStrings(in.References)
+		intent.Frontmatter.References = parser.DedupStrings(in.References)
 	}
 	if in.DependsOn != nil {
-		intent.Frontmatter.DependsOn = dedupStrings(in.DependsOn)
+		intent.Frontmatter.DependsOn = parser.DedupStrings(in.DependsOn)
 	}
 
 	// Always bump updated_at on any write so downstream observers
@@ -108,45 +107,15 @@ func HandleUpdate(ctx context.Context, _ *mcp.CallToolRequest, in UpdateInput) (
 	return nil, UpdateOutput{OK: true, Path: model.IntentPath(in.Slug)}, nil
 }
 
-// dedupStrings returns a slice with duplicate entries removed,
-// preserving the order of first appearance. nil / empty inputs
-// pass through unchanged.
-//
-// This mirrors RFC 2026-10-03-frontmatter-references §3.2: "重复由
-// YAML 解析层自动忽略". We apply the same rule to the patch layer so
-// `kron_update {"references": ["a","b","a"]}` doesn't write back a
-// list that disagrees with what YAML round-trip would yield.
-//
-// Reference equality is exact-string; we deliberately do not trim or
-// normalise whitespace because parser.ValidateSlug already rejects
-// entries that wouldn't round-trip cleanly through `ValidateSlug`.
-func dedupStrings(in []string) []string {
-	if len(in) < 2 {
-		return in
-	}
-	seen := make(map[string]struct{}, len(in))
-	out := make([]string, 0, len(in))
-	for _, s := range in {
-		if _, dup := seen[s]; dup {
-			continue
-		}
-		seen[s] = struct{}{}
-		out = append(out, s)
-	}
-	return out
-}
-
-// validateFrontmatterShape round-trips fm through parser's YAML
-// validator to enforce the same schema rules that parser.ParseFrontmatter
-// applies on load. By doing it after the patch we catch enum violations
-// (status, assumption severity) before they reach the on-disk file.
+// validateFrontmatterShape re-runs parser.ValidateFrontmatter on the
+// patched Frontmatter so a malformed update (invalid status enum,
+// missing required field, etc.) is rejected BEFORE the on-disk file
+// is overwritten. Self-reference (an intent listing its own slug in
+// References or DependsOn) is not caught by the YAML round-trip —
+// that check needs the owner slug, which we add here.
 func validateFrontmatterShape(slug string, fm *model.Frontmatter) error {
-	yml, err := yaml.Marshal(fm)
-	if err != nil {
-		return fmt.Errorf("yaml marshal: %w", err)
-	}
-	if _, err := parser.ParseFrontmatter(yml); err != nil {
-		return err
+	if err := parser.ValidateFrontmatter(fm); err != nil {
+		return fmt.Errorf("%w: %v", model.ErrFrontmatterInvalid, err)
 	}
 	for _, r := range fm.References {
 		if r == slug {

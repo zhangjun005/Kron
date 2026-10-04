@@ -25,6 +25,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/xxx/kron/internal/parser"
 )
 
 // sep normalises path separators so cross-platform tests can assert
@@ -327,7 +329,7 @@ func TestDedupStrings(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := dedupStrings(tc.in)
+			got := parser.DedupStrings(tc.in)
 			assert.Equal(t, tc.want, got)
 		})
 	}

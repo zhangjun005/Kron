@@ -206,6 +206,68 @@ func ParseFrontmatter(raw []byte) (model.Frontmatter, error) {
 	return fm, nil
 }
 
+// ValidateFrontmatter re-runs the same shape checks ParseFrontmatter
+// applies (required fields, status enum, assumption shape, slug
+// validity) on a Go-level Frontmatter. The implementation is a
+// marshal → parse round-trip: serialise the in-memory struct back
+// to YAML and feed it to ParseFrontmatter, then discard the result.
+//
+// The round-trip is intentionally simple. The alternative — refactor
+// validateFrontmatter to take a *model.Frontmatter and call it from
+// both ParseFrontmatter and here — would duplicate the field list
+// across two functions and risk drift. The marshal → parse path
+// keeps the single source of truth in ParseFrontmatter.
+//
+// Use this when an access layer mutates an Intent in memory (e.g.
+// kron_update's PATCH semantics) and wants to re-validate the
+// patched shape BEFORE persisting, so a malformed update does not
+// reach the on-disk file.
+func ValidateFrontmatter(fm *model.Frontmatter) error {
+	if fm == nil {
+		return errors.New("frontmatter is nil")
+	}
+	yml, err := yaml.Marshal(fm)
+	if err != nil {
+		return fmt.Errorf("yaml marshal: %w", err)
+	}
+	if _, err := ParseFrontmatter(yml); err != nil {
+		return err
+	}
+	return nil
+}
+
+// DedupStrings returns a slice with duplicate entries removed,
+// preserving the order of first appearance. nil / empty inputs
+// pass through unchanged. The result is always either nil (in)
+// or a fresh slice (out) — the input is never aliased.
+//
+// Reference equality is exact-string; we deliberately do not trim
+// or normalise whitespace because parser.ValidateSlug already
+// rejects entries that wouldn't round-trip cleanly.
+//
+// Sunk from cmd/kron/serve-mcp/handlers_update.go:dedupStrings so
+// update and any future access layer (CLI, IDE) share the same
+// dedup semantics. The original hand-rolled comment cited RFC
+// 2026-10-03-frontmatter-references §3.2 ("duplicates are silently
+// ignored by the YAML layer"); applying the same rule at the patch
+// layer means `kron_update {"references": ["a","b","a"]}` writes
+// back a list that agrees with what YAML round-trip would yield.
+func DedupStrings(in []string) []string {
+	if len(in) < 2 {
+		return in
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if _, dup := seen[s]; dup {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
 // SerializeMarkdown re-emits an Intent as a .md file using the sentinel-wrapped
 // frontmatter format:
 //

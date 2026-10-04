@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -97,28 +96,17 @@ func HandleIntentDensity(ctx context.Context, _ *mcp.CallToolRequest, _ IntentDe
 // source files that are > 50 lines long and have zero anchors. The
 // 50-line threshold matches the CLI intent-coverage gate; see
 // docs/process/lint-rule.md for the rationale.
+//
+// The walk uses parser.WalkSourceFiles so the skip-list (default
+// ignored directories) and the binary-file heuristic are shared with
+// lint.Run → parser.ScanAnchors. Previously this function carried
+// its own copy of both, which drifted twice (the lint-side list
+// added "dist" but density's local list did not, etc.).
 func scanOrphanFiles(root string, anchored map[string]struct{}) ([]string, error) {
 	const lineThreshold = 50
-	skipDirs := map[string]struct{}{
-		".git": {}, ".kron": {}, "node_modules": {}, "vendor": {},
-		"dist": {}, "bin": {}, "target": {}, ".idea": {}, ".vscode": {},
-	}
-
 	var orphans []string
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if d.IsDir() {
-			if _, skip := skipDirs[d.Name()]; skip {
-				return filepath.SkipDir
-			}
-			return nil
-		}
+	err := parser.WalkSourceFiles(root, func(path string) error {
 		if _, ok := anchored[path]; ok {
-			return nil
-		}
-		if isBinary, _ := quickBinaryCheck(path); isBinary {
 			return nil
 		}
 		n, err := countLines(path, lineThreshold+1)
@@ -137,22 +125,6 @@ func scanOrphanFiles(root string, anchored map[string]struct{}) ([]string, error
 	}
 	sort.Strings(orphans)
 	return orphans, nil
-}
-
-func quickBinaryCheck(path string) (bool, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-	var head [512]byte
-	n, _ := io.ReadFull(f, head[:])
-	for i := 0; i < n; i++ {
-		if head[i] == 0 {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 func countLines(path string, capLines int) (int, error) {

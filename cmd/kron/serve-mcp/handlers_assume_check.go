@@ -3,7 +3,6 @@ package servemcp
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -61,17 +60,19 @@ func HandleAssumeCheck(ctx context.Context, _ *mcp.CallToolRequest, in AssumeChe
 	// is cheap for source trees <10k files.
 	var slugsOfInterest map[string]struct{}
 	if in.FilePath != "" {
-		dir := filepath.Dir(in.FilePath)
-		anchors, err := parser.ScanAnchors(dir)
+		// parser.SlugsForFile opens the file directly and returns
+		// the set of intent slugs that file anchors (sorted,
+		// deduplicated). It replaces the prior "walk the parent
+		// directory, filter by FilePath" hack which was both slow
+		// (unnecessary walk) and platform-fragile (path-separator
+		// comparisons).
+		slugs, err := parser.SlugsForFile(in.FilePath)
 		if err != nil {
-			return nil, AssumeCheckOutput{}, fmt.Errorf("kron_assume_check: scan %s: %w", dir, err)
+			return nil, AssumeCheckOutput{}, fmt.Errorf("kron_assume_check: scan %s: %w", in.FilePath, err)
 		}
-		abs, _ := filepath.Abs(in.FilePath)
-		slugsOfInterest = make(map[string]struct{})
-		for _, a := range anchors {
-			if a.FilePath == abs || a.FilePath == in.FilePath {
-				slugsOfInterest[a.Slug] = struct{}{}
-			}
+		slugsOfInterest = make(map[string]struct{}, len(slugs))
+		for _, s := range slugs {
+			slugsOfInterest[s] = struct{}{}
 		}
 	}
 
