@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/xxx/kron/internal/identity"
@@ -81,7 +80,7 @@ func runAdd(args []string, out, errOut io.Writer) error {
 			CreatedBy: handle,
 			UpdatedAt: time.Now().UTC(),
 		},
-		Body: defaultIntentBody(slug),
+		Body: parser.IntentBodyTemplateCN(slug),
 	}
 	if err := w.Write(context.Background(), intent); err != nil {
 		fmt.Fprintln(errOut, "kron add:", err)
@@ -92,19 +91,11 @@ func runAdd(args []string, out, errOut io.Writer) error {
 	return nil
 }
 
-// defaultIntentBody produces the Markdown body for a freshly scaffolded
-// intent. The body follows the §三 skeleton from
-// docs/abstractDesign/intent-structure.md (Title + one-line summary +
-// Why + Trade-offs + Assumptions pointer). The English template is
-// also used by the MCP `kron_add` handler (handlers_add.go:scaffoldedBody);
-// the two access layers render the same body so the on-disk shape
-// doesn't depend on which access layer wrote it.
+// defaultIntentBody delegates to parser.IntentBodyTemplateCN. The
+// wrapper is kept so the CLI's call site (runAdd) reads naturally;
+// the actual template lives in internal/parser where it can be
+// shared with any future access layer (the English variant is
+// parser.IntentBodyTemplate).
 func defaultIntentBody(slug string) string {
-	title := slug
-	if i := strings.LastIndex(slug, "/"); i >= 0 {
-		title = slug[i+1:]
-	}
-	title = strings.ReplaceAll(title, "-", " ")
-
-	return fmt.Sprintf("# %s\n\n> One-line summary of this intent's decision.\n\n## 为什么（Why）\n记录当初为何如此决策。\n\n## 权衡（Trade-offs）\n选择与放弃的考量。\n\n<!-- 边界假设写在 frontmatter 的 assumptions 字段里，不在正文重复 -->\n", title)
+	return parser.IntentBodyTemplateCN(slug)
 }
