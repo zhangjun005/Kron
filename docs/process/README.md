@@ -15,6 +15,7 @@
 | [`mcp-tool.md`](./mcp-tool.md) | 想给 `kron serve-mcp` 增加新 MCP 工具 |
 | [`migrate.md`](./migrate.md) | 想修改 frontmatter schema |
 | [`references-snapshot.md`](./references-snapshot.md) | 想看当前 md 之间实际引用关系（快照而非规则） |
+| [`phase-archive/`](./phase-archive/) | 历史 phase 遗留事项归档（**不**作为待办清单使用；详见该目录 README） |
 
 ---
 

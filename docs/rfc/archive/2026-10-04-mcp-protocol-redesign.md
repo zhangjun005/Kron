@@ -1,8 +1,8 @@
 # MCP 协议层重设计:严格 2025-06-18 兼容
 
-> 状态:规划中 (2026-10-04)
-> 关联:`docs/process/mcp-protocol.md` (差距清单)、`docs/rfc/2026-10-03-frontmatter-references.md` (业务层 RFC)
-> 目标:让 Kron MCP server 能被 Claude Desktop / Cursor / MCP Inspector 标准接入。
+> **状态:SUPERSEDED** — 本 RFC 的"5 commit 手写协议层"路线被 [`../2026-10-04-mcp-sdk-adoption.md`](../2026-10-04-mcp-sdk-adoption.md) §0 (commit `55820ed`) 取代：改用官方 `modelcontextprotocol/go-sdk` SDK，零手写协议代码。本 RFC 留作**历史决策记录**。
+> 关联:`docs/process/mcp-protocol.md` (差距清单 — 实施后已大部分解决)、[`../2026-10-03-frontmatter-references.md`](../archive/2026-10-03-frontmatter-references.md) (业务层 RFC — 已落地)
+> 目标:让 Kron MCP server 能被 Claude Desktop / Cursor / MCP Inspector 标准接入。**该目标已通过 SDK 方案达成**。
 
 ---
 

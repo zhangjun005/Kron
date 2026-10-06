@@ -1,7 +1,7 @@
 # MCP SDK 选型:go-sdk vs 手写(2026-10-04 调研)
 
-> 状态:待决策
-> 关联:`docs/rfc/2026-10-04-mcp-protocol-redesign.md` (5 commit 手写计划,被本文挑战)
+> **状态:已采纳** — 官方 SDK (`github.com/modelcontextprotocol/go-sdk/mcp`) 已采用；实施见 [`2026-10-04-mcp-sdk-adoption.md`](./2026-10-04-mcp-sdk-adoption.md)，落地于 commit `55820ed refactor(serve-mcp): adopt official go-sdk` (2026-10-04)。本文作为**决策记录**保留，不再引导新决策。
+> 关联: [`2026-10-04-mcp-protocol-redesign.md`](./archive/2026-10-04-mcp-protocol-redesign.md) (5 commit 手写计划,被本文挑战) — **SUPERSEDED，归档**
 > 调研日期:2026-10-04
 
 ---
