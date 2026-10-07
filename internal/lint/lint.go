@@ -15,14 +15,70 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/xxx/kron/internal/model"
 	"github.com/xxx/kron/internal/parser"
 	"github.com/xxx/kron/internal/store"
 )
 
+// StaleDaysDefault is the staleness threshold used by
+// RuleStaleSupersededCandidate and RuleExpiredHardAssumption when the
+// caller does not supply a value. Matches MCP `kron_stale`'s default
+// (90 days) so the two surfaces produce the same supersession view.
+const StaleDaysDefault = 90
+
+// RunOptions tunes per-Run behaviour. The zero value is meaningful:
+// it applies the default staleness threshold (StaleDaysDefault) and
+// runs every rule. Set fields explicitly to opt out of specific rules.
+type RunOptions struct {
+	// StaleDaysThreshold sets the minimum age (in days) at which an
+	// active intent becomes a RuleStaleSupersededCandidate. 0 means
+	// "use the package default" (StaleDaysDefault). Negative values
+	// disable the staleness rules (S1 + S2) entirely, leaving the
+	// other rules active.
+	StaleDaysThreshold int
+
+	// now is the reference time used by the staleness rules. Tests
+	// inject a fixed value; production code leaves it zero, which
+	// means "time.Now().UTC()" at call time.
+	now time.Time
+}
+
+// Now overrides the reference time for staleness rules. Test-only
+// helper. Returns a new RunOptions value; the receiver is not modified.
+func (o RunOptions) WithNow(t time.Time) RunOptions {
+	o.now = t
+	return o
+}
+
+// resolveStaleDays returns the effective threshold and whether the
+// staleness rules are enabled.
+func (o RunOptions) resolveStaleDays() (days int, enabled bool) {
+	if o.StaleDaysThreshold < 0 {
+		return 0, false
+	}
+	if o.StaleDaysThreshold == 0 {
+		return StaleDaysDefault, true
+	}
+	return o.StaleDaysThreshold, true
+}
+
+// resolveNow returns the effective reference time for staleness rules.
+func (o RunOptions) resolveNow() time.Time {
+	if o.now.IsZero() {
+		return time.Now().UTC()
+	}
+	return o.now
+}
+
 // Run walks the repository rooted at root and returns every diagnostic
 // produced by v1's mandatory rule classes. ctx is reserved for future
 // cancellation; v1 does not read it.
+//
+// Use RunWith when staleness threshold tuning or test-time now
+// injection is needed. Run is the no-options equivalent of
+// RunWith(ctx, root, RunOptions{}).
 //
 // Errors are returned only for scope-cream failures: a missing root,
 // an I/O error walking the source tree, or a catastrophic parse failure
@@ -38,12 +94,20 @@ import (
 //	B-class: frontmatter-invalid (intent .md is unparseable)
 //	C-class: dangling-reference, dangling-depends-on, depends-on-cycle,
 //	         self-reference (intent → intent frontmatter relations)
+//	S-class: stale-superseded-candidate, expired-hard-assumption
+//	         (lifecycle staleness; default 90-day threshold)
 //
 // C-class rules require all intents to be loaded successfully; when
 // LoadAll fails, the per-intent C-class checks are skipped (the
 // frontmatter-invalid Diag already explains why) but A-class diags
-// (which don't need intent data) are still produced.
+// (which don't need intent data) are still produced. S-class rules
+// follow the same gating as C-class.
 func Run(ctx context.Context, root string) ([]Diag, error) {
+	return RunWith(ctx, root, RunOptions{})
+}
+
+// RunWith is the configurable variant of Run.
+func RunWith(ctx context.Context, root string, opts RunOptions) ([]Diag, error) {
 	_ = ctx // reserved for cancellation; no-op in v1
 
 	if root == "" {
@@ -73,11 +137,12 @@ func Run(ctx context.Context, root string) ([]Diag, error) {
 		}
 	}
 
-	// B + C-class: load every intent, then run the frontmatter-relation
-	// rules on each. A failure to load any single intent (LoadAll is
-	// fail-fast) becomes a single repo-wide Diag and the per-intent
-	// C-class checks are skipped — but the A-class results above are
-	// still meaningful and have already been appended.
+	// B + C-class + S-class: load every intent, then run the
+	// frontmatter-relation and staleness rules on each. A failure to
+	// load any single intent (LoadAll is fail-fast) becomes a single
+	// repo-wide Diag and the per-intent checks are skipped — but the
+	// A-class results above are still meaningful and have already been
+	// appended.
 	intents, loadErr := r.LoadAll(ctx)
 	if loadErr != nil {
 		diags = append(diags, Diag{
@@ -161,7 +226,122 @@ func Run(ctx context.Context, root string) ([]Diag, error) {
 		}
 	}
 
+	// S-class: staleness rules. Only the Diag half is consumed by
+	// RunWith's return value; the structured StaleReport is
+	// recomputed by callers that need it (e.g. MCP kron_stale) via
+	// ComputeStaleReport, which takes a pre-loaded intent slice and
+	// the same RunOptions. Splitting the two views keeps RunWith's
+	// signature stable.
+	diags = append(diags, runStalenessRules(intents, opts)...)
+
 	return diags, nil
+}
+
+// ComputeStaleReport walks intents and returns the structured view of
+// every RuleStaleSupersededCandidate and RuleExpiredHardAssumption
+// match. It is the data-shape twin of runStalenessRules: the same
+// walk, the same opts, but a StaleReport instead of []Diag.
+//
+// Callers that need structured stale data (MCP kron_stale, future
+// IDE status bar) call this directly with the result of
+// store.Reader.LoadAll. The Diag half is what `kron lint` text/JSON
+// output renders; this half is what machine consumers consume.
+//
+// When opts disables staleness rules the returned StaleReport has
+// ThresholdDays == 0 and empty slices.
+func ComputeStaleReport(intents []*model.Intent, opts RunOptions) StaleReport {
+	days, enabled := opts.resolveStaleDays()
+	if !enabled {
+		return StaleReport{}
+	}
+	now := opts.resolveNow()
+	cutoff := now.AddDate(0, 0, -days)
+
+	report := StaleReport{ThresholdDays: days}
+	for _, in := range intents {
+		if in.Frontmatter.Status == model.StatusActive &&
+			!in.Frontmatter.UpdatedAt.IsZero() &&
+			in.Frontmatter.UpdatedAt.Before(cutoff) {
+			report.SupersededCandidates = append(report.SupersededCandidates, in.Slug)
+		}
+		for _, a := range in.Frontmatter.Assumptions {
+			if a.Severity != model.SeverityHard || a.ExpiresAt == "" {
+				continue
+			}
+			exp, perr := time.Parse(time.RFC3339, a.ExpiresAt)
+			if perr != nil || !exp.Before(now) {
+				continue
+			}
+			if a.VerifiedAt != "" {
+				if v, verr := time.Parse(time.RFC3339, a.VerifiedAt); verr == nil && v.After(exp) {
+					continue
+				}
+			}
+			daysOverdue := int(now.Sub(exp).Hours() / 24)
+			report.ExpiredAssumptions = append(report.ExpiredAssumptions, ExpiredAssumption{
+				Slug:         in.Slug,
+				AssumptionID: a.ID,
+				ExpiresAt:    a.ExpiresAt,
+				DaysOverdue:  daysOverdue,
+			})
+		}
+	}
+	return report
+}
+
+// runStalenessRules is the Diag-shaped twin of ComputeStaleReport.
+// It applies the same S-class rules but emits a []Diag suitable for
+// the `kron lint` text/JSON output. Kept separate so the two views
+// can evolve independently (e.g. adding new fields to StaleReport
+// without changing the lint Diag schema).
+func runStalenessRules(intents []*model.Intent, opts RunOptions) []Diag {
+	days, enabled := opts.resolveStaleDays()
+	if !enabled {
+		return nil
+	}
+	now := opts.resolveNow()
+	cutoff := now.AddDate(0, 0, -days)
+
+	var out []Diag
+	for _, in := range intents {
+		// S1: active intent older than the threshold.
+		if in.Frontmatter.Status == model.StatusActive &&
+			!in.Frontmatter.UpdatedAt.IsZero() &&
+			in.Frontmatter.UpdatedAt.Before(cutoff) {
+			daysOld := int(now.Sub(in.Frontmatter.UpdatedAt).Hours() / 24)
+			out = append(out, Diag{
+				Rule:     RuleStaleSupersededCandidate,
+				Where:    in.Slug,
+				Detail:   fmt.Sprintf("active intent has not been updated in %d days (threshold %d)", daysOld, days),
+				Severity: SeverityWarning,
+			})
+		}
+
+		// S2: hard-severity assumption past expiry without a
+		// post-expiry verification.
+		for _, a := range in.Frontmatter.Assumptions {
+			if a.Severity != model.SeverityHard || a.ExpiresAt == "" {
+				continue
+			}
+			exp, perr := time.Parse(time.RFC3339, a.ExpiresAt)
+			if perr != nil || !exp.Before(now) {
+				continue
+			}
+			if a.VerifiedAt != "" {
+				if v, verr := time.Parse(time.RFC3339, a.VerifiedAt); verr == nil && v.After(exp) {
+					continue
+				}
+			}
+			daysOverdue := int(now.Sub(exp).Hours() / 24)
+			out = append(out, Diag{
+				Rule:     RuleExpiredHardAssumption,
+				Where:    in.Slug,
+				Detail:   fmt.Sprintf("hard assumption %q expired %d days ago (expired_at %s)", a.ID, daysOverdue, a.ExpiresAt),
+				Severity: SeverityWarning,
+			})
+		}
+	}
+	return out
 }
 
 // detectDependsOnCycle returns a path describing the cycle reachable

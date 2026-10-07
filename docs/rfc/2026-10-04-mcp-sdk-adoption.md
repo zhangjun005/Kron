@@ -1,8 +1,8 @@
 # MCP 官方 SDK 接入实施计划 (v1.2)
 
-> 状态:待审阅 + 待批准 dep 例外
-> 关联:`docs/rfc/2026-10-04-mcp-sdk-selection.md`(决策理由)、
->       `docs/rfc/2026-10-04-mcp-protocol-redesign.md`(被推翻的手写方案)、`docs/process/mcp-protocol.md`(差距清单)
+> **状态:已落地** — commit `55820ed refactor(serve-mcp): adopt official go-sdk` (2026-10-04) + 后续 `36070e1 docs(architecture): propose sinking serve-mcp business logic to internal` + `cafb75a/aa560ec/aeb5fc6` P0/P1/P2 sink 链完成业务层下沉。
+> 关联:`docs/rfc/2026-10-04-mcp-sdk-selection.md`(决策理由，**已采纳**)、
+>       [`docs/rfc/2026-10-04-mcp-protocol-redesign.md`](./archive/2026-10-04-mcp-protocol-redesign.md)(被推翻的手写方案 — **SUPERSEDED, 已归档**)、`docs/process/mcp-protocol.md`(差距清单)
 > 实施日期:2026-10-04 起
 
 ---

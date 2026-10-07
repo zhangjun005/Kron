@@ -6,11 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
+	"github.com/xxx/kron/internal/identity"
 	"github.com/xxx/kron/internal/model"
 	"github.com/xxx/kron/internal/parser"
 	"github.com/xxx/kron/internal/store"
@@ -73,13 +72,7 @@ func runAdd(args []string, out, errOut io.Writer) error {
 		return errUsage
 	}
 
-	handle := *createdBy
-	if handle == "" {
-		handle = detectGitUser()
-	}
-	if handle == "" {
-		handle = "agent:unknown"
-	}
+	handle := identity.Handle(*createdBy, identity.GitUser())
 
 	intent := &model.Intent{
 		Slug: slug,
@@ -87,7 +80,7 @@ func runAdd(args []string, out, errOut io.Writer) error {
 			CreatedBy: handle,
 			UpdatedAt: time.Now().UTC(),
 		},
-		Body: defaultIntentBody(slug),
+		Body: parser.IntentBodyTemplateCN(slug),
 	}
 	if err := w.Write(context.Background(), intent); err != nil {
 		fmt.Fprintln(errOut, "kron add:", err)
@@ -98,32 +91,11 @@ func runAdd(args []string, out, errOut io.Writer) error {
 	return nil
 }
 
-// defaultIntentBody produces the Markdown body for a freshly scaffolded
-// intent. The body follows the §三 skeleton from
-// docs/abstractDesign/intent-structure.md (Title + one-line summary +
-// Why + Trade-offs + Assumptions pointer).
+// defaultIntentBody delegates to parser.IntentBodyTemplateCN. The
+// wrapper is kept so the CLI's call site (runAdd) reads naturally;
+// the actual template lives in internal/parser where it can be
+// shared with any future access layer (the English variant is
+// parser.IntentBodyTemplate).
 func defaultIntentBody(slug string) string {
-	title := slug
-	if i := strings.LastIndex(slug, "/"); i >= 0 {
-		title = slug[i+1:]
-	}
-	title = strings.ReplaceAll(title, "-", " ")
-
-	return fmt.Sprintf("# %s\n\n> One-line summary of this intent's decision.\n\n## 为什么（Why）\n记录当初为何如此决策。\n\n## 权衡（Trade-offs）\n选择与放弃的考量。\n\n<!-- 边界假设写在 frontmatter 的 assumptions 字段里，不在正文重复 -->\n", title)
-}
-
-// detectGitUser returns "@<user.name>" by shelling out to git config.
-// On any failure (no git, no user.name), it returns "" so the caller
-// can fall back to "agent:unknown".
-func detectGitUser() string {
-	cmd := exec.Command("git", "config", "user.name")
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	name := strings.TrimSpace(string(out))
-	if name == "" {
-		return ""
-	}
-	return "@" + name
+	return parser.IntentBodyTemplateCN(slug)
 }

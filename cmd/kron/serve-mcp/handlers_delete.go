@@ -3,12 +3,12 @@ package servemcp
 import (
 	"context"
 	"fmt"
-	"sort"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/xxx/kron/internal/model"
 	"github.com/xxx/kron/internal/parser"
+	"github.com/xxx/kron/internal/relations"
 	"github.com/xxx/kron/internal/store"
 )
 
@@ -53,18 +53,7 @@ func HandleDelete(ctx context.Context, _ *mcp.CallToolRequest, in DeleteInput) (
 	dependents := []string{}
 	if r, rerr := store.NewReader(root); rerr == nil {
 		if all, lerr := r.LoadAll(ctx); lerr == nil {
-			for _, intent := range all {
-				if intent.Slug == in.Slug {
-					continue
-				}
-				for _, dep := range intent.Frontmatter.DependsOn {
-					if dep == in.Slug {
-						dependents = append(dependents, intent.Slug)
-						break
-					}
-				}
-			}
-			sort.Strings(dependents)
+			dependents = relations.Dependents(all, in.Slug)
 		}
 	}
 

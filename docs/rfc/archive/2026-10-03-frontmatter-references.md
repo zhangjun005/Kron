@@ -1,11 +1,13 @@
 # RFC: Frontmatter 结构化引用字段 (`references` + `depends_on`)
 
+> **本 RFC 已落地 + 已归档** (2026-10-03, commit `a373828` + `ea186a8`)。作为**历史决策记录**保留。schema / lint / MCP 工具的"v1.2 来源"以 [`docs/abstractDesign/intent-structure.md`](../../abstractDesign/intent-structure.md) §三 为准（事实层真理），本文**不再作为决策源**。
+
 | 字段 | 值 |
 |---|---|
-| **状态** | 草案 (Proposed) |
+| **状态** | **已落地 (Implemented) + 已归档 (2026-10-06 移入 `docs/rfc/archive/`)** — commit `a373828 feat(frontmatter): add references + depends_on per RFC 2026-10-03` (2026-10-03)；后续 `ea186a8 feat(serve-mcp): polish tools_list_get + relations edge cases` 打磨边缘 case。本 RFC 顶栏更新滞后，参考 [`../2026-10-04-mcp-sdk-adoption.md` §10 第 350 行](../2026-10-04-mcp-sdk-adoption.md) 的归档标注。 |
 | **作者** | AI assistant, 经 zh-jun 委托 |
 | **创建日期** | 2026-10-03 |
-| **目标版本** | v1.2 (在 v1.1 MCP 12 工具集稳定之后) |
+| **目标版本** | v1.2 — **已落地** (2026-10-03) |
 | **影响范围** | frontmatter schema / lint / MCP 工具 / 三份事实文档 |
 
 ---

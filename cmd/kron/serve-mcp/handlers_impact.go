@@ -9,6 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/xxx/kron/internal/parser"
+	"github.com/xxx/kron/internal/relations"
 	"github.com/xxx/kron/internal/store"
 )
 
@@ -66,60 +67,13 @@ func HandleImpact(ctx context.Context, _ *mcp.CallToolRequest, in ImpactInput) (
 		return nil, ImpactOutput{}, fmt.Errorf("kron_impact: load: %w", err)
 	}
 
-	// references: reverse soft-link view — which other intents
-	// have this slug in their Frontmatter.References?
-	references := make([]string, 0)
-	for _, intent := range all {
-		if intent.Slug == in.Slug {
-			continue
-		}
-		for _, ref := range intent.Frontmatter.References {
-			if ref == in.Slug {
-				references = append(references, intent.Slug)
-				break
-			}
-		}
-	}
-	sort.Strings(references)
-
-	// prerequisites: explicit depends_on (always) ∪ symbol-inferred
-	// (only when not already explicit). The "explicit wins" rule
-	// avoids double-listing: if A.depends_on B explicitly, the
-	// symbol-inferred "B" is not also added.
-	explicitDeps := make(map[string]struct{}, len(target.Frontmatter.DependsOn))
-	for _, d := range target.Frontmatter.DependsOn {
-		explicitDeps[d] = struct{}{}
-	}
-	prereqSet := make(map[string]struct{}, len(explicitDeps))
-	for d := range explicitDeps {
-		prereqSet[d] = struct{}{}
-	}
-
-	// Symbol-inferred: any other intent whose symbol set intersects
-	// target's symbol set becomes a candidate prerequisite.
-	targetSyms := make(map[string]struct{}, len(target.Frontmatter.Symbol))
-	for _, s := range target.Frontmatter.Symbol {
-		targetSyms[s] = struct{}{}
-	}
-	if len(targetSyms) > 0 {
-		for _, intent := range all {
-			if intent.Slug == in.Slug {
-				continue
-			}
-			for _, s := range intent.Frontmatter.Symbol {
-				if _, ok := targetSyms[s]; ok {
-					prereqSet[intent.Slug] = struct{}{}
-					break
-				}
-			}
-		}
-	}
-
-	prerequisites := make([]string, 0, len(prereqSet))
-	for s := range prereqSet {
-		prerequisites = append(prerequisites, s)
-	}
-	sort.Strings(prerequisites)
+	// All three reverse-graph views (references, depends-on dependents,
+	// symbol-inferred) and the prerequisites computation now live in
+	// internal/relations. Centralising them here means the impact tool
+	// and the delete tool (which surfaces "dependents") share the same
+	// graph walks and the same "explicit wins" rule.
+	references, _, _ := relations.ReverseLinks(all, in.Slug)
+	prerequisites := relations.Prerequisites(all, in.Slug)
 
 	// Walk the repo and filter to anchors pointing at our slug.
 	var incoming []AnchorRef

@@ -39,6 +39,27 @@ const (
 	// RuleSelfReference reports that an intent lists its own slug in
 	// either References or DependsOn. Severity: error.
 	RuleSelfReference Rule = "self-reference"
+
+	// RuleStaleSupersededCandidate reports an active intent whose
+	// UpdatedAt is older than the configured staleness threshold
+	// (default 90 days). It is the lint twin of MCP `kron_stale`'s
+	// "superseded_candidates" list — having the same rule fire under
+	// `kron lint` means CI catches the staleness without needing a
+	// dedicated cron. Severity: warning (the intent is still
+	// authoritative; the warning asks a human to decide).
+	//
+	// The threshold is supplied via RunOpts.StaleDaysThreshold (0 =
+	// skip the rule). When RunOpts is zero-valued, default 90 days is
+	// used to match MCP `kron_stale`'s default.
+	RuleStaleSupersededCandidate Rule = "stale-superseded-candidate"
+
+	// RuleExpiredHardAssumption reports a hard-severity assumption
+	// whose ExpiresAt is in the past AND whose VerifiedAt is either
+	// absent or earlier than the expiry. Soft-severity assumptions
+	// are excluded by spec (only hard assumptions count for staleness
+	// alerts). Severity: warning (the code still works; the warning
+	// asks a human to re-verify).
+	RuleExpiredHardAssumption Rule = "expired-hard-assumption"
 )
 
 // Severity ranks a Diag's importance. Empty is treated as error by

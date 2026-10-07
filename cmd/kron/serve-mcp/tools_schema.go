@@ -2,6 +2,8 @@ package servemcp
 
 import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/xxx/kron/internal/lint"
 )
 
 // This file holds the typed input / output schemas for the 12 MCP
@@ -227,16 +229,11 @@ type StaleInput struct {
 	DaysThreshold int `json:"days_threshold,omitempty" jsonschema:"minimum age in days for an active intent to be a superseded candidate (default 90)"`
 }
 
-type ExpiredAssumption struct {
-	Slug         string `json:"slug"           jsonschema:"slug of the owning intent"`
-	AssumptionID string `json:"assumption_id"  jsonschema:"stable assumption identifier"`
-	ExpiresAt    string `json:"expires_at"    jsonschema:"RFC3339 expiry timestamp"`
-	DaysOverdue  int    `json:"days_overdue"   jsonschema:"days past expiry (positive)"`
-}
+type ExpiredAssumption = lint.ExpiredAssumption
 
 type StaleOutput struct {
-	SupersededCandidates []string            `json:"superseded_candidates" jsonschema:"active intents older than days_threshold"`
-	ExpiredAssumptions   []ExpiredAssumption `json:"expired_assumptions"   jsonschema:"unverified hard assumptions past expiry"`
+	SupersededCandidates []string                `json:"superseded_candidates" jsonschema:"active intents older than days_threshold"`
+	ExpiredAssumptions   []lint.ExpiredAssumption `json:"expired_assumptions"   jsonschema:"unverified hard assumptions past expiry"`
 }
 
 // --- registerTools ----------------------------------------------------

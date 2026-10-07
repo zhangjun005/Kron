@@ -4,13 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/xxx/kron/internal/identity"
 	"github.com/xxx/kron/internal/model"
 	"github.com/xxx/kron/internal/parser"
 	"github.com/xxx/kron/internal/store"
@@ -59,10 +58,11 @@ func HandleAdd(ctx context.Context, _ *mcp.CallToolRequest, in AddInput) (
 		return nil, AddOutput{}, fmt.Errorf("%w: %s", model.ErrIntentExists, in.Slug)
 	}
 
-	handle := detectGitUser()
-	if handle == "" {
-		handle = "agent:unknown"
-	}
+	// Identity is resolved via internal/identity: prefer an explicit
+	// client-derived handle, fall back to git config user.name, fall
+	// back to "agent:unknown". Identity is an attribute, not an
+	// authz gate (architecture.md §2.3).
+	handle := identity.Handle("", identity.GitUser())
 
 	fm := model.Frontmatter{
 		CreatedBy: handle,
@@ -72,7 +72,7 @@ func HandleAdd(ctx context.Context, _ *mcp.CallToolRequest, in AddInput) (
 		fm.Symbol = []string{in.Symbol}
 	}
 
-	body := scaffoldedBody(in.Slug)
+	body := parser.IntentBodyTemplate(in.Slug)
 	if in.Why != "" {
 		body = body + "\n## Why\n\n" + in.Why + "\n"
 	}
@@ -89,32 +89,11 @@ func HandleAdd(ctx context.Context, _ *mcp.CallToolRequest, in AddInput) (
 	return nil, AddOutput{OK: true, Path: model.IntentPath(in.Slug)}, nil
 }
 
-// scaffoldedBody produces the default Markdown body for a freshly
-// scaffolded intent. Mirrors the CLI `kron add` skeleton from
-// cmd/kron/cli/add.go:defaultIntentBody, minus the trailing frontmatter
-// reminder (which is on the frontmatter side, not the body).
+// scaffoldedBody delegates to parser.IntentBodyTemplate. The wrapper
+// is kept so the handler reads naturally; the actual template lives
+// in internal/parser where it is shared with the CLI add path and
+// any future access layer. The CLI uses the Chinese variant
+// (parser.IntentBodyTemplateCN) to preserve its prior wording.
 func scaffoldedBody(slug string) string {
-	title := slug
-	if i := strings.LastIndex(slug, "/"); i >= 0 {
-		title = slug[i+1:]
-	}
-	title = strings.ReplaceAll(title, "-", " ")
-
-	return fmt.Sprintf("# %s\n\n> One-line summary of this intent's decision.\n\n## Why\n\nRecord the reason for this decision.\n\n## Trade-offs\n\nWhat was chosen and what was given up.\n", title)
-}
-
-// detectGitUser mirrors cmd/kron/cli/add.go:detectGitUser. Copied here
-// because cmd/kron/cli is a sibling access layer and cannot be imported
-// (architecture.md §〇 铁律 #3).
-func detectGitUser() string {
-	cmd := exec.Command("git", "config", "user.name")
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	name := strings.TrimSpace(string(out))
-	if name == "" {
-		return ""
-	}
-	return "@" + name
+	return parser.IntentBodyTemplate(slug)
 }

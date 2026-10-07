@@ -2,11 +2,9 @@ package parser
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/xxx/kron/internal/model"
@@ -22,77 +20,26 @@ const anchorMarker = "@kron:intent"
 // ScanAnchors walks dir recursively and returns every line-level
 // "@kron:intent <slug>" annotation it finds in source files.
 //
-// Scope:
-//   - All regular files under dir are scanned (no extension filter in
-//     v1: source files have too many extensions to enumerate, and
-//     false positives on binary files are avoided by a content sniff
-//     at the top of the file).
-//   - Skip-list: .git, .kron, node_modules, vendor, dist, bin, target,
-//     .idea, .vscode (matches docs/implementation/cli.md §4).
-//   - Each scanned file is read line-by-line; an anchor is any line
-//     that contains anchorMarker followed by a slug-shaped token.
-//   - LineNumber is 1-indexed.
+// The walk uses parser.WalkSourceFiles, so the skip-list (default
+// ignored directories) and the binary-file heuristic are shared with
+// any other source-tree scanner (intent-density orphan detection,
+// future "find dead @kron:intent" check, etc.). See walk.go for
+// the canonical skip list.
+//
+// Each scanned file is read line-by-line; an anchor is any line that
+// contains anchorMarker followed by a slug-shaped token. LineNumber
+// is 1-indexed.
 //
 // The returned slice is sorted by (FilePath, LineNumber) for
 // deterministic lint output.
 func ScanAnchors(dir string) ([]model.Anchor, error) {
-	skipDirs := map[string]struct{}{
-		".git":         {},
-		".kron":        {},
-		"node_modules": {},
-		"vendor":       {},
-		"dist":         {},
-		"bin":          {},
-		"target":       {},
-		".idea":        {},
-		".vscode":      {},
-	}
-
 	var anchors []model.Anchor
-	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if d.IsDir() {
-			if _, skip := skipDirs[d.Name()]; skip {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		// Quick content sniff: peek at the first 512 bytes and bail
-		// if any NUL byte is present, or if a UTF-16 BOM is detected.
-		// Both indicate the file is not a plain-text source file that
-		// could carry "// @kron:intent" annotations.
-		//
-		// The NUL check is what catches UTF-8 files written by tools
-		// that re-encode ASCII as UTF-16 (PowerShell's default), since
-		// every ASCII byte is followed by a 0x00 NUL. The explicit BOM
-		// checks are belt-and-suspenders for files that open in a
-		// non-NUL-padded multibyte encoding (e.g. UTF-16 with non-ASCII
-		// characters immediately after the BOM).
+	err := WalkSourceFiles(dir, func(path string) error {
 		f, err := os.Open(path)
 		if err != nil {
 			return fmt.Errorf("open %s: %w", path, err)
 		}
 		defer f.Close()
-
-		var head [512]byte
-		n, _ := io.ReadFull(f, head[:])
-		if bytes.IndexByte(head[:n], 0) >= 0 {
-			return nil
-		}
-		if n >= 2 {
-			// UTF-16 LE: FF FE. UTF-16 BE: FE FF.
-			if (head[0] == 0xFF && head[1] == 0xFE) ||
-				(head[0] == 0xFE && head[1] == 0xFF) {
-				return nil
-			}
-		}
-
-		// Reset to the start of the file.
-		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			return fmt.Errorf("seek %s: %w", path, err)
-		}
 
 		fileAnchors, err := scanFile(f, path)
 		if err != nil {
@@ -108,6 +55,47 @@ func ScanAnchors(dir string) ([]model.Anchor, error) {
 	// Deterministic ordering: (FilePath, LineNumber).
 	sortAnchors(anchors)
 	return anchors, nil
+}
+
+// SlugsForFile returns the set of intent slugs that have a
+// "@kron:intent <slug>" line in filePath. The set is returned as a
+// sorted slice so callers can iterate it deterministically.
+//
+// filePath may be absolute or repo-relative. The file is opened and
+// parsed directly (no walk), so this is the right entry point when
+// the caller already knows the file (e.g. kron_assume_check with a
+// file_path argument) and only needs the slugs that one file carries.
+//
+// Empty filePath or a path that cannot be opened returns an error.
+// A file with no anchors returns an empty (non-nil) slice.
+func SlugsForFile(filePath string) ([]string, error) {
+	if filePath == "" {
+		return nil, fmt.Errorf("parser: SlugsForFile: filePath is empty")
+	}
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("parser: open %s: %w", filePath, err)
+	}
+	defer f.Close()
+
+	fileAnchors, err := scanFile(f, filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Dedupe (a single file can carry the same anchor multiple times)
+	// and sort for deterministic output.
+	seen := make(map[string]struct{}, len(fileAnchors))
+	out := make([]string, 0, len(fileAnchors))
+	for _, a := range fileAnchors {
+		if _, ok := seen[a.Slug]; ok {
+			continue
+		}
+		seen[a.Slug] = struct{}{}
+		out = append(out, a.Slug)
+	}
+	sortStrings(out)
+	return out, nil
 }
 
 // scanFile scans a single open file for "@kron:intent <slug>" lines.

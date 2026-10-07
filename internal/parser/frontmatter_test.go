@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -223,4 +225,79 @@ func TestSerializeMarkdown_RoundTrip(t *testing.T) {
 	assert.Equal(t, parsed.UpdatedAt.Format(time.RFC3339), parsed2.UpdatedAt.Format(time.RFC3339))
 	assert.Equal(t, string(parsed.Status), string(parsed2.Status))
 	assert.Equal(t, body, body2)
+}
+
+func TestValidateFrontmatter_HappyPath(t *testing.T) {
+	// A well-formed Frontmatter round-trips through ValidateFrontmatter
+	// without error.
+	fm := &model.Frontmatter{
+		CreatedBy: "@a",
+		UpdatedAt: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
+		Status:    model.StatusActive,
+	}
+	require.NoError(t, ValidateFrontmatter(fm))
+}
+
+func TestValidateFrontmatter_MissingRequired(t *testing.T) {
+	// CreatedBy is required; an empty CreatedBy is rejected.
+	fm := &model.Frontmatter{
+		UpdatedAt: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
+	}
+	err := ValidateFrontmatter(fm)
+	require.Error(t, err)
+	// The marshal→parse round-trip surfaces the same error
+	// ParseFrontmatter would have produced (unwrapped string).
+	// It is intentionally NOT wrapped with model.ErrFrontmatterInvalid
+	// at this layer — the caller (e.g. kron_update) is expected to
+	// add the model.ErrFrontmatterInvalid wrap when surfacing to
+	// users, matching how the load path already wraps with %w.
+	assert.Contains(t, err.Error(), "created_by")
+}
+
+func TestValidateFrontmatter_BadStatus(t *testing.T) {
+	// Status enum is validated; unknown values are rejected.
+	fm := &model.Frontmatter{
+		CreatedBy: "@a",
+		UpdatedAt: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
+		Status:    model.Status("drafty"),
+	}
+	err := ValidateFrontmatter(fm)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "status")
+}
+
+func TestValidateFrontmatter_NilPointer(t *testing.T) {
+	require.Error(t, ValidateFrontmatter(nil))
+}
+
+func TestSlugsForFile_HappyPath(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "x.go")
+	require.NoError(t, os.WriteFile(p, []byte(`package x
+// @kron:intent auth/jwt
+// @kron:intent auth/refresh
+// @kron:intent auth/jwt  // duplicate, dedup
+`), 0o644))
+	slugs, err := SlugsForFile(p)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"auth/jwt", "auth/refresh"}, slugs)
+}
+
+func TestSlugsForFile_NoAnchors(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "x.go")
+	require.NoError(t, os.WriteFile(p, []byte("package x\n"), 0o644))
+	slugs, err := SlugsForFile(p)
+	require.NoError(t, err)
+	assert.Empty(t, slugs)
+}
+
+func TestSlugsForFile_EmptyPath(t *testing.T) {
+	_, err := SlugsForFile("")
+	require.Error(t, err)
+}
+
+func TestSlugsForFile_MissingFile(t *testing.T) {
+	_, err := SlugsForFile(filepath.Join(t.TempDir(), "nope"))
+	require.Error(t, err)
 }

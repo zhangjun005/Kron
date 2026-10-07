@@ -33,3 +33,41 @@ func (d Diag) severity() Severity {
 	}
 	return d.Severity
 }
+
+// ExpiredAssumption is one machine-readable entry in StaleReport.
+// Mirrors the wire shape of MCP `kron_stale.expired_assumptions[]`
+// so a caller can render the report directly without re-typing the
+// fields. Field tags use jsonschema so the MCP SDK can derive the
+// tools/list response schema automatically.
+type ExpiredAssumption struct {
+	Slug         string `json:"slug"           jsonschema:"slug of the owning intent"`
+	AssumptionID string `json:"assumption_id"  jsonschema:"stable assumption identifier"`
+	ExpiresAt    string `json:"expires_at"    jsonschema:"RFC3339 expiry timestamp"`
+	DaysOverdue  int    `json:"days_overdue"   jsonschema:"days past expiry (positive)"`
+}
+
+// StaleReport is the structured view of every S-class (staleness) rule
+// match. It is the data twin of the RuleStaleSupersededCandidate /
+// RuleExpiredHardAssumption entries in []Diag.
+//
+// Callers that need a list of stale slugs or expired assumptions in
+// machine-readable form (MCP kron_stale, future IDE status bar) read
+// this directly. Callers that need human-readable output (CLI kron
+// lint) read the Diag list returned by Run/RunWith — both come from
+// the same walk over the same data, so they never disagree.
+type StaleReport struct {
+	// ThresholdDays is the effective staleness threshold the report
+	// was computed with (resolved from RunOptions.StaleDaysThreshold
+	// or StaleDaysDefault). 0 indicates "staleness rules disabled".
+	ThresholdDays int
+
+	// SupersededCandidates is the sorted list of slugs whose status
+	// is active and whose UpdatedAt is older than ThresholdDays days.
+	SupersededCandidates []string
+
+	// ExpiredAssumptions lists every hard-severity assumption past
+	// its ExpiresAt with no post-expiry verification. Order is the
+	// LoadAll order (lexicographic by slug); the consumer is expected
+	// to sort if a different order matters.
+	ExpiredAssumptions []ExpiredAssumption
+}
