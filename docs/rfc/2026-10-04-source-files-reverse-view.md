@@ -5,6 +5,7 @@
 | **状态** | 草案 (Proposed) |
 | **作者** | AI assistant, 经 zh-jun 委托 |
 | **创建日期** | 2026-10-04 |
+| **最后修订** | 2026-10-06（§2.2/§2.3/§3.6/§3.8/§9/§10 修订） |
 | **目标版本** | 未定 — 不属于任何已规划 phase。v1.2（[`2026-10-03-frontmatter-references.md`](./2026-10-03-frontmatter-references.md), commit `a373828`, 2026-10-03 已落地）与 phase 2（[`docs/process/phase-2-leftovers.md`](../process/phase-2-leftovers.md), 2026-10-03 全 closed）都**已收口**；phase 3 尚未规划。 |
 | **影响范围** | `internal/parser` / `internal/relations` / `internal/lint` / `kron_impact` (未来) |
 
@@ -77,17 +78,19 @@ func SourceFiles(intents []*model.Intent, root, targetSlug string) ([]model.Anch
 
 - ❌ 不暴露给 `kron_impact` MCP 工具（v1.2 内另开 RFC 决定字段名/JSON schema）。
 - ❌ 不暴露给 CLI（`kron where-used` 子命令不在 v1 必需范围，AGENTS.md "off-limits"）。
-- ❌ 不引入 `.kron/.cache/anchors.json` 缓存（v1 每次重扫）。
+- ❌ **不写磁盘缓存**（无 `.kron/.cache/anchors.json`、无外部备份目录）——与 `docs/requirements.md:3` "不做自备份"红线一致。
 - ❌ 不扩展锚点语法（不识别 markdown 里的裸 slug，不做 symbol 字符串扫描）。
 - ❌ 不读 `.kron/.trash/`（软删除的 intent 不参与 `SourceFiles` 关联——见 §5.4）。
+- ⏸ **进程内 cache**——进入待评估（§3.8），不在 RFC 阶段承诺实施。
 
-### 2.3 决策记录（2026-10-04 用户拍板）
+### 2.3 决策记录（2026-10-04 用户拍板；2026-10-06 复核）
 
 | 决策 | 选项 | 理由 |
 |---|---|---|
 | 反向来源 | **只看 `@kron:intent` 硬锚点** | 软匹配会被 RFC 文档的非意图引用污染 |
-| 性能策略 | **每次调用重扫源码树** | 仓库规模 v1 <10k 文件，单次 walk <0.1s；缓存失效复杂度不值得 |
+| 性能策略 | **默认**每次调用重扫源码树 | 仓库规模 v1 <10k 文件，单次 walk <0.1s；进程内 cache 复杂度见 §3.8 |
 | 暴露面 | **只预置底层，不接 CLI/MCP** | 留出 RFC 阶段打磨 schema 与 UX |
+| 磁盘缓存 | **禁止** | 与 `requirements.md:3` "不做自备份"红线一致 |
 
 ---
 
@@ -120,19 +123,88 @@ v1.2 预置阶段**不强制**去重策略——`SourceFiles` 直传 `[]model.An
 
 ### 3.6 与 lint A-class 的解耦
 
-lint `RuleAnchorDangling` 走 `ScanAnchors`，`AnchorsForSlug` 也要走同一棵树。三种解耦方式：
+lint `RuleAnchorDangling` 走 `ScanAnchors`，`AnchorsForSlug` 也要走同一棵树。四种解耦方式：
 
 1. **不管**：lint 跑一次（CI 触发），`AnchorsForSlug` 跑一次（按需），重复扫。
-2. **缓存**：lint 跑完写 `.kron/.cache/anchors.json`，`AnchorsForSlug` 读缓存。
+2. **磁盘缓存**：lint 跑完写 `.kron/.cache/anchors.json`，`AnchorsForSlug` 读缓存。**已废**——与 `requirements.md:3` "不做自备份"红线冲突。
 3. **共用 helper**：parser 加 `Index(dir) (map[string][]Anchor, error)`，lint 和 relations 都调它。**单次 walk，零缓存**。
+4. **先量后做**（2026-10-06 新增）：先在 `kron_impact` handler 出口打 `time.Now()` 计时日志，跑 1–2 周量实际调用频率；**根据量测结果**再决定要不要进 §3.8 评估 cache 落地。
 
-**倾向方案 3**——把"扫一遍源码树"提到 parser 原语层，lint 和 relations 都站在它之上。
+**当前倾向方案 4**——把"扫一遍源码树"提不提到 parser 原语层是次要的；**先搞清楚"扫一次的成本 vs 调用频率"的比值**再说。如果每次会话 1 次，cache 永远不做（直接删 §3.8）；如果每次会话 >5 次，再按 §3.8 评估落地。
 
 ### 3.7 还没想清楚的（v1.2 当天再定）
 
 - MCP 响应里 `LineNumber` 序列化为 `int` 还是 `string`。
 - 单文件锚点数量上限（防 1 万行锚点撑爆响应）。
 - 软删除的 intent 在 `SourceFiles` 里的归属（**当前倾向不参与**，见 §5.4）。
+
+### 3.8 进程内 cache 待评估（2026-10-06 用户拍板启动）
+
+> **状态**：本节是**待评估项**，不是实施承诺。RFC 阶段需要回答 4 个真问题才能落地；不预判结论。
+
+#### 3.8.1 适用边界——cache 给谁用？
+
+候选：
+
+- **A. 全进程**——任何 access layer 共享一个 cache。坏处：CLI 跑完填缓存，MCP 后续拿到 CLI 留下的脏数据（虽然跨进程不串，但同进程的 CLI→MCP 切换会有"看不见的写入"）。
+- **B. 进程内 + per-access-layer**——每个进程一个 cache，**不跨进程**。CLI 短命不需要缓存；MCP 长会话最受益。
+- **C. 进程内 + per-root**——同进程、同一 repo root 共享。CI 在 monorepo 里跑多个 repo 时，缓存不串。
+
+**当前倾向 B**——理由：CLI 本来就是一次性的，cache 在它身上是浪费；MCP 是唯一真正受益者。
+
+**关键参考**：`kron_impact` MCP handler 在每次 Agent 提问时调用 1–N 次。**未量测前不锁结论**——见 §9 (7)。
+
+#### 3.8.2 缓存粒度
+
+候选：
+
+| 粒度 | 形式 | 失效难度 | 占用内存 |
+|---|---|---|---|
+| 粗（整棵扫一次） | `[]model.Anchor` 单值 | 任何文件改动 = 整缓存失效（基于 mtime） | 小（<1MB） |
+| 中（按 slug 字典） | `map[string][]model.Anchor` | 哪个 slug 失效 = 反向映射**再扫一次**才能知道 | 中 |
+| 细（按 file path） | `map[file][]anchor` | 哪个 file 改了 = 那 file 的 entry 失效 | 大 |
+
+**粗粒度"刷新"就是"看到 root 目录 mtime 变了就整个清掉"**——简单到几乎不用想。但**准确度差**：用户编辑了一个 .go 文件但**没动锚点**——缓存也失效重扫。这是**伪失效**，无害但浪费。
+
+**中/细粒度的本质困难**：`@kron:intent` 注释**没有反向引用**——它**不是** `auth/jwt 引用了 ./refresh.go`，而是 `./refresh.go 锚定到 auth/jwt`。**所以"按 slug 失效"和"按 file 失效"在数据结构上不对等**。粗粒度可以选"任何 IO 变化都重扫"（不细追究）；中/细粒度**做不到**精准（除非引入 watcher，而 watcher 本身就要持久化）。
+
+**当前倾向粗粒度**——中/细粒度要么失效不准（不对称），要么引依赖（fsnotify 与"零新依赖"红线冲突）。
+
+#### 3.8.3 失效机制——什么时候刷新？
+
+候选：
+
+| 触发 | 实现 | 可靠度 |
+|---|---|---|
+| (a) TTL | cache 写时记时间，过期重扫 | 简单，**但**时间窗内有脏读 |
+| (b) mtime 哨兵 | cache 写时记 `root` 的 mtime，调用前 `os.Stat` 比对 | 中等；**不能 100% 检测** root 树的修改（Linux 行为，Windows 类似但**不是**所有 FS 都保证） |
+| (c) Watcher | `fsnotify` 监听 root 树 | 准——但 **AGENTS.md off-limits "零新依赖"**，fsnotify 是新顶层依赖 |
+| (d) 不失效 | 进程内 cache **不**刷新——直到进程退出 | 等同"per-process cache"——`kron serve-mcp` 进程在的时候，缓存**永远不刷新**——这是**最危险**的方案 |
+| (e) 显式 `kron_reload` MCP 工具 | 给 agent 一个"刷新缓存"的工具 | 把"什么时候刷新"的责任**完全**推给调用方 |
+
+**当前倾向 (b) mtime 哨兵 + (a) TTL 兜底**——mtime 变了重扫；TTL（默认 60s）兜 mtime 不可靠；不引新依赖。
+
+**写时失效的真正难点**：`parser` 包**没有**写时钩入点。`store.Writer` 改 .kron/intents/*.md，**但不**改源文件。**源文件的修改在 kron 之外**——IDE / `git checkout` / 用户手 `cat > refresh.go` 都会改源文件。`kron` **根本看不到这些写**。
+
+退化原则：锚点语法是 `// @kron:intent <slug>`——slug 改了、文件删了，**只是 anchor-dangling 错（lint 会抓到）**，**不会**让有效 anchor 凭空消失。**TTL/mtime 失效下，cache 偶尔脏的代价是"看到陈旧但不误导的数据"——可接受**。
+
+#### 3.8.4 "运行时隐式状态"合规审查
+
+`architecture.md` §〇 铁律 7 原话：**"CI lint is the only enforceable gate — no runtime implicit state; strong constraints are expressed as `kron lint` errors in CI, not runtime defaults."**
+
+**严格读**："no runtime implicit state" 的语境是**"让约束只能在 CI lint 里表达"**——意思是不能有"kron 在运行时偷偷改文件 / 改环境变量 / 改 git 状态"这种隐式副作用。
+
+**进程内 `sync.Map` 不属于**这种——它：
+
+- ✅ 不写磁盘
+- ✅ 不改外部进程
+- ✅ 不影响 git
+- ✅ 不改 .kron/intents/*.md
+- ⚠️ 但它**让第二次 `kron_impact` 拿到第一次看不到的中间状态**——这个**算不算**隐式？
+
+**当前判断**：**不算**——理由：`parser` 包本来就**每次重读文件**（无状态），加 cache 之后**对外可观察的行为不变**（同一时刻同一仓库，结果一致）；变的只是**性能**。
+
+**对照**：`store` 包**明确说**"no in-memory caches"（`internal/store/reader.go:27`）——它**选择**保守。`parser` 选**激进**也合理，但**得有 commit message / 注释明说**——留证，让后来人能 revert。
 
 ---
 
@@ -287,8 +359,10 @@ Windows 下 `filepath.WalkDir` 用 `\`。测试需覆盖：
 
 | 阶段 | 内容 | 触发条件 |
 |---|---|---|
-| RFC 草案 | 本文件 | 2026-10-04（**现状**） |
-| 待 phase 3 规划 | `parser.AnchorsForSlug` + `relations.SourceFiles` + 单测 | phase 3 启动时把本 RFC 加入 backlog |
+| RFC 草案 | 本文件（2026-10-04 初稿；2026-10-06 §2.2/§2.3/§3.6/§3.8/§9/§10 修订） | 现状 |
+| **频率量测**（前置） | `kron_impact` handler 出口加 `time.Now()` 计时日志，跑 1–2 周 | RFC §9 (7) |
+| 决定 cache 适用边界 | 根据量测结果决定是否进 §3.8 子节 | 量测完成后 |
+| phase 3 规划 | `parser.AnchorsForSlug` + `relations.SourceFiles` + 单测 | phase 3 启动时把本 RFC 加入 backlog；**不依赖量测结果启动实施** |
 | 暴露阶段（未知） | MCP `kron_impact` 加字段 + CLI 子命令（可选） | 待 phase 3 启动后另开 RFC 决定 schema |
 
 ---
@@ -301,3 +375,25 @@ Windows 下 `filepath.WalkDir` 用 `\`。测试需覆盖：
 - [ ] **新（2026-10-06）**：phase 3 启动时把本 RFC 加入 backlog；phase 3 启动前本文件**不进入实施窗口**。
 - [ ] 跟进 [`2026-10-03-frontmatter-references.md`](./2026-10-03-frontmatter-references.md) §1.1 表 3 行表述的修订（RFC 顶栏已标"已落地"；该处"反向"字样在事实层已被追平）。
 - [ ] 评估 [`docs/process/references-snapshot.md`](../process/references-snapshot.md) 是否可在本 RFC 落地后正式退役。
+- [ ] **新（2026-10-06）**：在 `cmd/kron/serve-mcp/handlers_impact.go` 出口加 `time.Now()` 计时日志，记录 `ScanAnchors` 耗时 + 本次会话累计调用次数；跑 1–2 周后回填量测数据，**作为 §3.8 进程内 cache 是否落地的唯一决策依据**。
+- [ ] **新（2026-10-06）**：在 §3.8.1 / §3.8.2 / §3.8.3 评估落地前，本 RFC 实施工作**不开**；仅允许"频率量测"（上一条）作为前置依赖推进。
+
+---
+
+## 10. 与 `requirements.md:3` "不做自备份" 边界澄清
+
+> **2026-10-06 用户拍板**
+
+`docs/requirements.md:3` 原文："备份/行进全部依赖 git，不要做任何的自备份想法"。`docs/abstractDesign/tech-stack.md:64` 同义重申。
+
+**这条红线管的是 `.kron/intents/*.md` 的内容冗余**——禁止磁盘副本：
+
+- ❌ 无 `.kron/.cache/anchors.json`（磁盘 cache）
+- ❌ 无外部备份目录
+- ❌ 无 git 之外的 `.md` 副本
+
+**进程内 `sync.Map` 类型的纯运行时结构**不**在该红线覆盖范围**——`sync.Map` 只活在 `kron serve-mcp` 进程内存中，进程退出即消失；**不构成"备份"**。
+
+但进程内 cache **仍受** `architecture.md` §〇 铁律 7 约束（"无运行时隐式状态"）——合规审查详见 §3.8.4。
+
+**未来若有新讨论混淆这两条**（"自备份" vs "运行时 cache"），回看本节。
