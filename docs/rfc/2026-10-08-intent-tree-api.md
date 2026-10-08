@@ -1,6 +1,7 @@
 # RFC: Intent 树 API + README-as-intent 语义映射
 
-> 状态：**DRAFT** (2026-10-08)
+> 状态：**ACCEPTED** (2026-10-08)
+> 拍板：走 **PR-A + PR-B**；README-as-intent 边界 = 只 `*/README.md`；冲突时目录名（`auth`）赢；顶层 README 保留字面 `"README"` slug（不动 `model.IntentPath`）
 > 范围：内部包 `internal/view/` + 存储层 README 识别 + 未来 MCP/IDE 工具
 > 触发：本 PR 实现 `internal/view/BuildIntentTree` 时发现存储层有 2 个 RFC 语义 gap
 
@@ -93,10 +94,11 @@
 - ❌ Wails GUI / VSCode 扩展 / LSP 树视图渲染——客户端层
 - ❌ intent-density 树形展示——`kron_intent_density` 是 MCP 工具，看 `internal/parser` 现状
 
-## 6 等待决策
+## 6 决策
 
-| 决策 | 选项 |
+| 决策 | 拍板 |
 |---|---|
-| 走 PR-A 还是 PR-B | PR-A (改存储) / PR-B (view 包兜) / 两个都做 |
-| README-as-intent 边界 | 只 `*/README.md` 触发 / `*/README.md` + `*/index.md` 都触发 |
-| 双 slug 冲突时的优先名 | 目录名（`auth`）/ 文件名（`auth/README`） |
+| 走 PR-A 还是 PR-B | **两个都做**（PR-A 改存储；PR-B view 兜底） |
+| README-as-intent 边界 | **只 `*/README.md` 触发**（不收 `index.md`——intent-structure.md §一也只说 README） |
+| 双 slug 冲突时的优先名 | **目录名（`auth`）赢**；若 `auth.md` 已存在 → 报 `intent-slug-collision`（lint 规则，v1.2+） |
+| 顶层 `README.md` slug | 保留字面 `"README"`（不为 `""` 魔改 `model.IntentPath`） |
