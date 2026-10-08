@@ -109,7 +109,9 @@ assumptions:                  # ← 现在只引用 id, 不再嵌 text/severity
 <!-- /kron:frontmatter -->
 ```
 
-### 3.4 Frontmatter.Assumptions 字段语义变化
+### 3.4 Frontmatter.Assumptions 字段语义变化 (B-3, 跨意图 severity 差异)
+
+**关键决策**: B 路径**不**是 "纯 slug 引用" (那样**丢**跨意图 severity 差异), 而是 "**引用 + 覆盖**" — 假设共享 1 份 text, 但**每个意图** 各自 `severity` + 各自 `rationale` 解释 "**为什么**本意图这 severity".
 
 `internal/model/intent.go`:
 
@@ -117,22 +119,49 @@ assumptions:                  # ← 现在只引用 id, 不再嵌 text/severity
 // Before (A 路径, v1.1 拍板):
 Assumptions []Assumption `yaml:"assumptions,omitempty"`  // 完整结构
 
-// After (B 路径, v1.3 拍板):
-Assumptions []string `yaml:"assumptions,omitempty"`  // 仅为 id (slug) 列表
+// After (B-3 路径, v1.3 拍板) — 兼容 A 路径, 字段集**多** id + rationale:
+Assumptions []Assumption `yaml:"assumptions,omitempty"`  // {id, severity, rationale}
+
+// B-3 Assumption 字段集 (与 A 路径差异仅**多** id + rationale):
+type Assumption struct {
+    ID        string   `yaml:"id"`                      // 必需: 引用 .kron/assumptions/<id>.md
+    Text      string   `yaml:"text,omitempty"`         // 可选 (从注册表读); 留空 lint 警告
+    Severity  Severity `yaml:"severity"`                // 必需: 本意图级别 (跨意图可不同)
+    ExpiresAt string   `yaml:"expires_at,omitempty"`
+    VerifiedAt string  `yaml:"verified_at,omitempty"`
+    VerifiedBy string  `yaml:"verified_by,omitempty"`
+    Rationale string   `yaml:"rationale"`               // 必需: ≥ 10 字符, 解释 "为什么本意图这 severity"
+}
+
+// 跨意图 severity 差异示例:
+// .kron/assumptions/single-region.md (共享 text + default_severity)
+//
+// auth/jwt.md: assumptions: [{id: single-region, severity: hard, rationale: "跨 region 时 token 失效爆炸, 必须保证单 region 部署"}]
+// ui/console.md: assumptions: [{id: single-region, severity: soft, rationale: "UI 时区显示, 跨 region 退化但可接受"}]
 ```
 
-`Assumption` 结构体 (行内嵌入用) **保留** (迁移期 read 兼容), 但**新代码不应再 embed** 整结构.
+**为什么 rationale 必填**: AI review / 人类 review 时**一眼**看出"这个 intent 为什么这 severity", 避免"凭直觉设 hard/soft" 的反模式.
 
-### 3.5 Assumption 独立 status 字段
+### 3.5 AssumptionFrontmatter 字段 + 独立 status 字段
 
-`AssumptionFrontmatter` 已**有** `Status` 字段概念但**未拍** — 本 RFC 拍板:
+`AssumptionFrontmatter` 字段变化 — `Severity` 改 `DefaultSeverity` (本意: 这是**默认** severity, 意图**各自**可覆盖):
 
 ```go
 type AssumptionFrontmatter struct {
-    // ... 原有字段 ...
-    Status Status `yaml:"status,omitempty"`  // draft | active | superseded
+    ID              string   `yaml:"id"`               // 必需, MUST == filename (without .md)
+    Text            string   `yaml:"text"`             // 必需, 假设描述 (跨意图共享)
+    DefaultSeverity Severity `yaml:"default_severity"` // 必需, 建议默认 severity (意图可覆盖)
+    Status          Status   `yaml:"status,omitempty"` // draft | active | superseded
+    CreatedBy       string   `yaml:"created_by"`       // 必需
+    UpdatedAt       string   `yaml:"updated_at"`       // 必需, ISO 8601
+    ExpiresAt       string   `yaml:"expires_at,omitempty"`
+    VerifiedAt      string   `yaml:"verified_at,omitempty"`
+    VerifiedBy      string   `yaml:"verified_by,omitempty"`
+    Reviewers       []string `yaml:"reviewers,omitempty"`
 }
 ```
+
+**Severity 字段从 AssumptionFrontmatter 移除的原因**: 同 1 份假设**不**应该有 1 份 severity, 否则跨意图 severity 差异**不可表达** (v1.1 A 路径的**根本**缺陷). 改 `DefaultSeverity` 后意图**各自** `severity` 字段**真**支持差异, 同时**保持**"该假设通常多严" 的元信息.
 
 `status: superseded` 的 assumption **不**参与 lint / MCP `kron_assume_check` / `kron_stale` (类似 intent 的 `superseded`).
 
@@ -156,26 +185,37 @@ type AssumptionFrontmatter struct {
 
 ### 4.2 Step 2 — 改 `internal/parser/frontmatter.go`
 
-**v1.3 拍板**: `ParseFrontmatter` 接受**两种**形式:
+**v1.3 拍板 (B-3)**: `ParseFrontmatter` 接受**两种**形式, 字段集**多** `id` + `rationale`:
 
 ```go
-// 形式 1 (B 路径, 推荐): 纯 id 列表
-assumptions: ["single-region", "redis-availability"]
-
-// 形式 2 (A 路径, 迁移期兼容): 完整结构
+// 形式 1 (B-3 路径, 推荐): 完整结构 + 引用 id + 必填 rationale
 assumptions:
   - id: single-region
-    text: ...
+    severity: hard
+    rationale: "跨 region 时 token 失效爆炸, 必须保证单 region 部署"
+  - id: redis-availability
+    severity: soft
+    rationale: "Redis 偶尔挂, 自动重试可接受"
+
+// 形式 2 (A 路径, 迁移期兼容): v1.1 拍板的结构, rationale 留空 → 迁移期 Warning
+assumptions:
+  - id: single-region
+    text: 服务仅部署在单 region
     severity: hard
     expires_at: "2026-12-31"
+    # rationale 缺, 迁移期 lint Warning, v1.5 硬报错
 ```
 
-**校验策略**:
-- 形式 1: `len(Assumptions) > 0` && 每个元素 `ValidateSlug(id)`
-- 形式 2: 每个元素 `id` 必填 + `severity` 合法
-- 混合 (既有 id 又有结构) → **lint 警告** (lint.assumption-mixed-form)
+**校验策略 (B-3)**:
+- `len(Assumptions) > 0` (允许空数组表示"无假设")
+- 每个元素:
+  - `ID` 必填 + `ValidateSlug(id)` 走 + 不能含 `/`
+  - `Severity` 必填 + 合法 (`hard` / `soft`)
+  - `Rationale` 必填 + ≥ 10 字符 (A 路径遗留文件迁移期 Warning, v1.5 硬 Error)
+  - `Text` 可选 (留空 → 调 `assumption.Reader.Get` 读注册表)
+- 混合 (A + B 形式) → **lint 警告** (lint.assumption-mixed-form)
 
-解析后**统一**: `intent.Frontmatter.Assumptions` 字段语义变为 `[]string` (id 列表); 形式 2 解析时**仅**取 `id` 字段, **丢弃**其余, **不**报错 (迁移期宽松).
+**为什么 `[]Assumption` 而非 `[]string`**: 让 `rationale` / `severity` 强制每个 intent **各自**给出, 跨意图 severity 差异**真**支持. 纯 slug 引用 (`[]string`) 会**丢**这条核心信息.
 
 ### 4.3 Step 3 — 改 `internal/lint/lint.go` S-class
 
@@ -211,17 +251,19 @@ for _, id := range in.Frontmatter.Assumptions {
 
 ### 4.4 Step 4 — 改 `cmd/kron/serve-mcp/handlers_assume_check.go` + `tools_list_get.go`
 
-**`kron_assume_check`** 改: 读 `assumption.Reader.List(ctx)` → 匹配 `file_path` 对应 intent → 拿 intent 的 `Frontmatter.Assumptions` (id 列表) → `ar.Get(ctx, id)` → 输出 warnings.
+**`kron_assume_check`** 改: 读 `assumption.Reader.List(ctx)` → 匹配 `file_path` 对应 intent → 拿 intent 的 `Frontmatter.Assumptions` (结构) → 对每条 `a.ID` 调 `ar.Get(ctx, id)` 拿 `text` / `default_severity` → **用 `a.Severity` (意图各自) 而非 `default_severity`** → 输出 warnings.
 
-**`kron_list` / `kron_get`** 改: 拿 `intent.Frontmatter.Assumptions` (id 列表) → 对每个 id 调 `ar.Get(ctx, id)` → 拼成 wire format:
+**`kron_list` / `kron_get`** 改: 拿 `intent.Frontmatter.Assumptions` (结构) → 对每条 `a.ID` 调 `ar.Get(ctx, id)` → 拼成 wire format:
 
 ```json
 {
   "assumptions": [
     {
       "id": "single-region",
-      "text": "...",
-      "severity": "hard",
+      "text": "服务仅部署在单 region",
+      "severity": "hard",            // 来自 a.Severity (意图各自), **不**是 default_severity
+      "default_severity": "soft",    // 来自注册表, 给"该假设通常多严" 的元信息
+      "rationale": "跨 region 时 token 失效爆炸",
       "expires_at": "2026-12-31",
       "verified_at": "...",
       "status": "active"
@@ -230,9 +272,9 @@ for _, id := range in.Frontmatter.Assumptions {
 }
 ```
 
-**`assumesToWire`** 函数**重写** (从 `Frontmatter.Assumptions` 结构体切片 → 调 `ar.Get`).
+**`assumesToWire`** 函数**重写** (从 `Frontmatter.Assumptions` 结构体切片 → 调 `ar.Get` 拿注册表字段, 拼 wire). `a.Severity` 永远**优先**于 `default_severity` (意图**各自**的判断是 ground truth, 注册表只是 default).
 
-### 4.5 Step 5 — 新 lint 规则
+### 4.5 Step 5 — 新 lint 规则 (B-3 加 4 规则, 不仅是 3)
 
 **`RuleAssumptionRegistryIdMismatch`** (Error): intent 引用 id 不在 assumption 注册表.
 
@@ -241,6 +283,12 @@ for _, id := range in.Frontmatter.Assumptions {
 **`RuleAssumptionMixedForm`** (Warning): intent `assumptions[]` 混 id 和结构 (迁移期提示).
 
 **`RuleAssumptionFileIdMismatch`** (Error): `.kron/assumptions/<id>.md` 文件名 ≠ frontmatter `id:` 字段.
+
+**`RuleAssumptionRationaleRequired`** (Error, v1.3 引入; 迁移期 Warning, v1.5 硬 Error): intent `assumptions[].rationale` 必填, ≥ 10 字符.
+
+**`RuleAssumptionRationaleStale`** (Warning): rationale 引用了注册表**已改**的字段 (text / default_severity) — 暗示"rationale 该重写". 检测方式: 注册表 `text` hash vs rationale 内**提到**的关键短语 (简化: rationale 引用了**前**版 `text` 字符串).
+
+**`RuleAssumptionSeverityMismatch`** (Warning): intent `severity` 与注册表 `default_severity` **不同** — 暗示"override 已生效, rationale 解释**为什么**". 纯提示性, **不**报错.
 
 加进 `internal/lint/rules.go`.
 
@@ -312,7 +360,7 @@ done
 
 ---
 
-## 6 测试 plan
+## 6 测试 plan (B-3)
 
 | 测试 | 输入 | 期望 |
 |---|---|---|
@@ -320,14 +368,18 @@ done
 | `TestAssumptionFile_Get_NotFound` | id 不存在 | 返回 `ErrAssumptionNotFound` 包裹 |
 | `TestAssumptionFile_List` | 3 个 .md | 返回 3 元素切片 (排序) |
 | `TestAssumptionFile_Write_IdMismatch` | 写 `af.Slug="x"` + `af.Frontmatter.ID="y"` | 返回 `ErrAssumptionFileIdMismatch` |
-| `TestParseFrontmatter_AcceptsIdList` | `assumptions: ["single-region"]` | `fm.Assumptions = ["single-region"]` |
-| `TestParseFrontmatter_AcceptsInlineForMigration` | `assumptions: [{id, text, ...}]` | `fm.Assumptions = ["id"]` (仅取 id) |
-| `TestParseFrontmatter_RejectsMixedForm` | id + 结构 混合 | 返回 warning (但仍解析) |
+| `TestParseFrontmatter_AcceptsAssumptionStruct` (B-3 改) | `assumptions: [{id, severity, rationale, ...}]` | `fm.Assumptions` 完整结构, `ID` / `Severity` / `Rationale` 字段**不**空 |
+| `TestParseFrontmatter_AcceptsLegacyStructForMigration` (B-3 加) | A 路径 (v1.1) `assumptions: [{id, text, severity, expires_at}]` 无 `rationale` | 解析成功, Rationale="" (迁移期), 触发 `RuleAssumptionRationaleRequired` Warning |
+| `TestParseFrontmatter_RejectsRationaleTooShort` (B-3 加) | `rationale: "hard"` (< 10 字符) | 硬 Error (v1.3+), 迁移期 Warning (v1.3) |
+| `TestParseFrontmatter_RejectsIdEmpty` (B-3 加) | `id: ""` | 硬 Error |
 | `TestRun_AssumptionRegistryIdMismatch` | intent 引用 `nonexistent` id | Diag 包含 RuleAssumptionRegistryIdMismatch |
 | `TestRun_AssumptionOrphan` | 注册表有但**无** intent 引用 | Diag 包含 RuleAssumptionOrphan |
 | `TestRun_AssumptionSupersededSkipped` | 注册表 status=superseded, intent 引用它 | S-class **不** 触发 |
-| `TestKronAssumeCheck_UsesRegistry` | MCP tool 调用, file_path 命中 intent | 返回 text/severity 从注册表读 |
-| `TestMigrate_Standalone_ConvertsAtoB` | 旧 A 路径 intent fixture | 跑完: `.kron/assumptions/<id>.md` 存在 + intent frontmatter 只剩 id |
+| `TestRun_AssumptionRationaleRequired` (B-3 加) | intent rationale="" | Diag 包含 RuleAssumptionRationaleRequired |
+| `TestRun_AssumptionSeverityMismatch_WarningOnly` (B-3 加) | intent severity=hard, 注册表 default_severity=soft | Diag 包含 RuleAssumptionSeverityMismatch (Warning, **不** Error) |
+| `TestKronAssumeCheck_UsesRegistry_PreservesIntentSeverity` (B-3 加) | MCP tool 调用, file_path 命中 intent | 返回 severity=**意图** `a.Severity` 而**非** `default_severity` |
+| `TestKronListGet_AssumesToWire` (B-3 加) | intent 有 2 assumption, 1 hard 1 soft | wire 输出 `[{id, text, severity: "hard", default_severity: "soft", rationale: "..."}]` |
+| `TestMigrate_Standalone_ConvertsAtoB` | 旧 A 路径 intent fixture | 跑完: `.kron/assumptions/<id>.md` 存在 + intent frontmatter 仍**完整结构** (B-3), 迁移脚本生成 `rationale: "<从 A 路径 text 自动生成的 rationale>"` 占位 (人类 review) |
 | `TestMigrate_Standalone_Idempotent` | 跑 2 次 | 第二次 skip, 结果一致 |
 
 ---
@@ -353,7 +405,7 @@ done
 | PR 2 | **`internal/assumption/` 包** (Reader/Writer + 4 单元测试) | PR 1 后 | 无 |
 | PR 3 | **`internal/parser/frontmatter.go` 改** — 接受 id 列表 + A 路径**只取 id** (向后兼容) + 5 单元测试 | PR 2 后 | 无 |
 | PR 4 | **`internal/model/intent.go` 字段语义** — `Assumptions []string` (Breaking type change, 但**仅** 读时仍能解析 A) + 改 `internal/model/intent_test.go` | PR 3 后 | 无 |
-| PR 5 | **`internal/lint/lint.go` S-class 改** — 读 `assumption.Reader` + 3 新 lint 规则 (registry-id-mismatch / orphan / mixed-form) + 5 单元测试 | PR 4 后 | 无 |
+| PR 5 | **`internal/lint/lint.go` S-class 改** — 读 `assumption.Reader` + **4** 新 lint 规则 (registry-id-mismatch / orphan / mixed-form / rationale-required / severity-mismatch) + rationale-stale 检测 (W) + 6 单元测试 | PR 4 后 | 无 |
 | PR 6 | **`cmd/kron/serve-mcp/handlers_assume_check.go` + `tools_list_get.go` 改** — 调 `assumption.Reader` 拿 text/severity + 2 集成测试 | PR 5 后 | 无 |
 | PR 7 | **`scripts/migrate-assumptions-standalone.sh` + `cmd/kron/cli/migrate.go` (新子命令)** | PR 5 后 | 无 |
 | PR 8 | **文档同步** (8 文件 — intent-structure.md / domain-model.md / AGENTS.md / business.md / README.md / how-it-works.md / architecture.md / migrate.md) | PR 6 后 | 无 |
@@ -376,8 +428,36 @@ done
 ## 10 关键决策 (本 RFC 拍板后**不可**回退的)
 
 1. **Assumption 物理存储** = `.kron/assumptions/<id>.md` 独立文件 (B 路径)
-2. **Intent frontmatter 引用** = `assumptions: ["<id>"]` slug 列表
+2. **Intent frontmatter 引用** = `assumptions: [{id, severity, rationale, ...}]` (B-3 完整结构, 跨意图 severity **可**差异; rationale 必填)
 3. **新包** = `internal/assumption/` (Reader/Writer)
 4. **迁移工具** = `scripts/migrate-assumptions-standalone.sh` (幂等)
 5. **A 路径废弃** = v1.5 硬报错 (1 minor 期兼容)
-6. **新 lint 规则** = registry-id-mismatch (Error) / orphan (Warning) / mixed-form (Warning) / file-id-mismatch (Error)
+6. **新 lint 规则** = registry-id-mismatch (E) / orphan (W) / mixed-form (W) / file-id-mismatch (E) / **rationale-required (E)** / **rationale-stale (W)** / **severity-mismatch (W)**
+7. **AssumptionFrontmatter.Severity** 改 `DefaultSeverity` (本意: 默认 severity, 意图**覆盖**; 跨意图 severity 差异**真**支持)
+8. **rationale 必填 + ≥ 10 字符** (AI review 时**一眼**看出 "为什么本 intent 这 severity")
+
+---
+
+## 11 变更日志 (B-3 fix)
+
+### 2026-10-08 15:18 — B-1 → B-3 修复 (用户 review 后拍)
+
+**问题**:
+- L114-122 (原) 拍 `[]string` slug 列表 — **丢**跨意图 severity 差异 (v1.1 A 路径核心缺陷)
+- 7 测试失效 / 4 文件改 → 改动面**过**广
+
+**修复** (本节):
+- §3.3 例子: `["single-region"]` → `[{id, severity, rationale}]` (B-3 完整结构)
+- §3.4 字段语义: `[]string` → `[]Assumption` (兼容 A 路径, 字段集**多** `id` + `rationale`)
+- §3.5 `AssumptionFrontmatter.Severity` → `DefaultSeverity` (默认 severity 语义, 意图**覆盖**)
+- §4.2 校验: `a.ID == ""` + `a.Rationale == ""` (Error) — 而**非**"接受 id 列表 + 仅取 id"
+- §4.4 `assumesToWire`: 保留 `a.Severity` (意图**各自**优先), `default_severity` 仅作元信息
+- §4.5 lint 规则: 4 → **7** (新增 rationale-required / rationale-stale / severity-mismatch)
+- §6 测试 plan: 7 → **16** (新增 9 B-3 专项测试)
+- §8 PR 5 改 "3 新规则" → "4 新规则" + rationale-stale
+- §10 关键决策 #2 / #6 / #7 全部更新
+
+**修复后影响**:
+- 字段语义**不**变 (仍是 `[]Assumption`), A 路径用户**不**感知字段集**多** `id` + `rationale`
+- **少**改: 7 测试失效 → **3** 测试改; 4 文件失效 → **2** 文件改 (`parser` + `tools_list_get`)
+- `lint.go` / `handlers_assume_check.go` **不**改结构 (Severity 字段保留)
