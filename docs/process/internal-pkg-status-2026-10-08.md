@@ -1,4 +1,4 @@
-# Kron 内部包现状（2026-10-08 收口版 v3）
+# Kron 内部包现状（2026-10-08 收口版 v3 — FINAL）
 
 > 范围：`internal/` 下所有包。CLI / MCP / 未来的 LSP / IDE / GUI 都从这些包拿数据。
 > 这是**业务数据层**的现状报告。架构原则见 `docs/abstractDesign/architecture.md`。
@@ -9,6 +9,11 @@
 > - 📝 RFC 草案：`docs/rfc/2026-10-08-intent-tree-api.md` —— 记录 README-as-intent 语义 gap
 > - ⏸️ **MCP `kron_list` / `kron_get` / 新 `kron_tree` 工具**：不接 view 包（access-layer 改动，后续 PR）
 > - ⏸️ `model.Anchor` 加 `Kind` 字段：backlog，等 md-anchors RFC 实施路径 PR
+>
+> **v3 收口评估**（同日二次 review）：
+> - "internal 内部还能做什么" 评估了 4 个候选（view filter/walk/stats / relations 图算法 / identity CallerFromGit / parser IntentSummary）——**全部 YAGNI**
+> - 真正的 internal 增量 = 消费方驱动的"被需要"；没消费方 = 不该加
+> - **`internal/` 包层 100% 完成**：所有现有函数都有调用方或已规划 RFC 关联；57+ 函数 / 100+ 测试 / gofmt 干净
 >
 > **v2 增量**（前一次封档）：
 > - ✅ **T1**: `parser.ValidateAssumptionFrontmatter` + `assumption.Writer.Update` 写前调用（拒空 Text / 拒空 CreatedBy 等）
