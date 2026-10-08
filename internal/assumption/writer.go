@@ -295,6 +295,13 @@ func (w *Writer) Update(ctx context.Context, id string, p UpdatePatch, opts ...U
 		body = *p.Body
 	}
 
+	// Re-validate the patched shape BEFORE writing so a malformed
+	// patch (e.g. empty Text) does not reach disk. Mirrors
+	// store.Writer.Update's ValidateFrontmatter call.
+	if err := parser.ValidateAssumptionFrontmatter(&curFM); err != nil {
+		return fmt.Errorf("assumption: patch invalid: %w", err)
+	}
+
 	content, err := serializeAssumptionFile(curFM, body)
 	if err != nil {
 		return fmt.Errorf("assumption: serialize %s: %w", id, err)

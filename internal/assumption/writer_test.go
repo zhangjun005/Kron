@@ -504,6 +504,122 @@ func TestWriter_Restore_NotInTrash(t *testing.T) {
 }
 
 // =====================================================================
+// Update: pre-write validation (T1 tail)
+// =====================================================================
+
+func TestWriter_Update_RejectsEmptyText(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Create(context.Background(), CreateParams{
+		ID: "x", Text: "original", DefaultSeverity: model.SeverityHard, CreatedBy: "@a",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	empty := ""
+	patch := UpdatePatch{Text: &empty, Actor: "@a"}
+	if err := w.Update(context.Background(), "x", patch); err == nil {
+		t.Fatal("expected error on empty Text, got nil")
+	} else if !strings.Contains(err.Error(), "text") {
+		t.Errorf("err = %v, want substring 'text'", err)
+	}
+
+	// On-disk unchanged.
+	r, err := NewReader(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.Get(context.Background(), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Frontmatter.Text != "original" {
+		t.Errorf("Text = %q, want 'original'", got.Frontmatter.Text)
+	}
+}
+
+func TestWriter_Update_RejectsInvalidSeverity(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Create(context.Background(), CreateParams{
+		ID: "x", Text: "x", DefaultSeverity: model.SeverityHard, CreatedBy: "@a",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Field-level severity check rejects non-{hard,soft} values.
+	// The post-patch ValidateAssumptionFrontmatter re-checks this
+	// and would also catch it; either way, the on-disk file MUST
+	// not change.
+	bad := model.Severity("nuclear")
+	patch := UpdatePatch{DefaultSeverity: &bad, Actor: "@a"}
+	if err := w.Update(context.Background(), "x", patch); err == nil {
+		t.Fatal("expected error on invalid severity, got nil")
+	} else if !strings.Contains(err.Error(), "severity") {
+		t.Errorf("err = %v, want substring 'severity'", err)
+	}
+
+	r, err := NewReader(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.Get(context.Background(), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Frontmatter.DefaultSeverity != model.SeverityHard {
+		t.Errorf("DefaultSeverity = %q, want 'hard'", got.Frontmatter.DefaultSeverity)
+	}
+}
+
+func TestWriter_Update_RejectsEmptyCreatedBy(t *testing.T) {
+	// Exercises the post-patch ValidateAssumptionFrontmatter:
+	// the field-level check in Update does NOT verify CreatedBy is
+	// non-empty, but the strict validator does. Without the strict
+	// check, an Update could wipe CreatedBy.
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Create(context.Background(), CreateParams{
+		ID: "x", Text: "x", DefaultSeverity: model.SeverityHard, CreatedBy: "@alice",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	empty := ""
+	patch := UpdatePatch{
+		CreatedBy: &empty,
+		Actor:     "@alice",
+	}
+	if err := w.Update(context.Background(), "x", patch, WithAllowCreatorChange()); err == nil {
+		t.Fatal("expected error on empty CreatedBy, got nil")
+	} else if !strings.Contains(err.Error(), "created_by") {
+		t.Errorf("err = %v, want substring 'created_by'", err)
+	}
+
+	// On-disk unchanged.
+	r, err := NewReader(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.Get(context.Background(), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Frontmatter.CreatedBy != "@alice" {
+		t.Errorf("CreatedBy = %q, want '@alice'", got.Frontmatter.CreatedBy)
+	}
+}
+
+// =====================================================================
 // helpers
 // =====================================================================
 

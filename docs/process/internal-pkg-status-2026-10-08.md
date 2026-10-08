@@ -1,14 +1,19 @@
-# Kron 内部包现状（2026-10-08 收口版）
+# Kron 内部包现状（2026-10-08 收口版 v2）
 
 > 范围：`internal/` 下所有包。CLI / MCP / 未来的 LSP / IDE / GUI 都从这些包拿数据。
 > 这是**业务数据层**的现状报告。架构原则见 `docs/abstractDesign/architecture.md`。
 >
-> **本版本要点**（相对 2026-10-08 初版）：
-> - ✅ `internal/store/` 补 `Writer.Update` + 6 个测试（CRUD 完整）
+> **v2 增量**（相对 v1，同日二次封档）：
+> - ✅ **T1**: `parser.ValidateAssumptionFrontmatter` + `assumption.Writer.Update` 写前调用（拒空 Text / 拒空 CreatedBy 等）
+> - ✅ **T2**: `parser.validateFrontmatter` 加 Symbol 校验（拒空 / 拒 ".."）；`store.Writer.Update` 写前已调，自动覆盖
+> - ✅ **`relations.ReferencingIntents(intents, assumptionID) []string`** + 4 测试（Intent ↔ Assumption 反向）
+> - ⏸️ `assumption.Writer.Delete` 的 `CreatedBy` 改为 actor 仍保留为 `Delete` 例外（v1.4+ 审计日志时再统一）
+>
+> **v1 增量**（前一次封档）：
+> - ✅ `internal/store/` 补 `Writer.Update` + 9 个测试（CRUD 完整）
 > - ✅ `internal/store/` 风格对齐 `internal/assumption/`（Patch + auto-time + opt-in CreatedBy）
 > - 🗑️ `docs/process/migrate.md` 移到 `.deprecated/2026-10-08-store-update-patch/`
-> - ⏸️ **推倒重写**：原报告里 ❶❷ ❸ ❹ ❺ ❻ 一律推迟——本报告以"今天做完了什么"为唯一评估基准
-> - 🚫 **没有** RepoView、ScanMarkdownAnchors 进 lint、relations.ReferencingIntents、lint 规则重组——这些不在本次范围
+> - 🚫 RepoView、ScanMarkdownAnchors 进 lint、lint 规则重组——继续推迟
 
 ---
 
@@ -78,13 +83,14 @@
 
 ### 1.4 关系图（`internal/relations/`）—— 完整
 
-接受预加载的 `[]*model.Intent`，**零 IO**。3 个反向 view：
+接受预加载的 `[]*model.Intent`，**零 IO**。4 个反向 view：
 
 | 函数 | 输出 | 用例 |
 |---|---|---|
 | `ReverseLinks(intents, target)` | 3 个 sorted slice：`references` / `dependsOnDependents` / `symbolInferred` | `kron_impact` 反向 view |
 | `Dependents(intents, target)` | 排序的 `[]string` | `kron_delete` 提示"删之前哪些 intent 依赖它" |
 | `Prerequisites(intents, target)` | 排序的 `[]string` | `kron_impact` 前置条件 |
+| `ReferencingIntents(intents, assumptionID)` ✅ NEW | 排序去重的 `[]string`（哪些 intent 在 `Assumptions[].ID` 里引了这个 assumption） | 未来 `kron_assumption_delete` 提示"删之前哪些 intent 在用" |
 
 ### 1.5 写 API 风格一致性（**今天对齐了**）
 
@@ -114,7 +120,7 @@
 | 锚点扫描 | ✅ 100% | 两个扫描器独立可用 |
 | 关系图 | ✅ 100% | 3 函数覆盖所有反向 view |
 | 校验 | ✅ 100% | 14 条规则 |
-| 写 API 风格一致性 | ✅ 100% | `store.Update` ↔ `assumption.Update` 完全对称 |
+| 写 API 风格一致性 | ✅ 100% | `store.Update` ↔ `assumption.Update` 完全对称 + 都有 pre-write 严格校验 |
 | 测试覆盖 | ✅ 高 | 所有 internal 包都有 `_test.go` |
 
 ---
@@ -125,7 +131,6 @@
 
 - ❌ RepoView 内存三件套（3 路 IO 汇聚）
 - ❌ `parser.ScanMarkdownAnchors` 接入 `lint.Run`
-- ❌ `relations.ReferencingIntents` 反向 API
 - ❌ lint 规则文件重组
 - ❌ MCP `kron_assumption_*` 写工具
 - ❌ CLI assumption 子命令
@@ -151,14 +156,19 @@
 | 4 个上层迁移策略 | ✅ 拍板 | **留 `Write` + 加 `Update` 并存**——handler_add.go / handler_delete.go / handler_restore.go 不动；handler_update.go 可后续迁移 |
 | `migrate.md` 处理 | ✅ 拍板 | `git mv` 到 `.deprecated/2026-10-08-store-update-patch/`（保 blame） |
 | `internal-pkg-status-2026-10-08.md` | ✅ 拍板 | **推倒重写**为本文件（原 6 个 ❶❷ ❸ ❹ ❺ ❻ 全部回到"未拍板"） |
+| T1 (assumption pre-write 校验) | ✅ 拍板 | 修 |
+| T2 (store Symbol 校验) | ✅ 拍板 | 修 |
+| `relations.ReferencingIntents` 范围 | ✅ 拍板 | **只 internal 层**——不接 lint / 不开 MCP 工具 |
 
 ---
 
-## 5. 留给下次的 1 个小尾巴
+## 5. 留给下次的小尾巴
 
-`assumption.Writer.Update` 写前**没**调 `parser.ValidateAssumptionFrontmatter`（如果有这个函数的话；目前**没有**——`Update` 只走 `Create` 路径的 `serialize` 校验）。**风险**：通过 `Update` 把 `text` 改成空、`default_severity` 改成非法值，库不拦。
-
-**修复方向**：在 `parser/frontmatter.go` 加 `ValidateAssumptionFrontmatter(fm) -> error`，`assumption.Update` 写前调一次。**30 分钟**。**不在本 PR**——下次开新 PR 再动。
+| # | 尾巴 | 备注 |
+|---|---|---|
+| **T3** | `assumption.Writer.Delete` / `Restore` 仍改 `CreatedBy` 为 actor | 注释里说"v1.4+ 审计日志时再统一"；当前是**有意保留的 Delete 例外**——不视作 bug |
+| T4 | 4 个上层调用方未迁到 `Update` | 设计选择（留 `Write` + 加 `Update` 并存），**不**算尾巴 |
+| T5 | `gofmt -l .` 报 `internal/relations/relations_test.go` 之前是 pre-existing | 本次 PR 已修（`gofmt -w`） |
 
 ---
 
@@ -170,4 +180,15 @@
 | `internal/store/writer_test.go` | 加 9 个 `TestWriter_Update_*`（single / multi / body / nil-vs-empty / CreatedBy opt-in / empty patch / actor required / invalid slug / not found） |
 | `internal/store/errors.go` | **新文件**：`ErrEmptyPatch` + `ErrCreatorChangeNotAllowed`（镜像 `assumption/errors.go`） |
 | `docs/process/migrate.md` | `git mv` 到 `.deprecated/2026-10-08-store-update-patch/migrate.md` |
-| `docs/process/internal-pkg-status-2026-10-08.md` | **本文件**（推倒重写） |
+| `internal-pkg-status-2026-10-08.md` | **本文件**（v1 推倒重写 → v2 二次封档） |
+
+## 7. v2 文件变更清单（今日二次封档）
+
+| 文件 | 变化 |
+|---|---|
+| `internal/parser/frontmatter.go` | 加 `ValidateAssumptionFrontmatter`；`validateFrontmatter` 加 Symbol 校验（空 / ".." 拒） |
+| `internal/assumption/writer.go` | `Update` 写前调 `ValidateAssumptionFrontmatter` |
+| `internal/assumption/writer_test.go` | 加 3 个 `TestWriter_Update_Rejects*`（空 Text / 非法 severity / 空 CreatedBy） |
+| `internal/store/writer_test.go` | 加 3 个 `TestWriter_Update_Rejects*`（坏 assumption id / 空 symbol / 短 rationale） |
+| `internal/relations/relations.go` | 加 `ReferencingIntents(intents, assumptionID) []string` |
+| `internal/relations/relations_test.go` | 加 4 个 `TestReferencingIntents_*`（none / multiple / sorted-dedup / empty input） |

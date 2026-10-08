@@ -14,9 +14,9 @@ func mkIntent(slug string, syms, refs, deps []string) *model.Intent {
 	return &model.Intent{
 		Slug: slug,
 		Frontmatter: model.Frontmatter{
-			CreatedBy: "@a",
-			UpdatedAt: time.Now(),
-			Symbol:    syms,
+			CreatedBy:  "@a",
+			UpdatedAt:  time.Now(),
+			Symbol:     syms,
 			References: refs,
 			DependsOn:  deps,
 		},
@@ -130,4 +130,74 @@ func TestPrerequisites_NoSymbolsNoInferred(t *testing.T) {
 	sameSym := mkIntent("same-sym", []string{"X"}, nil, nil) // not relevant; target has no symbols
 	got := Prerequisites([]*model.Intent{target, b, sameSym}, "target")
 	assert.Equal(t, []string{"b"}, got)
+}
+
+// =====================================================================
+// ReferencingIntents (Intent ↔ Assumption reverse view)
+// =====================================================================
+
+// mkIntentWithAsm is a separate helper from mkIntent so the
+// existing 12 tests stay untouched.
+func mkIntentWithAsm(slug string, asmIDs []string) *model.Intent {
+	asms := make([]model.Assumption, 0, len(asmIDs))
+	for _, id := range asmIDs {
+		asms = append(asms, model.Assumption{
+			ID:        id,
+			Severity:  model.SeverityHard,
+			Rationale: "this is a perfectly valid rationale for testing",
+		})
+	}
+	return &model.Intent{
+		Slug: slug,
+		Frontmatter: model.Frontmatter{
+			CreatedBy:   "@a",
+			UpdatedAt:   time.Now(),
+			Assumptions: asms,
+		},
+	}
+}
+
+func TestReferencingIntents_None(t *testing.T) {
+	intents := []*model.Intent{
+		mkIntentWithAsm("a", []string{"other-assumption"}),
+		mkIntentWithAsm("b", nil),
+	}
+	got := ReferencingIntents(intents, "single-region")
+	assert.Empty(t, got)
+}
+
+func TestReferencingIntents_Multiple(t *testing.T) {
+	intents := []*model.Intent{
+		mkIntentWithAsm("a", []string{"single-region", "low-latency"}),
+		mkIntentWithAsm("b", []string{"single-region"}),
+		mkIntentWithAsm("c", []string{"other"}),
+	}
+	got := ReferencingIntents(intents, "single-region")
+	assert.Equal(t, []string{"a", "b"}, got,
+		"must return sorted distinct slugs that reference the assumption")
+}
+
+func TestReferencingIntents_SortedDedup(t *testing.T) {
+	// Intent "a" references "single-region" twice (shouldn't but might
+	// via patch dedup gap); ReferencingIntents lists it once.
+	intent := &model.Intent{
+		Slug: "a",
+		Frontmatter: model.Frontmatter{
+			CreatedBy: "@a",
+			UpdatedAt: time.Now(),
+			Assumptions: []model.Assumption{
+				{ID: "single-region", Severity: model.SeverityHard, Rationale: "this is a perfectly valid rationale for testing"},
+				{ID: "single-region", Severity: model.SeveritySoft, Rationale: "this is a perfectly valid rationale for testing"},
+			},
+		},
+	}
+	got := ReferencingIntents([]*model.Intent{intent}, "single-region")
+	assert.Equal(t, []string{"a"}, got,
+		"duplicate ID references on one intent must dedup")
+}
+
+func TestReferencingIntents_EmptyInput(t *testing.T) {
+	got := ReferencingIntents(nil, "anything")
+	assert.NotNil(t, got)
+	assert.Empty(t, got)
 }

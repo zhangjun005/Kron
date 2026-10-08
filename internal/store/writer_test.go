@@ -412,3 +412,72 @@ func TestWriter_Update_NotFound(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, model.ErrIntentNotFound)
 }
+
+// =====================================================================
+// T2: pre-write validation (mirrors assumption tests)
+// =====================================================================
+
+func TestWriter_Update_RejectsBadAssumptionID(t *testing.T) {
+	// An assumption.ID containing "/" is invalid (B-3: flat dir).
+	// The field-level check in Update does NOT validate this; the
+	// post-patch parser.ValidateFrontmatter does.
+	w, r := seedIntentForUpdate(t)
+
+	badID := "auth/jwt" // contains "/"
+	badSev := model.SeverityHard
+	badRationale := "this is a perfectly valid rationale for testing"
+	newAsm := []model.Assumption{
+		{ID: badID, Severity: badSev, Rationale: badRationale},
+	}
+	patch := UpdatePatch{
+		Assumptions: &newAsm,
+		Actor:       "@alice",
+	}
+	err := w.Update(context.Background(), "auth-jwt", patch)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "assumptions[0].id")
+
+	// On-disk unchanged.
+	got, err := r.Load(context.Background(), "auth-jwt")
+	require.NoError(t, err)
+	assert.Empty(t, got.Frontmatter.Assumptions)
+}
+
+func TestWriter_Update_RejectsEmptySymbol(t *testing.T) {
+	w, r := seedIntentForUpdate(t)
+
+	badSym := []string{"auth.Token", ""} // empty element
+	patch := UpdatePatch{
+		Symbol: &badSym,
+		Actor:  "@alice",
+	}
+	err := w.Update(context.Background(), "auth-jwt", patch)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "symbol[1]")
+
+	got, err := r.Load(context.Background(), "auth-jwt")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"auth.Token"}, got.Frontmatter.Symbol,
+		"Symbol must remain unchanged on rejection")
+}
+
+func TestWriter_Update_RejectsShortRationale(t *testing.T) {
+	// MinRationaleLen=10. "short" is 5 chars.
+	w, r := seedIntentForUpdate(t)
+
+	shortRationale := "short"
+	badAsm := []model.Assumption{
+		{ID: "single-region", Severity: model.SeverityHard, Rationale: shortRationale},
+	}
+	patch := UpdatePatch{
+		Assumptions: &badAsm,
+		Actor:       "@alice",
+	}
+	err := w.Update(context.Background(), "auth-jwt", patch)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rationale")
+
+	got, err := r.Load(context.Background(), "auth-jwt")
+	require.NoError(t, err)
+	assert.Empty(t, got.Frontmatter.Assumptions)
+}

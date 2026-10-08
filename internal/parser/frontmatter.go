@@ -439,6 +439,18 @@ func validateFrontmatter(fm *model.Frontmatter) error {
 	if err := validateSlugList("depends_on", fm.DependsOn); err != nil {
 		return err
 	}
+	// Symbol is a list of code identifiers (e.g. "pkg.TypeName"); we
+	// don't run ValidateSlug (it would reject dots and uppercase),
+	// but we DO reject empty entries and ".." so a typo doesn't slip
+	// through to lint.
+	for i, sym := range fm.Symbol {
+		if strings.TrimSpace(sym) == "" {
+			return fmt.Errorf("symbol[%d] is empty", i)
+		}
+		if strings.Contains(sym, "..") {
+			return fmt.Errorf("symbol[%d] %q must not contain '..'", i, sym)
+		}
+	}
 	return nil
 }
 
@@ -513,6 +525,57 @@ func ValidateSlug(slug string) error {
 		if !slugSegmentRE.MatchString(seg) {
 			return fmt.Errorf("%w: %q contains invalid characters", model.ErrSlugInvalid, slug)
 		}
+	}
+	return nil
+}
+
+// ValidateAssumptionFrontmatter checks required-field presence and value
+// shape for an in-memory AssumptionFrontmatter. This is the strict version
+// that ParseAssumptionFrontmatter deliberately does NOT run (the parser is
+// lenient so existing files with missing optional fields round-trip OK).
+//
+// Library callers — particularly Writer.Update — should call this BEFORE
+// persisting a mutated frontmatter, so a malformed patch (e.g. empty Text,
+// invalid Severity) does not reach disk. Mirrors the role of
+// ValidateFrontmatter for Intent frontmatter.
+//
+// Required-field set (RFC 2026-10-08-assumptions-standalone §3):
+//   - ID: kebab-case slug
+//   - Text: non-empty (frontmatter text is the human-readable description;
+//     the registry's body markdown is OPTIONAL free-form commentary)
+//   - DefaultSeverity: must be hard or soft
+//   - CreatedBy: non-empty ("@user" or "agent:<model>")
+//   - UpdatedAt: non-empty (RFC3339 string; format check is caller's job,
+//     we only require presence)
+//
+// Status is optional; if present must be one of {draft, active, superseded}.
+// Rationale, ExpiresAt, VerifiedAt, VerifiedBy: all optional, no shape
+// validation here (Rationale length is enforced by lint at run-time, not
+// at write time — assumption.Writer.Create also doesn't enforce it).
+func ValidateAssumptionFrontmatter(fm *model.AssumptionFrontmatter) error {
+	if fm == nil {
+		return errors.New("frontmatter is nil")
+	}
+	if err := ValidateSlug(fm.ID); err != nil {
+		return fmt.Errorf("id: %w", err)
+	}
+	if strings.TrimSpace(fm.Text) == "" {
+		return errors.New("text is required")
+	}
+	if fm.DefaultSeverity != model.SeverityHard && fm.DefaultSeverity != model.SeveritySoft {
+		return fmt.Errorf("default_severity %q is invalid (allowed: hard, soft)", fm.DefaultSeverity)
+	}
+	if strings.TrimSpace(fm.CreatedBy) == "" {
+		return errors.New("created_by is required")
+	}
+	if strings.TrimSpace(fm.UpdatedAt) == "" {
+		return errors.New("updated_at is required")
+	}
+	switch fm.Status {
+	case "", model.StatusDraft, model.StatusActive, model.StatusSuperseded:
+		// ok
+	default:
+		return fmt.Errorf("status %q is invalid (allowed: draft, active, superseded)", fm.Status)
 	}
 	return nil
 }

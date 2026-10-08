@@ -131,6 +131,38 @@ func Dependents(intents []*model.Intent, targetSlug string) []string {
 	return out
 }
 
+// ReferencingIntents returns the sorted slugs of every intent that
+// has the given assumptionID in its Frontmatter.Assumptions[].ID
+// list. Excludes the target itself (an intent never references
+// itself in B-3). The targetSlug is unused but kept in the signature
+// for symmetry with the rest of the package — callers can pass the
+// intent's own slug or any other anchor.
+//
+// This is the reverse view that MCP `kron_assumption_delete` (and
+// future "what depends on this assumption" features) will need.
+// It complements lint.RuleAssumptionOrphan (which flags the FORWARD
+// direction: assumptions registered but never used). Lint and this
+// function answer different questions, both useful:
+//
+//	lint.RuleAssumptionOrphan: "this assumption file is unused"
+//	ReferencingIntents:         "which intents use this assumption"
+//
+// Note: this is in-memory only. The relations package is documented
+// as "no I/O, no on-disk paths"; loading is the caller's job.
+func ReferencingIntents(intents []*model.Intent, assumptionID string) []string {
+	out := []string{}
+	for _, in := range intents {
+		for _, a := range in.Frontmatter.Assumptions {
+			if a.ID == assumptionID {
+				out = append(out, in.Slug)
+				break
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Prerequisites returns the sorted union of:
 //
 //   - target.Frontmatter.DependsOn (explicit, hard)
