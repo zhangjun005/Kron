@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/xxx/kron/internal/model"
@@ -30,18 +31,34 @@ const anchorMarker = "@kron:intent"
 // contains anchorMarker followed by a slug-shaped token. LineNumber
 // is 1-indexed.
 //
+// FilePath convention (RFC 2026-10-08-path-conventions.md §2.1):
+// model.Anchor.FilePath is always repo-relative, forward-slash
+// separated (filepath.ToSlash of filepath.Rel(dir, abs)). It is an
+// *identifier*, not an IO path — callers that need to open the
+// file must join it against their own root. This keeps the value
+// stable across processes and platforms (Windows backslashes are
+// not allowed in the emitted FilePath).
+//
 // The returned slice is sorted by (FilePath, LineNumber) for
 // deterministic lint output.
 func ScanAnchors(dir string) ([]model.Anchor, error) {
+	// Pre-resolve the walk root so filepath.Rel below uses a stable
+	// absolute baseline regardless of how `dir` was passed (".", "..",
+	// "C:\path", or "/abs/path"). If Abs fails we fall back to the
+	// raw dir — the walk still works, but FilePath values will be
+	// relative to whatever string the caller passed in.
+	rootAbs, _ := filepath.Abs(dir)
+
 	var anchors []model.Anchor
 	err := WalkSourceFiles(dir, func(path string) error {
+		relPath := toRepoRelative(path, rootAbs)
 		f, err := os.Open(path)
 		if err != nil {
 			return fmt.Errorf("open %s: %w", path, err)
 		}
 		defer f.Close()
 
-		fileAnchors, err := scanFile(f, path)
+		fileAnchors, err := scanFile(f, relPath)
 		if err != nil {
 			return fmt.Errorf("scan %s: %w", path, err)
 		}
@@ -55,6 +72,26 @@ func ScanAnchors(dir string) ([]model.Anchor, error) {
 	// Deterministic ordering: (FilePath, LineNumber).
 	sortAnchors(anchors)
 	return anchors, nil
+}
+
+// toRepoRelative converts an absolute (or walk-relative) file path
+// into a forward-slash, root-relative identifier. It is the single
+// point where Anchor.FilePath gets its canonical form per
+// RFC 2026-10-08-path-conventions.md.
+//
+//	rootAbs = ""           → filePath is returned as-is (best effort)
+//	rootAbs given, abs under root → Rel + ToSlash
+//	rootAbs given, abs outside root → Rel + ToSlash (gives "../..." —
+//	                            access layer decides how to surface)
+func toRepoRelative(filePath, rootAbs string) string {
+	if rootAbs == "" {
+		return filePath
+	}
+	rel, err := filepath.Rel(rootAbs, filePath)
+	if err != nil {
+		return filePath
+	}
+	return filepath.ToSlash(rel)
 }
 
 // SlugsForFile returns the set of intent slugs that have a

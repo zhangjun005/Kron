@@ -41,12 +41,18 @@ import (
 // self-referential (one .md == one intent); see intent-structure.md
 // §一.
 func ScanMarkdownAnchors(dir string) ([]model.Anchor, error) {
+	// Mirror ScanAnchors: pre-resolve the walk root so Anchor.FilePath
+	// values are repo-relative, forward-slash per
+	// RFC 2026-10-08-path-conventions.md.
+	rootAbs, _ := filepath.Abs(dir)
+
 	var out []model.Anchor
 	err := WalkSourceFiles(dir, func(path string) error {
 		if !isMarkdownFile(path) {
 			return nil
 		}
-		anchors, err := scanMarkdownFile(path)
+		relPath := toRepoRelative(path, rootAbs)
+		anchors, err := scanMarkdownFileWithPath(path, relPath)
 		if err != nil {
 			return fmt.Errorf("scan %s: %w", path, err)
 		}
@@ -66,13 +72,19 @@ func isMarkdownFile(path string) bool {
 	return strings.HasSuffix(path, ".md")
 }
 
-// scanMarkdownFile scans a single .md file, respecting fenced code blocks.
-// Returns anchors (with line numbers) for every non-fence line that
-// matches the @kron:intent marker.
-func scanMarkdownFile(path string) ([]model.Anchor, error) {
+// scanMarkdownFileWithPath is the production entry point: it scans
+// a single .md file and emits anchors with the canonical
+// (repo-relative, forward-slash) FilePath per
+// RFC 2026-10-08-path-conventions.md.
+//
+// filePath is the disk path used to open the file. emitPath is the
+// value placed on model.Anchor.FilePath. The two diverge when the
+// walk root was a relative dir like "." — filePath is "./auth/foo.md"
+// and emitPath is "auth/foo.md".
+func scanMarkdownFileWithPath(filePath, emitPath string) ([]model.Anchor, error) {
 	const maxLineBytes = 1 << 20 // 1 MiB
 
-	f, err := os.Open(path)
+	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("open: %w", err)
 	}
@@ -114,7 +126,7 @@ func scanMarkdownFile(path string) ([]model.Anchor, error) {
 		}
 		out = append(out, model.Anchor{
 			Slug:       slug,
-			FilePath:   path,
+			FilePath:   emitPath,
 			LineNumber: lineNo,
 		})
 	}
@@ -169,9 +181,3 @@ func parseFenceLine(line string) (isOpen bool, fenceLen int, isClose bool) {
 	// Non-empty info string: opening fence only.
 	return true, count, false
 }
-
-// _ = filepath.Join keeps the filepath import "used" in case future
-// refactors need to construct paths from ScanMarkdownmodel.Anchors. Removing
-// this would break `goimports` and force a second edit when adding
-// path-derived code.
-var _ = filepath.Join

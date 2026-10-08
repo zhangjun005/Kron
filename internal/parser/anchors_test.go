@@ -3,6 +3,7 @@ package parser
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -186,4 +187,78 @@ func TestAnchorStructFields(t *testing.T) {
 	assert.Equal(t, "x", a.Slug)
 	assert.Equal(t, "/p", a.FilePath)
 	assert.Equal(t, 7, a.LineNumber)
+}
+
+// TestScanAnchors_FilePathIsRepoRelative locks down the
+// "FilePath is repo-relative, forward-slash" contract from
+// RFC 2026-10-08-path-conventions.md §2.1. Callers rely on this
+// format to (a) serialize anchors into JSON-RPC payloads without
+// leaking absolute OS paths and (b) join FilePath against their
+// own root to locate the file again. Both invariants are checked.
+func TestScanAnchors_FilePathIsRepoRelative(t *testing.T) {
+	dir := t.TempDir()
+	writeSourceFile(t, dir, "internal/auth/refresh.go", "// @kron:intent auth/jwt\n")
+	writeSourceFile(t, dir, "internal/auth/password.go", "// @kron:intent auth/password\n")
+	// Top-level file.
+	writeSourceFile(t, dir, "root.go", "// @kron:intent root-intent\n")
+
+	anchors, err := ScanAnchors(dir)
+	require.NoError(t, err)
+	require.Len(t, anchors, 3)
+
+	for _, a := range anchors {
+		// (a) No leading slash (relative).
+		assert.False(t, strings.HasPrefix(a.FilePath, "/"),
+			"FilePath must not be absolute: %q", a.FilePath)
+		// (b) No backslash (forward-slash only — Windows safe).
+		assert.NotContains(t, a.FilePath, "\\",
+			"FilePath must use forward slashes: %q", a.FilePath)
+	}
+
+	// Specific values: anchors[0] is the lexicographically first by
+	// (FilePath, LineNumber) — "password.go" sorts before
+	// "refresh.go" (p < r).
+	assert.Equal(t, "internal/auth/password.go", anchors[0].FilePath)
+	assert.Equal(t, "internal/auth/refresh.go", anchors[1].FilePath)
+	assert.Equal(t, "root.go", anchors[2].FilePath)
+}
+
+// TestScanAnchors_FilePath_StableWhenDirIsRelative: even when the
+// caller passes a relative dir, the emitted FilePath is still
+// repo-relative (not "./auth/foo.md"). filepath.Abs is taken
+// internally so the Rel() baseline is the resolved absolute root.
+func TestScanAnchors_FilePath_StableWhenDirIsRelative(t *testing.T) {
+	root := t.TempDir()
+	writeSourceFile(t, root, "a.go", "// @kron:intent single-region\n")
+
+	// Chdir so passing "." is meaningful.
+	oldCwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(root))
+	t.Cleanup(func() { _ = os.Chdir(oldCwd) })
+
+	anchors, err := ScanAnchors(".")
+	require.NoError(t, err)
+	require.Len(t, anchors, 1)
+	assert.Equal(t, "a.go", anchors[1-1].FilePath,
+		"FilePath must be relative to the resolved walk root, not to the caller's CWD string")
+}
+
+func TestScanMarkdownAnchors_FilePathIsRepoRelative(t *testing.T) {
+	dir := t.TempDir()
+	writeSourceFile(t, dir, "docs/spec.md", "<!-- @kron:intent auth/jwt -->\n")
+	writeSourceFile(t, dir, "docs/notes.md", "<!-- @kron:intent auth/password -->\n")
+
+	anchors, err := ScanMarkdownAnchors(dir)
+	require.NoError(t, err)
+	require.Len(t, anchors, 2)
+
+	for _, a := range anchors {
+		assert.False(t, strings.HasPrefix(a.FilePath, "/"),
+			"FilePath must not be absolute: %q", a.FilePath)
+		assert.NotContains(t, a.FilePath, "\\",
+			"FilePath must use forward slashes: %q", a.FilePath)
+	}
+	assert.Equal(t, "docs/notes.md", anchors[0].FilePath)
+	assert.Equal(t, "docs/spec.md", anchors[1].FilePath)
 }

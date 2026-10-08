@@ -302,12 +302,14 @@ func TestImpact_IncomingAnchorsAreSorted(t *testing.T) {
 	require.Len(t, r.IncomingAnchors, 3)
 	// Expected order: a/file1.go, m/file2.go, z/file3.go (all on
 	// line 1). Any other order means the sort in handleImpact is
-	// not (file_path, line)-stable.
-	assert.Equal(t, "a"+sep+"file1.go", r.IncomingAnchors[0].FilePath)
+	// not (file_path, line)-stable. File paths are repo-relative
+	// forward-slash per RFC 2026-10-08-path-conventions.md §2.1
+	// (NOT the platform-native separator).
+	assert.Equal(t, "a/file1.go", r.IncomingAnchors[0].FilePath)
 	assert.Equal(t, 1, r.IncomingAnchors[0].Line)
-	assert.Equal(t, "m"+sep+"file2.go", r.IncomingAnchors[1].FilePath)
+	assert.Equal(t, "m/file2.go", r.IncomingAnchors[1].FilePath)
 	assert.Equal(t, 1, r.IncomingAnchors[1].Line)
-	assert.Equal(t, "z"+sep+"file3.go", r.IncomingAnchors[2].FilePath)
+	assert.Equal(t, "z/file3.go", r.IncomingAnchors[2].FilePath)
 	assert.Equal(t, 1, r.IncomingAnchors[2].Line)
 }
 
