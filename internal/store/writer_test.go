@@ -207,3 +207,208 @@ func TestWriter_Write_NilIntent(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "intent is nil")
 }
+
+// =====================================================================
+// Update tests
+//
+// These mirror assumption.Writer_Update_* in shape. Eight cases:
+//   1. basic single-field patch
+//   2. multi-field patch
+//   3. Body patch (frontmatter unchanged except auto-bump)
+//   4. nil-vs-non-nil semantics (zero value via &empty{})
+//   5. CreatedBy opt-in (default refuses, WithAllowCreatorChange allows)
+//   6. EmptyPatch rejected
+//   7. Actor required
+//   8. Invalid slug rejected
+// =====================================================================
+
+// seedIntentForUpdate writes an intent and returns the Writer + Reader
+// so each Update subtest starts from a known shape. The intent's
+// UpdatedAt is set 1 hour in the past so tests can detect the
+// auto-bump.
+func seedIntentForUpdate(t *testing.T) (*Writer, *Reader) {
+	t.Helper()
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	require.NoError(t, err)
+
+	intent := &model.Intent{
+		Slug: "auth-jwt",
+		Frontmatter: model.Frontmatter{
+			Symbol:     []string{"auth.Token"},
+			CreatedBy:  "@alice",
+			UpdatedAt:  time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC),
+			Status:     model.StatusActive,
+			Reviewers:  []string{"@bob"},
+			References: []string{"auth/refresh"},
+		},
+		Body: "original body",
+	}
+	require.NoError(t, w.Write(context.Background(), intent))
+
+	r, err := NewReader(dir)
+	require.NoError(t, err)
+	return w, r
+}
+
+func TestWriter_Update_SingleField(t *testing.T) {
+	w, r := seedIntentForUpdate(t)
+	before := time.Now().UTC()
+
+	newStatus := model.StatusSuperseded
+	patch := UpdatePatch{
+		Status: &newStatus,
+		Actor:  "@alice",
+	}
+	require.NoError(t, w.Update(context.Background(), "auth-jwt", patch))
+
+	got, err := r.Load(context.Background(), "auth-jwt")
+	require.NoError(t, err)
+	assert.Equal(t, model.StatusSuperseded, got.Frontmatter.Status)
+	// Other fields untouched.
+	assert.Equal(t, []string{"auth.Token"}, got.Frontmatter.Symbol)
+	assert.Equal(t, "@alice", got.Frontmatter.CreatedBy)
+	assert.Equal(t, []string{"@bob"}, got.Frontmatter.Reviewers)
+	// Auto-bump.
+	assert.True(t, got.Frontmatter.UpdatedAt.After(before.Add(-time.Second)),
+		"UpdatedAt should be auto-bumped to recent time, got %v", got.Frontmatter.UpdatedAt)
+}
+
+func TestWriter_Update_MultipleFields(t *testing.T) {
+	w, r := seedIntentForUpdate(t)
+
+	newSymbol := []string{"auth.AccessToken", "auth.RefreshToken"}
+	newReviewers := []string{"@carol"}
+	newRefs := []string{"auth/refresh", "auth/login"}
+	patch := UpdatePatch{
+		Symbol:     &newSymbol,
+		Reviewers:  &newReviewers,
+		References: &newRefs,
+		Actor:      "@alice",
+	}
+	require.NoError(t, w.Update(context.Background(), "auth-jwt", patch))
+
+	got, err := r.Load(context.Background(), "auth-jwt")
+	require.NoError(t, err)
+	assert.Equal(t, newSymbol, got.Frontmatter.Symbol)
+	assert.Equal(t, newReviewers, got.Frontmatter.Reviewers)
+	assert.Equal(t, newRefs, got.Frontmatter.References)
+	// Untouched.
+	assert.Equal(t, model.StatusActive, got.Frontmatter.Status)
+	assert.Equal(t, "@alice", got.Frontmatter.CreatedBy)
+}
+
+func TestWriter_Update_Body(t *testing.T) {
+	w, r := seedIntentForUpdate(t)
+
+	newBody := "completely new body content"
+	patch := UpdatePatch{
+		Body:  &newBody,
+		Actor: "@alice",
+	}
+	require.NoError(t, w.Update(context.Background(), "auth-jwt", patch))
+
+	got, err := r.Load(context.Background(), "auth-jwt")
+	require.NoError(t, err)
+	assert.Equal(t, "completely new body content\n", got.Body,
+		"SerializeMarkdown always appends a trailing newline")
+	// Frontmatter unchanged (other than auto-bump).
+	assert.Equal(t, []string{"auth.Token"}, got.Frontmatter.Symbol)
+}
+
+func TestWriter_Update_NilVsEmpty(t *testing.T) {
+	// nil pointer = leave field alone. Non-nil pointer to empty value
+	// = overwrite to empty. Distinguishing the two is the whole point
+	// of the pointer-per-field design.
+	w, r := seedIntentForUpdate(t)
+
+	emptyReviewers := []string{}
+	patch := UpdatePatch{
+		Reviewers: &emptyReviewers, // explicit empty: clear reviewers
+		Actor:     "@alice",
+	}
+	require.NoError(t, w.Update(context.Background(), "auth-jwt", patch))
+
+	got, err := r.Load(context.Background(), "auth-jwt")
+	require.NoError(t, err)
+	assert.Empty(t, got.Frontmatter.Reviewers,
+		"non-nil pointer to empty slice should clear the field")
+	// Symbol still has its original value.
+	assert.Equal(t, []string{"auth.Token"}, got.Frontmatter.Symbol)
+}
+
+func TestWriter_Update_CreatedByOptIn(t *testing.T) {
+	w, r := seedIntentForUpdate(t)
+
+	// Default: CreatedBy patch is refused.
+	newCreatedBy := "@bob"
+	patch := UpdatePatch{
+		CreatedBy: &newCreatedBy,
+		Actor:     "@alice",
+	}
+	err := w.Update(context.Background(), "auth-jwt", patch)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrCreatorChangeNotAllowed)
+
+	// Verify on-disk state is unchanged.
+	got, err := r.Load(context.Background(), "auth-jwt")
+	require.NoError(t, err)
+	assert.Equal(t, "@alice", got.Frontmatter.CreatedBy)
+
+	// With opt-in: allowed.
+	require.NoError(t, w.Update(context.Background(), "auth-jwt", patch, WithAllowCreatorChange()))
+
+	got, err = r.Load(context.Background(), "auth-jwt")
+	require.NoError(t, err)
+	assert.Equal(t, "@bob", got.Frontmatter.CreatedBy)
+}
+
+func TestWriter_Update_EmptyPatch(t *testing.T) {
+	w, _ := seedIntentForUpdate(t)
+
+	// Every business field nil → ErrEmptyPatch. Library refuses
+	// to write a file with only UpdatedAt changed.
+	patch := UpdatePatch{Actor: "@alice"}
+	err := w.Update(context.Background(), "auth-jwt", patch)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrEmptyPatch)
+}
+
+func TestWriter_Update_ActorRequired(t *testing.T) {
+	w, _ := seedIntentForUpdate(t)
+
+	newStatus := model.StatusSuperseded
+	patch := UpdatePatch{Status: &newStatus} // no Actor
+	err := w.Update(context.Background(), "auth-jwt", patch)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "actor")
+}
+
+func TestWriter_Update_InvalidSlug(t *testing.T) {
+	w, _ := seedIntentForUpdate(t)
+
+	newStatus := model.StatusSuperseded
+	patch := UpdatePatch{
+		Status: &newStatus,
+		Actor:  "@alice",
+	}
+	err := w.Update(context.Background(), "Auth/JWT", patch)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, model.ErrSlugInvalid),
+		"expected ErrSlugInvalid, got %v", err)
+}
+
+func TestWriter_Update_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	require.NoError(t, err)
+
+	newStatus := model.StatusActive
+	patch := UpdatePatch{
+		Status: &newStatus,
+		Actor:  "@alice",
+	}
+	err = w.Update(context.Background(), "missing", patch)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, model.ErrIntentNotFound)
+}
