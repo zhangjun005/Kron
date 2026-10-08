@@ -26,18 +26,29 @@ const (
 
 // Assumption is a verifiable precondition that governs the intent's validity.
 // Written in frontmatter's assumptions[] field, not duplicated in body.
+//
+// B-3 fields (v1.3): ID (required) + Severity (required, per-intent) + Rationale
+// (required, ≥ 10 chars) + Text (optional, read from assumption registry) + expires/verified.
 type Assumption struct {
 	// ID is a machine-friendly identifier in kebab-case.
 	// Used by lint and MCP tools to reference this assumption.
 	ID string `yaml:"id"`
 
 	// Text is a human-readable description of the precondition.
-	Text string `yaml:"text"`
+	// Optional; if empty, callers should read from the assumption registry via ID.
+	Text string `yaml:"text,omitempty"`
 
 	// Severity determines what happens when this assumption is violated.
 	// - hard: code logic MUST be changed (e.g., "Redis available ≥ 99.9%" → token revocation fails)
 	// - soft: code still works but degrades; impact needs evaluation (e.g., "DAU ≤ 10K" → Redis memory pressure)
 	Severity Severity `yaml:"severity"`
+
+	// Rationale explains why THIS intent uses this severity level.
+	// Required, ≥ 10 characters. Rationale is per-intent: the same assumption
+	// (e.g., "single-region") can have different severity in different intents,
+	// with each intent explaining its own rationale.
+	// Lint: RuleAssumptionRationaleRequired (Error, v1.3); v1.5 hard Error.
+	Rationale string `yaml:"rationale"`
 
 	// ExpiresAt is the estimated review deadline for this assumption.
 	// It does NOT trigger any automatic behavior; it only serves as a hint
@@ -76,17 +87,20 @@ type AssumptionFile struct {
 }
 
 // AssumptionFrontmatter is the YAML metadata for an AssumptionFile.
-// Same field set as Assumption (id/text/severity) plus ownership metadata.
+// Same field set as Assumption (id/text/severity/rationale) plus ownership metadata.
+//
+// B-3: Severity → DefaultSeverity (the assumption's default severity;
+// individual intents may override via their Frontmatter.Assumptions[].Severity).
 type AssumptionFrontmatter struct {
-	ID         string   `yaml:"id"`         // kebab-case; MUST equal file name without .md
-	Text       string   `yaml:"text"`       // human/AI description
-	Severity   Severity `yaml:"severity"`   // hard | soft
-	CreatedBy  string   `yaml:"created_by"` // "@user" or "agent:<model>"
-	UpdatedAt  string   `yaml:"updated_at"` // ISO 8601
-	Reviewers  []string `yaml:"reviews,omitempty"`
-	ExpiresAt  string   `yaml:"expires_at,omitempty"`
-	VerifiedAt string   `yaml:"verified_at,omitempty"`
-	VerifiedBy string   `yaml:"verified_by,omitempty"`
+	ID              string   `yaml:"id"`               // kebab-case; MUST equal file name without .md
+	Text            string   `yaml:"text"`             // human/AI description
+	DefaultSeverity Severity `yaml:"default_severity"`  // hard | soft — suggestion only; intents override
+	CreatedBy       string   `yaml:"created_by"`       // "@user" or "agent:<model>"
+	UpdatedAt       string   `yaml:"updated_at"`       // ISO 8601
+	Reviewers       []string `yaml:"reviewers,omitempty"`
+	ExpiresAt       string   `yaml:"expires_at,omitempty"`
+	VerifiedAt      string   `yaml:"verified_at,omitempty"`
+	VerifiedBy      string   `yaml:"verified_by,omitempty"`
 }
 
 // Frontmatter holds the YAML metadata at the top of an intent .md file.

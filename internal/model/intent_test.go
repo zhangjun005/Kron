@@ -134,12 +134,12 @@ func TestAssumption(t *testing.T) {
 
 func TestAssumptionFrontmatter(t *testing.T) {
 	fm := AssumptionFrontmatter{
-		ID:        "single-region",
-		Text:      "服务仅部署在单 region",
-		Severity:  SeverityHard,
-		CreatedBy: "@zhangjun005",
-		UpdatedAt: "2026-09-22T10:00:00Z",
-		Reviewers: []string{"@alice"},
+		ID:              "single-region",
+		Text:            "服务仅部署在单 region",
+		DefaultSeverity: SeverityHard,
+		CreatedBy:       "@zhangjun005",
+		UpdatedAt:       "2026-09-22T10:00:00Z",
+		Reviewers:       []string{"@alice"},
 	}
 
 	if fm.ID != "single-region" {
@@ -157,11 +157,11 @@ func TestAssumptionFile(t *testing.T) {
 	af := AssumptionFile{
 		Slug: "single-region",
 		Frontmatter: AssumptionFrontmatter{
-			ID:        "single-region",
-			Text:      "服务仅部署在单 region",
-			Severity:  SeverityHard,
-			CreatedBy: "@zhangjun005",
-			UpdatedAt: "2026-09-22T10:00:00Z",
+			ID:              "single-region",
+			Text:            "服务仅部署在单 region",
+			DefaultSeverity: SeverityHard,
+			CreatedBy:       "@zhangjun005",
+			UpdatedAt:       "2026-09-22T10:00:00Z",
 		},
 		Body: "# Single Region\n\n> 服务仅部署在单 region。",
 	}
