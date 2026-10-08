@@ -198,6 +198,7 @@ type ImpactInput struct {
 type AnchorRef struct {
 	FilePath string `json:"file_path" jsonschema:"repo-relative path of the source file containing the anchor"`
 	Line     int    `json:"line"      jsonschema:"1-based line number of the @kron:intent line"`
+	Kind     string `json:"kind"      jsonschema:"anchor kind: 'code' (source) or 'markdown' (docs/.md); added in v1.2 per docs/rfc/2026-10-08-md-anchors.md"`
 }
 
 type ImpactOutput struct {
@@ -232,7 +233,7 @@ type StaleInput struct {
 type ExpiredAssumption = lint.ExpiredAssumption
 
 type StaleOutput struct {
-	SupersededCandidates []string                `json:"superseded_candidates" jsonschema:"active intents older than days_threshold"`
+	SupersededCandidates []string                 `json:"superseded_candidates" jsonschema:"active intents older than days_threshold"`
 	ExpiredAssumptions   []lint.ExpiredAssumption `json:"expired_assumptions"   jsonschema:"unverified hard assumptions past expiry"`
 }
 

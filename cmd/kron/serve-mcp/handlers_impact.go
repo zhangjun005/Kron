@@ -76,16 +76,32 @@ func HandleImpact(ctx context.Context, _ *mcp.CallToolRequest, in ImpactInput) (
 	prerequisites := relations.Prerequisites(all, in.Slug)
 
 	// Walk the repo and filter to anchors pointing at our slug.
+	// B-3 / md-anchors RFC §2.5: each anchor carries a `kind` field
+	// ("code" for source files, "markdown" for any .md outside .kron/intents/).
 	var incoming []AnchorRef
 	anchors, err := parser.ScanAnchors(root)
 	if err != nil {
 		return nil, ImpactOutput{}, fmt.Errorf("kron_impact: scan anchors: %w", err)
+	}
+	markdownAnchors, err := parser.ScanMarkdownAnchors(root)
+	if err != nil {
+		return nil, ImpactOutput{}, fmt.Errorf("kron_impact: scan markdown anchors: %w", err)
 	}
 	for _, a := range anchors {
 		if a.Slug == in.Slug {
 			incoming = append(incoming, AnchorRef{
 				FilePath: a.FilePath,
 				Line:     a.LineNumber,
+				Kind:     "code",
+			})
+		}
+	}
+	for _, a := range markdownAnchors {
+		if a.Slug == in.Slug {
+			incoming = append(incoming, AnchorRef{
+				FilePath: a.FilePath,
+				Line:     a.LineNumber,
+				Kind:     "markdown",
 			})
 		}
 	}
