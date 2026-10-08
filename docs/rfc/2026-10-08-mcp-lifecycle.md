@@ -108,7 +108,16 @@ MCP-A: flock("auth/jwt.md") → 写 → unlock
 MCP-B: flock("auth/jwt.md") → 等 → 锁释放 → 写 → unlock
 ```
 
-**不锁整目录** (粒度太粗, 阻塞其他 slug 写)。
+**不锁整目录** (粒度太粗, 阻塞其他 slug 写).
+
+### 2.5 与现有 `writeFileAtomic` 的整合
+
+`internal/store/writer.go` L167-202 `writeFileAtomic` **已**是 temp+rename 原子写, 但**不**跨进程防并发 (rename 在 OS 层原子, **多进程**同时打开 + rename 仍 race). 拍板:
+
+- **包成** `writeFileAtomicLocked(path, data, perm)`: 在 `writeFileAtomic` **前** `flock(LOCK_EX)`, **defer** `flock(LOCK_UN)`
+- 3 个写方法 (`Write` L65 / `MoveToTrash` L100 / `RestoreFromTrash` L135) **全**走新 helper, **不**改方法签名 (仍 `ctx context.Context` 在前)
+- `writeFileAtomic` **不**重命名 (向后兼容既有测试期望, 如 `writer_test.go` 直接测该 helper)
+- 3 个写方法内的 `_ = ctx` **保持不变** (caller 注入 **不**管, 走 `lsp-client.md` §4.5 + `architecture.md` §2.3 — 同一拍板; `ctx` 仅供取消 / 超时传播)
 
 ### 2.3 影响面
 
@@ -143,11 +152,12 @@ MCP-B: flock("auth/jwt.md") → 等 → 锁释放 → 写 → unlock
 
 ### 3.2 Phase 2 (v1.1 实施, 1-2 周)
 
-- [ ] `internal/store/writer.go` 加 `flock` 包装 (`writeWithLock`)
-- [ ] `model` 加 `ErrConcurrentWrite` 错误码
+- [ ] `internal/store/writer.go` 加 `writeFileAtomicLocked` 包装 (走 §2.5), 3 个写方法**不**改签名
+- [ ] `model.ErrConcurrentWrite` 错误码 — **可选**, 实施前**先** grep `cmd/kron/serve-mcp/` 看是否有 `errors.Is(err, syscall.EAGAIN)` 需求; 若无, **直接** `fmt.Errorf("flock: %w", syscall.EAGAIN)` 不加 sentinel
 - [ ] `internal/store/writer_test.go` 增并发测试 (`go test -race`)
-- [ ] `docs/implementation/error-catalog.md` 增 `ErrConcurrentWrite` 描述
-- [ ] `cmd/kron/serve-mcp/` 错误码映射 (`ErrConcurrentWrite` → JSON-RPC `internal_error`)
+- [ ] `docs/implementation/error-catalog.md` 增 `ErrConcurrentWrite` 描述 (若新增)
+- [ ] `cmd/kron/serve-mcp/` 错误码映射 (`ErrConcurrentWrite` / `syscall.EAGAIN` → JSON-RPC `internal_error`)
+- [ ] `_ = ctx` 行 (L65 / L105 / L143) **保持不变** (caller 注入 **不**管, 走 `lsp-client.md` §4.5)
 
 ### 3.3 Phase 3 (v1.2+ 优化, 可选)
 

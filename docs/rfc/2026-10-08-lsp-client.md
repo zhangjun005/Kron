@@ -98,6 +98,7 @@ export function activate(context: vscode.ExtensionContext) {
 2. **0 新依赖** (除 LSP SDK `go.lsp.dev/protocol`, 旧 RFC §8 已拍)
 3. **VSCode 扩展**用 `vscode-languageclient` (TypeScript) 是**事实标准**, 不需要新写
 4. **未来跨编辑器** (Neovim / Helix) 各 client 端**自己**实现 LSP client 协议 — **不**下沉 SDK 到 Kron 仓库
+5. **客户端 SDK 由各编辑器生态提供**: VSCode 走 `vscode-languageclient` (TS, 事实标准), Cursor 复用 VSCode extension, Neovim 走 `nvim-lspconfig`, Helix 走内置 LSP. Kron 仓库**不**下沉跨语言 client SDK (重复 B 候选)
 
 ### 3.4 不在本 RFC 范围
 
@@ -195,7 +196,23 @@ func (s *Server) hover(ctx, params) Hover {
 }
 ```
 
-> **修订**: 旧 RFC §6 拍板"新增 `AnchorAtPosition`" 实际**不**需要 — `SlugsForFile` 已够. **不**走 `new-internal-api.md` 流程. 这是**本次**新增的拍板.
+> **修订**: 旧 RFC §6 拍板"新增 `AnchorAtPosition`" 实际**不**需要 — `SlugsForFile` 已够. **不**走 `new-internal-api.md` 流程, **因为** `SlugsForFile` **已存在** (`internal/parser/anchors.go` L70-95), 既**不**是新加 API, 也**不**改签名 — 是**直接复用**, **不**触发流程门槛.
+
+### 4.5 serve-lsp caller 注入 — **不**管 (2026-10-08 拍)
+
+`model.WithCaller` / `CallerFrom` / `CallerLSP` 等 API 在 `internal/model/caller.go` **仍存在** (兼容 `cmd/kron/serve-mcp` 旧 `callerInjectMiddleware` 与既有 import), 但:
+
+- **新**访问层代码 (含本 RFC 拍板的 `serve-lsp`) **不**调 `model.WithCaller` 注入
+- `internal/` **不**依赖 ctx 上的 caller key 做行为分支
+- 原因: `context.Context` 注入身份属性**不便于开发** (调试栈不直观 / 单元测试需额外包装 / 类型安全弱)
+- 详见 [`docs/abstractDesign/architecture.md`](../abstractDesign/architecture.md) §2.3
+
+**实施影响**: `cmd/kron/serve-lsp/main.go` **不**写 `ctx = model.WithCaller(ctx, model.CallerLSP)`, 直接 `cmd.Context()` 传入 `store.Get` / `parser.SlugsForFile`. `ctx` 仍保留**用于取消 / 超时传播** (与 store/parser 函数签名兼容).
+
+**未来 caller 区分场合** (本 RFC **不**列, 等需要时再拍):
+- lint 输出归因 (caller-aware diagnostics)
+- 审计日志
+- 多租户权限
 
 ---
 
@@ -208,6 +225,14 @@ func (s *Server) hover(ctx, params) Hover {
 - ✅ `docs/implementation/ide-interaction.md` (重写为'VSCode 扩展 / Cursor 调 serve-mcp / serve-lsp 子进程')
 
 ### 5.2 代码实施 (v1.3 启动后, 用户**不**要求立即开工 — 仅写 RFC + 文档)
+
+**前置条件** (实施前**必**完成):
+- [ ] `go.mod` 当前**未**有 `go.lsp.dev/protocol` (grep `go.mod | grep lsp`), 若**已**有则跳过加 dep
+- [ ] 若**未**有, 走 "新 top-level dep" explicit approval: 在 commit body 写 "lsp.dev/protocol 依赖理由" 4 段 (竞品对比 / 包大小 / 维护活跃度 / API 稳定性)
+- [ ] approval 后 `go get go.lsp.dev/protocol@v3.17.0`
+- [ ] `cmd/kron/serve-lsp/main.go` **不**调 `model.WithCaller` (caller 注入 API **不**管, 走 §4.5)
+
+**实施清单**:
 
 - [ ] `cmd/kron/serve-lsp/main.go` (cobra 启动 stdio LSP server)
 - [ ] `cmd/kron/serve-lsp/server.go` (注册 `initialize` / `textDocument/hover` / `textDocument/definition` / `shutdown` / `exit`)
