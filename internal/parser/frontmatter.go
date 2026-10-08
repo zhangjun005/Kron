@@ -166,14 +166,21 @@ func splitFence(data []byte) (fmRaw []byte, body string, err error) {
 // Kept in this file (rather than in internal/model) so the validation
 // policy and the field list live next to the decoder that uses them.
 var knownFrontmatterFields = map[string]struct{}{
-	"symbol":      {},
-	"created_by":  {},
-	"updated_at":  {},
-	"reviewers":   {},
-	"status":      {},
-	"assumptions": {},
-	"references":  {},
-	"depends_on":  {},
+	"symbol":           {},
+	"created_by":       {},
+	"updated_at":       {},
+	"reviewers":        {},
+	"status":           {},
+	"assumptions":      {},
+	"references":       {},
+	"depends_on":       {},
+	"id":               {}, // shared: intent + assumption frontmatter
+	"text":             {}, // shared: intent assumption + assumption file
+	"severity":         {}, // intent inline assumption (per-intent severity)
+	"default_severity": {}, // assumption file (B-3: renamed from severity)
+	"rationale":        {}, // B-3: per-intent explanation (required ≥10 chars)
+	"verified_at":      {}, // shared
+	"verified_by":      {}, // shared
 }
 
 // ParseFrontmatter decodes raw YAML into a model.Frontmatter.
@@ -204,6 +211,69 @@ func ParseFrontmatter(raw []byte) (model.Frontmatter, error) {
 		return fm, err
 	}
 	return fm, nil
+}
+
+// ParseAssumptionFrontmatter parses the YAML frontmatter of an assumption file
+// (.kron/assumptions/<id>.md). It is separate from ParseFrontmatter because
+// assumption files have a different required-field set (no created_by/updated_at
+// required at parse level; Writer.Create checks them).
+//
+// Returns (frontmatter, body, error). Body is the markdown content after the
+// frontmatter separator. Caller is responsible for writing to disk.
+func ParseAssumptionFrontmatter(raw []byte) (model.AssumptionFrontmatter, string, error) {
+	// Split on the kron:frontmatter delimiter.
+	const sep = "<!-- kron:frontmatter -->"
+	idx := bytes.Index(raw, []byte(sep))
+	if idx < 0 {
+		return model.AssumptionFrontmatter{}, "", errors.New("frontmatter: missing <!-- kron:frontmatter --> delimiter")
+	}
+
+	after := raw[idx+len(sep):]
+	endIdx := bytes.Index(after, []byte("<!-- /kron:frontmatter -->"))
+	if endIdx < 0 {
+		return model.AssumptionFrontmatter{}, "", errors.New("frontmatter: missing <!-- /kron:frontmatter --> delimiter")
+	}
+	yamlPart := bytes.TrimSpace(after[:endIdx])
+
+	var fm model.AssumptionFrontmatter
+	dec := yaml.NewDecoder(bytes.NewReader(yamlPart))
+	dec.KnownFields(true)
+	if err := dec.Decode(&fm); err != nil {
+		return fm, "", fmt.Errorf("yaml decode: %w", err)
+	}
+
+	// Remaining content is the body.
+	body := string(bytes.TrimSpace(after[endIdx+len("<!-- /kron:frontmatter -->"):]))
+	return fm, body, nil
+}
+
+// MarshalAssumptionFrontmatter serializes a model.AssumptionFrontmatter to YAML bytes.
+func MarshalAssumptionFrontmatter(fm *model.AssumptionFrontmatter) ([]byte, error) {
+	// Marshal only the public fields (id, text, default_severity, etc.)
+	// Skip SourcePath (set by store layer, not serialized).
+	type afMarshal struct {
+		ID              string   `yaml:"id"`
+		Text            string   `yaml:"text"`
+		DefaultSeverity string   `yaml:"default_severity"`
+		CreatedBy       string   `yaml:"created_by"`
+		UpdatedAt       string   `yaml:"updated_at"`
+		Reviewers       []string `yaml:"reviewers,omitempty"`
+		ExpiresAt       string   `yaml:"expires_at,omitempty"`
+		VerifiedAt      string   `yaml:"verified_at,omitempty"`
+		VerifiedBy      string   `yaml:"verified_by,omitempty"`
+	}
+	m := afMarshal{
+		ID:              fm.ID,
+		Text:            fm.Text,
+		DefaultSeverity: string(fm.DefaultSeverity),
+		CreatedBy:       fm.CreatedBy,
+		UpdatedAt:       fm.UpdatedAt,
+		Reviewers:       fm.Reviewers,
+		ExpiresAt:       fm.ExpiresAt,
+		VerifiedAt:      fm.VerifiedAt,
+		VerifiedBy:      fm.VerifiedBy,
+	}
+	return yaml.Marshal(m)
 }
 
 // ValidateFrontmatter re-runs the same shape checks ParseFrontmatter
