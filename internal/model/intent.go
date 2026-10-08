@@ -173,7 +173,18 @@ type Anchor struct {
 	// Slug is the intent path, without the .md extension.
 	Slug string
 
-	// FilePath is the path to the source file containing this anchor.
+	// FilePath is the path to the source file containing this anchor,
+	// expressed as a REPO-RELATIVE identifier with forward-slash
+	// separators (filepath.ToSlash of filepath.Rel(root, abs)).
+	//
+	// It is an identifier, not an IO path. Callers that need to open
+	// the file must join it against their own root. The format is
+	// locked by RFC 2026-10-08-path-conventions.md §2.1 so anchors
+	// remain stable across processes and platforms (no Windows
+	// backslashes, no leading slash). Scanner implementations (see
+	// internal/parser.ScanAnchors / ScanMarkdownAnchors) emit this
+	// canonical form; tools that synthesize Anchor values directly
+	// (e.g. tests) must follow the same rule.
 	FilePath string
 
 	// LineNumber is the 1-indexed line where the anchor appears.

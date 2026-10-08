@@ -265,9 +265,24 @@ func collapseReadmeSlug(slug string) string {
 
 // Exists reports whether an intent with the given slug is present
 // in .kron/intents/. Trash contents are NOT considered.
+//
+// Like Load, this applies the README shorthand (RFC 2026-10-08
+// §3.1): a slug resolves if EITHER "<slug>.md" OR "<slug>/README.md"
+// is on disk. This keeps the existence check consistent with Load
+// so that callers (notably internal/lint.RuleAnchorDangling) do not
+// falsely flag `// @kron:intent auth` as dangling when the
+// module-level README.md is the actual intent.
 func (r *Reader) Exists(ctx context.Context, slug string) bool {
 	_ = ctx
-	path := r.IntentPath(slug)
-	_, err := os.Stat(path)
-	return err == nil
+	if slug == "" {
+		return false
+	}
+	if _, err := os.Stat(r.IntentPath(slug)); err == nil {
+		return true
+	}
+	readme := filepath.Join(r.Root, model.KronDir, model.IntentDir, slug, "README.md")
+	if _, err := os.Stat(readme); err == nil {
+		return true
+	}
+	return false
 }

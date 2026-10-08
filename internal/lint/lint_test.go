@@ -77,6 +77,37 @@ func TestRun_AnchorValid(t *testing.T) {
 	assert.Empty(t, diags)
 }
 
+func TestRun_AnchorValid_READMEShorthand(t *testing.T) {
+	// Regression guard: an anchor `// @kron:intent auth` must NOT be
+	// reported as dangling when the intent lives at auth/README.md
+	// (RFC 2026-10-08-intent-tree-api.md §3.1 README shorthand).
+	// The bug it would have caught: store.Reader.Exists previously
+	// only checked "<slug>.md", so lint's RuleAnchorDangling would
+	// have falsely fired here.
+	dir := t.TempDir()
+	writeFile(t, dir, "internal/auth/auth.go", "// @kron:intent auth\npackage auth\n")
+	writeFile(t, dir, ".kron/intents/auth/README.md", sampleIntent)
+
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	assert.Empty(t, diags,
+		"auth/README.md should satisfy // @kron:intent auth, but got: %v", diags)
+}
+
+func TestRun_AnchorDangling_READMEMissing(t *testing.T) {
+	// The shorthand only applies when README.md actually exists;
+	// a bare directory with sibling .md files but no README must
+	// still produce a dangling diag.
+	dir := t.TempDir()
+	writeFile(t, dir, "internal/auth/auth.go", "// @kron:intent auth\npackage auth\n")
+	// No .kron/intents/auth.md AND no .kron/intents/auth/README.md.
+
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	require.Len(t, diags, 1)
+	assert.Equal(t, RuleAnchorDangling, diags[0].Rule)
+}
+
 func TestRun_FrontmatterLoadFailureRepromDiag(t *testing.T) {
 	// v1 LoadAll is fail-fast: the first broken intent surfaces as a Go
 	// error. Run() converts that error into a single repo-wide Diag so

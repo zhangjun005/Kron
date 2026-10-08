@@ -133,10 +133,12 @@ func Dependents(intents []*model.Intent, targetSlug string) []string {
 
 // ReferencingIntents returns the sorted slugs of every intent that
 // has the given assumptionID in its Frontmatter.Assumptions[].ID
-// list. Excludes the target itself (an intent never references
-// itself in B-3). The targetSlug is unused but kept in the signature
-// for symmetry with the rest of the package — callers can pass the
-// intent's own slug or any other anchor.
+// list. Duplicates within one intent's Assumptions slice are
+// collapsed (an intent is reported at most once even if it lists
+// the ID twice with different severities). Excludes the
+// assumption's own slug if it ever appeared in intents (an intent
+// never self-references in B-3, but the guard is defensive against
+// future shape changes).
 //
 // This is the reverse view that MCP `kron_assumption_delete` (and
 // future "what depends on this assumption" features) will need.
