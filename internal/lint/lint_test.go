@@ -390,13 +390,14 @@ assumptions:
   - id: region-stays-single
     text: single region
     severity: hard
+    rationale: "service must remain in single region for token consistency"
     expires_at: %s
 <!-- /kron:frontmatter -->
 
 # Has expiry
 `, expiry.Format(time.RFC3339)))
 
-	diags, err := RunWith(context.Background(), dir, RunOptions{}.WithNow(now))
+	diags, err := RunWith(context.Background(), dir, RunOptions{MigrationMode: true}.WithNow(now))
 	require.NoError(t, err)
 	require.Len(t, diags, 1)
 	assert.Equal(t, RuleExpiredHardAssumption, diags[0].Rule)
@@ -418,6 +419,7 @@ assumptions:
   - id: region-stays-single
     text: single region
     severity: hard
+    rationale: "service must remain in single region for token consistency"
     expires_at: %s
     verified_at: %s
     verified_by: "@alice"
@@ -426,7 +428,7 @@ assumptions:
 # Verified after expiry
 `, expiry.Format(time.RFC3339), verified.Format(time.RFC3339)))
 
-	diags, err := RunWith(context.Background(), dir, RunOptions{}.WithNow(now))
+	diags, err := RunWith(context.Background(), dir, RunOptions{MigrationMode: true}.WithNow(now))
 	require.NoError(t, err)
 	assert.Empty(t, diags)
 }
@@ -443,13 +445,14 @@ assumptions:
   - id: dau-under-10k
     text: DAU under 10k
     severity: soft
+    rationale: "soft DAU budget for the system's scale, can degrade"
     expires_at: %s
 <!-- /kron:frontmatter -->
 
 # Soft
 `, expiry.Format(time.RFC3339)))
 
-	diags, err := RunWith(context.Background(), dir, RunOptions{}.WithNow(now))
+	diags, err := RunWith(context.Background(), dir, RunOptions{MigrationMode: true}.WithNow(now))
 	require.NoError(t, err)
 	assert.Empty(t, diags)
 }
@@ -478,13 +481,14 @@ assumptions:
   - id: x
     text: x
     severity: hard
+    rationale: "x assumption rationale is at least 10 chars"
     expires_at: %s
 <!-- /kron:frontmatter -->
 
 # Has expiry
 `, expiry.Format(time.RFC3339)))
 
-	opts := RunOptions{}.WithNow(now)
+	opts := RunOptions{MigrationMode: true}.WithNow(now)
 	diags, err := RunWith(context.Background(), dir, opts)
 	require.NoError(t, err)
 
@@ -512,6 +516,166 @@ assumptions:
 		}
 	}
 	assert.Len(t, report.ExpiredAssumptions, diagsS2)
+}
+
+// --- B-3: assumption-registry rules ----------------------------------
+//
+// All these tests use a small fixture: a registry with one assumption
+// and one intent referencing (or not) it. They expect specific
+// Rule* diags to appear so the rule wiring is exercised end-to-end.
+
+// helper: write an assumption file into the registry.
+func writeAssumption(t *testing.T, dir, id, text, sev, status string) {
+	t.Helper()
+	body := fmt.Sprintf(`<!-- kron:frontmatter -->
+id: %s
+text: %s
+default_severity: %s
+status: %s
+created_by: "@alice"
+updated_at: 2026-09-22T10:00:00Z
+<!-- /kron:frontmatter -->
+
+# %s
+`, id, text, sev, status, id)
+	writeFile(t, dir, ".kron/assumptions/"+id+".md", body)
+}
+
+func TestRun_AssumptionRegistryIdMismatch(t *testing.T) {
+	dir := t.TempDir()
+	// Empty registry directory (so the reader doesn't skip).
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".kron/assumptions"), 0o755))
+	// Intent references an id that has no registry file.
+	writeFile(t, dir, ".kron/intents/uses-x.md", `<!-- kron:frontmatter -->
+created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+assumptions:
+  - id: ghost
+    severity: hard
+    rationale: "this is a long enough rationale string"
+<!-- /kron:frontmatter -->
+
+# uses-x
+`)
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	assertDiagRule(t, diags, RuleAssumptionRegistryIdMismatch, SeverityError, "uses-x")
+}
+
+func TestRun_AssumptionOrphan(t *testing.T) {
+	dir := t.TempDir()
+	// Registry has one file, but no intent references it.
+	writeAssumption(t, dir, "lonely", "lonely assumption", "soft", "active")
+	// An unrelated intent to keep the repo from being empty.
+	writeFile(t, dir, ".kron/intents/unrelated.md", sampleIntent)
+
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	assertDiagRule(t, diags, RuleAssumptionOrphan, SeverityWarning, "lonely")
+}
+
+func TestRun_AssumptionSupersededSkipped(t *testing.T) {
+	dir := t.TempDir()
+	// Superseded assumption is referenced; should not surface as orphan.
+	writeAssumption(t, dir, "retired", "retired", "soft", "superseded")
+	writeFile(t, dir, ".kron/intents/uses-retired.md", `<!-- kron:frontmatter -->
+created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+assumptions:
+  - id: retired
+    severity: soft
+    rationale: "this is a long enough rationale string"
+<!-- /kron:frontmatter -->
+
+# uses-retired
+`)
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	// No orphan diag for "retired".
+	for _, d := range diags {
+		if d.Rule == RuleAssumptionOrphan && d.Where == "retired" {
+			t.Fatalf("unexpected orphan diag for superseded assumption: %+v", d)
+		}
+	}
+}
+
+func TestRun_AssumptionRationaleRequired(t *testing.T) {
+	dir := t.TempDir()
+	// In MigrationMode (default for CLI): Warning. Without: Error.
+	writeAssumption(t, dir, "x", "x", "soft", "active")
+	writeFile(t, dir, ".kron/intents/needs-rationale.md", `<!-- kron:frontmatter -->
+created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+assumptions:
+  - id: x
+    severity: hard
+<!-- /kron:frontmatter -->
+
+# needs-rationale
+`)
+
+	// MigrationMode: Warning
+	diags, err := RunWith(context.Background(), dir, RunOptions{MigrationMode: true})
+	require.NoError(t, err)
+	assertDiagRule(t, diags, RuleAssumptionRationaleRequired, SeverityWarning, "needs-rationale")
+
+	// Non-migration: Error
+	diags, err = RunWith(context.Background(), dir, RunOptions{MigrationMode: false})
+	require.NoError(t, err)
+	assertDiagRule(t, diags, RuleAssumptionRationaleRequired, SeverityError, "needs-rationale")
+}
+
+func TestRun_AssumptionSeverityMismatch_WarningOnly(t *testing.T) {
+	dir := t.TempDir()
+	// Registry default_severity=soft, intent override=hard. Warning only.
+	writeAssumption(t, dir, "y", "y", "soft", "active")
+	writeFile(t, dir, ".kron/intents/overrides-sev.md", `<!-- kron:frontmatter -->
+created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+assumptions:
+  - id: y
+    severity: hard
+    rationale: "this is a long enough rationale string"
+<!-- /kron:frontmatter -->
+
+# overrides-sev
+`)
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	assertDiagRule(t, diags, RuleAssumptionSeverityMismatch, SeverityWarning, "overrides-sev")
+}
+
+func TestRun_AssumptionFileIdMismatch(t *testing.T) {
+	dir := t.TempDir()
+	// File named z.md but frontmatter id = "different".
+	writeFile(t, dir, ".kron/assumptions/z.md", `<!-- kron:frontmatter -->
+id: different
+text: z
+default_severity: soft
+created_by: "@a"
+updated_at: 2026-09-22T10:00:00Z
+<!-- /kron:frontmatter -->
+
+# z
+`)
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	assertDiagRule(t, diags, RuleAssumptionFileIdMismatch, SeverityError, "z")
+}
+
+// assertDiagRule is a tiny helper to keep the B-3 tests concise.
+func assertDiagRule(t *testing.T, diags []Diag, rule Rule, wantSev Severity, whereContains string) {
+	t.Helper()
+	for _, d := range diags {
+		if d.Rule == rule && d.Severity == wantSev && (whereContains == "" || d.Where == whereContains) {
+			return
+		}
+	}
+	var seen []string
+	for _, d := range diags {
+		seen = append(seen, fmt.Sprintf("%s/%s/%s", d.Rule, d.Severity, d.Where))
+	}
+	t.Fatalf("expected diag rule=%s severity=%s where=%q, got: %v", rule, wantSev, whereContains, seen)
 }
 
 // DO NOT REMOVE the closing blank line below; it keeps the file

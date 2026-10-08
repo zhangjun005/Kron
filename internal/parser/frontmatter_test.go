@@ -167,6 +167,84 @@ assumptions:
 	assert.Contains(t, err.Error(), "severity")
 }
 
+// B-3 (RFC 2026-10-08-assumptions-standalone): assumption IDs are file
+// slugs, not intent slugs — they MUST NOT contain "/" because the
+// on-disk file is .kron/assumptions/<id>.md (flat directory).
+
+func TestParseFrontmatter_RejectsAssumptionIdWithSlash(t *testing.T) {
+	raw := []byte(`created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+assumptions:
+  - id: "auth/region"
+    severity: hard
+    rationale: "this is a long enough rationale string"
+`)
+	_, err := ParseFrontmatter(raw)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "/")
+}
+
+func TestParseFrontmatter_AcceptsAssumptionWithRationale(t *testing.T) {
+	raw := []byte(`created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+assumptions:
+  - id: single-region
+    severity: hard
+    rationale: "跨 region 时 token 失效爆炸, 必须保证单 region 部署"
+`)
+	fm, err := ParseFrontmatter(raw)
+	require.NoError(t, err)
+	require.Len(t, fm.Assumptions, 1)
+	assert.Equal(t, "single-region", fm.Assumptions[0].ID)
+	assert.Equal(t, "跨 region 时 token 失效爆炸, 必须保证单 region 部署", fm.Assumptions[0].Rationale)
+}
+
+func TestParseFrontmatter_AcceptsLegacyStructForMigration(t *testing.T) {
+	// A-path (v1.1) form: full struct with text/severity/expires_at,
+	// no rationale. v1.3 accepts this (parse-level), lint surfaces
+	// RuleAssumptionRationaleRequired as a Warning.
+	raw := []byte(`created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+assumptions:
+  - id: single-region
+    text: 服务仅部署在单 region
+    severity: hard
+    expires_at: "2026-12-31T00:00:00Z"
+`)
+	fm, err := ParseFrontmatter(raw)
+	require.NoError(t, err)
+	require.Len(t, fm.Assumptions, 1)
+	assert.Empty(t, fm.Assumptions[0].Rationale, "empty rationale permitted at parse time (lint surfaces as Warning)")
+	assert.Equal(t, "服务仅部署在单 region", fm.Assumptions[0].Text)
+	assert.Equal(t, "2026-12-31T00:00:00Z", fm.Assumptions[0].ExpiresAt)
+}
+
+func TestParseFrontmatter_RejectsRationaleTooShort(t *testing.T) {
+	raw := []byte(`created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+assumptions:
+  - id: single-region
+    severity: hard
+    rationale: "hard"
+`)
+	_, err := ParseFrontmatter(raw)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rationale")
+}
+
+func TestParseFrontmatter_RejectsIdEmpty(t *testing.T) {
+	raw := []byte(`created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+assumptions:
+  - id: ""
+    severity: hard
+    rationale: "this is a long enough rationale string"
+`)
+	_, err := ParseFrontmatter(raw)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "id")
+}
+
 func TestValidateSlug_TableDriven(t *testing.T) {
 	cases := []struct {
 		slug     string

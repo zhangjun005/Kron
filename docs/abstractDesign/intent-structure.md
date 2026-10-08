@@ -137,16 +137,24 @@
 
 语义：每条假设表达"这段代码在什么前提下成立"。假设显式化后，AI Agent 和 LSP 可主动消费。
 
-字段结构：
+字段结构（**B-3**，RFC [`2026-10-08-assumptions-standalone.md`](../../rfc/2026-10-08-assumptions-standalone.md)）：
 ```yaml
 assumptions:
-  - id: <短机器名>           # 唯一标识，用于 lint 和 MCP 锚点
-    text: <自然语言描述>      # 人/AI 可读的前提描述
-    severity: hard | soft     # hard=破了必须改代码；soft=破了需评估影响
+  - id: <短机器名>           # 唯一标识，对应 .kron/assumptions/<id>.md（**不**含 "/"）
+    text: <自然语言描述>      # （可选）从 registry 读，inline 留空以完成 A→B 迁移
+    severity: hard | soft     # 必需：本意图级别（跨意图可不同）
+    rationale: "<≥10 字符>"   # 必需：解释"为什么本意图这 severity"
     expires_at: "YYYY-MM-DD" # （可选）人工估量的重新审视截止日期
     verified_at: "YYYY-MM-DD" # （可选）最近一次人工确认该假设仍成立的日期
     verified_by: "@handle"   # （可选）确认人
 ```
+
+**B-3 关键变化**（v1.3, 走 `kron migrate assumptions --to-standalone` 迁移）：
+
+- **共享 `text` 存于 registry**：`.kron/assumptions/<id>.md` 里的 `text:` 是单一真理源；intent frontmatter 的 `text:` 是迁移期兼容的 inline copy，迁移完成后**应**清空
+- **`default_severity` 取代 `severity`**（在 registry 文件里）：表示"该假设通常多严"；intent 各自的 `severity` 字段是 ground truth
+- **`rationale` 必填**（≥ 10 字符）：避免"凭直觉设 hard/soft"的反模式；v1.3 迁移期是 Warning，v1.5 改 Error
+- **跨意图 severity 可不同**：同一条假设（`single-region`）在 `auth/jwt.md` 可能是 `hard`、在 `ui/console.md` 可能是 `soft`，各自的 `rationale` 解释"为什么"
 
 `severity` 语义：
 - `hard`：假设破裂时，相关代码逻辑必须修改。例如"Redis 可用性 ≥ 99.9%"破了意味着 token 吊销完全失效，必须改。

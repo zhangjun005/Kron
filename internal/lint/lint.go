@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xxx/kron/internal/assumption"
 	"github.com/xxx/kron/internal/model"
 	"github.com/xxx/kron/internal/parser"
 	"github.com/xxx/kron/internal/store"
@@ -38,6 +39,14 @@ type RunOptions struct {
 	// disable the staleness rules (S1 + S2) entirely, leaving the
 	// other rules active.
 	StaleDaysThreshold int
+
+	// MigrationMode controls how RuleAssumptionRationaleRequired is
+	// surfaced. During the A→B migration window (v1.3 → v1.5),
+	// empty-rationale is a Warning to avoid blocking existing repos.
+	// v1.5+ flips this to Error. CLI `kron lint` calls RunWith
+	// with MigrationMode = true; CI in a v1.5+ project passes
+	// MigrationMode = false.
+	MigrationMode bool
 
 	// now is the reference time used by the staleness rules. Tests
 	// inject a fixed value; production code leaves it zero, which
@@ -78,7 +87,11 @@ func (o RunOptions) resolveNow() time.Time {
 //
 // Use RunWith when staleness threshold tuning or test-time now
 // injection is needed. Run is the no-options equivalent of
-// RunWith(ctx, root, RunOptions{}).
+// RunWith(ctx, root, RunOptions{MigrationMode: true}).
+//
+// MigrationMode defaults to TRUE so that the v1.3 → v1.5 migration
+// window remains non-blocking for existing repos. v1.5+ callers
+// (CI in upgraded projects) pass MigrationMode = false explicitly.
 //
 // Errors are returned only for scope-cream failures: a missing root,
 // an I/O error walking the source tree, or a catastrophic parse failure
@@ -88,7 +101,7 @@ func (o RunOptions) resolveNow() time.Time {
 // root may be absolute; ScanAnchors and store.NewReader both call
 // filepath.Abs internally.
 //
-// Rule classes (May 2026 schema):
+// Rule classes (May 2026 schema + B-3 assumption rules 2026-10-08):
 //
 //	A-class: anchor-dangling (source code → intent)
 //	B-class: frontmatter-invalid (intent .md is unparseable)
@@ -96,6 +109,10 @@ func (o RunOptions) resolveNow() time.Time {
 //	         self-reference (intent → intent frontmatter relations)
 //	S-class: stale-superseded-candidate, expired-hard-assumption
 //	         (lifecycle staleness; default 90-day threshold)
+//	B-3:     assumption-registry-id-mismatch, assumption-orphan,
+//	         assumption-mixed-form, assumption-file-id-mismatch,
+//	         assumption-rationale-required, assumption-rationale-stale,
+//	         assumption-severity-mismatch
 //
 // C-class rules require all intents to be loaded successfully; when
 // LoadAll fails, the per-intent C-class checks are skipped (the
@@ -103,7 +120,7 @@ func (o RunOptions) resolveNow() time.Time {
 // (which don't need intent data) are still produced. S-class rules
 // follow the same gating as C-class.
 func Run(ctx context.Context, root string) ([]Diag, error) {
-	return RunWith(ctx, root, RunOptions{})
+	return RunWith(ctx, root, RunOptions{MigrationMode: true})
 }
 
 // RunWith is the configurable variant of Run.
@@ -234,6 +251,40 @@ func RunWith(ctx context.Context, root string, opts RunOptions) ([]Diag, error) 
 	// signature stable.
 	diags = append(diags, runStalenessRules(intents, opts)...)
 
+	// B-3: assumption registry rules. Skipped cleanly when the
+	// registry directory does not exist (pre-migration repos).
+	ar, arErr := assumption.NewReader(root)
+	var arReader *assumption.Reader
+	if arErr == nil {
+		arReader = ar
+		// file-id-mismatch: walk the registry via the reader
+		// (which surfaces each parsed file even when its
+		// frontmatter id doesn't match the file name — it
+		// returns the file + a wrapped
+		// ErrAssumptionFileIdMismatch on the side).
+		registry, _ := ar.List(ctx)
+		for _, af := range registry {
+			if af.Frontmatter.ID != "" && af.Frontmatter.ID != af.Slug {
+				diags = append(diags, Diag{
+					Rule:     RuleAssumptionFileIdMismatch,
+					Where:    af.Slug,
+					Detail:   fmt.Sprintf("frontmatter id %q does not match file name %q", af.Frontmatter.ID, af.Slug),
+					Severity: SeverityError,
+				})
+			}
+		}
+	} else if !errors.Is(arErr, assumption.ErrAssumptionDirNotFound) {
+		// Unexpected error (permission, IO) — surface as a Diag so
+		// the user sees it instead of getting a silent skip.
+		diags = append(diags, Diag{
+			Rule:     RuleAssumptionFileIdMismatch,
+			Where:    "<root>",
+			Detail:   fmt.Sprintf("could not open .kron/assumptions/: %v", arErr),
+			Severity: SeverityError,
+		})
+	}
+	diags = append(diags, runAssumptionRules(intents, arReader, opts)...)
+
 	return diags, nil
 }
 
@@ -294,6 +345,11 @@ func ComputeStaleReport(intents []*model.Intent, opts RunOptions) StaleReport {
 // the `kron lint` text/JSON output. Kept separate so the two views
 // can evolve independently (e.g. adding new fields to StaleReport
 // without changing the lint Diag schema).
+//
+// B-3 (RFC 2026-10-08-assumptions-standalone): S2 (expired hard
+// assumption) now reads from the assumption registry when present,
+// falling back to inline frontmatter for pre-migration repos. This
+// keeps `kron lint` meaningful during the A→B migration window.
 func runStalenessRules(intents []*model.Intent, opts RunOptions) []Diag {
 	days, enabled := opts.resolveStaleDays()
 	if !enabled {
@@ -318,7 +374,12 @@ func runStalenessRules(intents []*model.Intent, opts RunOptions) []Diag {
 		}
 
 		// S2: hard-severity assumption past expiry without a
-		// post-expiry verification.
+		// post-expiry verification. B-3: in migration window, the
+		// assumption metadata is still inline (registry may not
+		// exist yet); use the inline shape. When the registry
+		// exists, runAssumptionRules covers the registry-aware
+		// variant. Here we keep the inline check so repos mid-
+		// migration still get the warning.
 		for _, a := range in.Frontmatter.Assumptions {
 			if a.Severity != model.SeverityHard || a.ExpiresAt == "" {
 				continue

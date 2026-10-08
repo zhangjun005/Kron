@@ -8,6 +8,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/xxx/kron/internal/assumption"
 	"github.com/xxx/kron/internal/parser"
 	"github.com/xxx/kron/internal/relations"
 	"github.com/xxx/kron/internal/store"
@@ -75,6 +76,14 @@ func HandleImpact(ctx context.Context, _ *mcp.CallToolRequest, in ImpactInput) (
 	references, _, _ := relations.ReverseLinks(all, in.Slug)
 	prerequisites := relations.Prerequisites(all, in.Slug)
 
+	// B-3: read the assumption registry when present so the
+	// summary's `assumes[]` field shows registry text /
+	// default_severity.
+	var ar *assumption.Reader
+	if ard, ardErr := assumption.NewReader(root); ardErr == nil {
+		ar = ard
+	}
+
 	// Walk the repo and filter to anchors pointing at our slug.
 	// B-3 / md-anchors RFC §2.5: each anchor carries a `kind` field
 	// ("code" for source files, "markdown" for any .md outside .kron/intents/).
@@ -130,7 +139,7 @@ func HandleImpact(ctx context.Context, _ *mcp.CallToolRequest, in ImpactInput) (
 	})
 
 	return nil, ImpactOutput{
-		Intent:          intentSummaryFromIntent(target),
+		Intent:          intentSummaryFromIntent(target, ar),
 		IncomingAnchors: incoming,
 		References:      references,
 		Prerequisites:   prerequisites,

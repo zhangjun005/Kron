@@ -8,6 +8,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/xxx/kron/internal/assumption"
 	"github.com/xxx/kron/internal/model"
 	"github.com/xxx/kron/internal/store"
 )
@@ -40,12 +41,20 @@ func HandleList(ctx context.Context, _ *mcp.CallToolRequest, in ListInput) (
 		return nil, ListOutput{}, fmt.Errorf("kron_list: load: %w", err)
 	}
 
+	// B-3: optional assumption registry reader. Pre-migration
+	// repos won't have it; assumesToWire falls back to inline
+	// fields.
+	var ar *assumption.Reader
+	if ard, ardErr := assumption.NewReader(root); ardErr == nil {
+		ar = ard
+	}
+
 	out := ListOutput{Intents: make([]IntentSummary, 0, len(all))}
 	for _, intent := range all {
 		if in.Prefix != "" && !strings.HasPrefix(intent.Slug, in.Prefix) {
 			continue
 		}
-		out.Intents = append(out.Intents, intentSummaryFromIntent(intent))
+		out.Intents = append(out.Intents, intentSummaryFromIntent(intent, ar))
 	}
 	return nil, out, nil
 }
@@ -80,23 +89,31 @@ func HandleGet(ctx context.Context, _ *mcp.CallToolRequest, in GetInput) (
 	if err != nil {
 		return nil, GetOutput{}, err
 	}
-	return nil, GetOutput{Intent: intentFromModel(intent)}, nil
+	var ar *assumption.Reader
+	if ard, ardErr := assumption.NewReader(root); ardErr == nil {
+		ar = ard
+	}
+	return nil, GetOutput{Intent: intentFromModel(intent, ar)}, nil
 }
 
 // intentSummaryFromIntent converts an internal Intent to the wire
 // summary shape (slug + key frontmatter fields). Used by kron_list
 // and kron_impact. Matches docs/implementation/mcp.md §2.
-func intentSummaryFromIntent(in *model.Intent) IntentSummary {
+//
+// ar is the assumption registry reader; it is consulted for each
+// assumption's text + default_severity. Pass nil for pre-migration
+// callers (the inline fields are used as-is).
+func intentSummaryFromIntent(in *model.Intent, ar *assumption.Reader) IntentSummary {
 	return IntentSummary{
 		Slug:      in.Slug,
 		Symbol:    in.Frontmatter.Symbol,
 		Status:    string(in.Frontmatter.Status),
 		UpdatedAt: in.Frontmatter.UpdatedAt.Format(time.RFC3339),
-		Assumes:   assumesToWire(in.Frontmatter.Assumptions),
+		Assumes:   assumesToWire(context.Background(), in.Frontmatter.Assumptions, ar),
 	}
 }
 
-func intentFromModel(in *model.Intent) IntentBody {
+func intentFromModel(in *model.Intent, ar *assumption.Reader) IntentBody {
 	return IntentBody{
 		Slug: in.Slug,
 		Frontmatter: IntentFrontmatter{
@@ -105,7 +122,7 @@ func intentFromModel(in *model.Intent) IntentBody {
 			UpdatedAt:   in.Frontmatter.UpdatedAt.Format(time.RFC3339),
 			Reviewers:   in.Frontmatter.Reviewers,
 			Status:      string(in.Frontmatter.Status),
-			Assumptions: assumesToWire(in.Frontmatter.Assumptions),
+			Assumptions: assumesToWire(context.Background(), in.Frontmatter.Assumptions, ar),
 			References:  in.Frontmatter.References,
 			DependsOn:   in.Frontmatter.DependsOn,
 		},
@@ -114,20 +131,44 @@ func intentFromModel(in *model.Intent) IntentBody {
 	}
 }
 
-func assumesToWire(as []model.Assumption) []AssumeEntry {
+// assumesToWire projects a []model.Assumption to the wire shape,
+// reading the assumption registry (when ar is non-nil) for the
+// canonical text and default_severity.
+//
+// B-3 (RFC 2026-10-08-assumptions-standalone) wire shape:
+//
+//	id                string  (from inline)
+//	text              string  (registry preferred, falls back to inline)
+//	severity          string  (per-intent; ground truth)
+//	default_severity  string  (registry, informational)
+//	rationale         string  (per-intent, B-3)
+//	expires_at        string  (inline)
+//	verified_at       string  (inline)
+//	verified_by       string  (inline)
+func assumesToWire(ctx context.Context, as []model.Assumption, ar *assumption.Reader) []AssumeEntry {
 	if len(as) == 0 {
 		return nil
 	}
 	out := make([]AssumeEntry, 0, len(as))
 	for _, a := range as {
-		out = append(out, AssumeEntry{
+		entry := AssumeEntry{
 			ID:         a.ID,
 			Text:       a.Text,
 			Severity:   string(a.Severity),
+			Rationale:  a.Rationale,
 			ExpiresAt:  a.ExpiresAt,
 			VerifiedAt: a.VerifiedAt,
 			VerifiedBy: a.VerifiedBy,
-		})
+		}
+		if ar != nil && a.ID != "" {
+			if af, err := ar.Get(ctx, a.ID); err == nil && af != nil {
+				if af.Frontmatter.Text != "" {
+					entry.Text = af.Frontmatter.Text
+				}
+				entry.DefaultSeverity = string(af.Frontmatter.DefaultSeverity)
+			}
+		}
+		out = append(out, entry)
 	}
 	return out
 }

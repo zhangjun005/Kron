@@ -97,12 +97,14 @@ type IntentFrontmatter struct {
 }
 
 type AssumeEntry struct {
-	ID         string `json:"id"                       jsonschema:"stable assumption identifier"`
-	Text       string `json:"text"                     jsonschema:"human-readable claim"`
-	Severity   string `json:"severity"                 jsonschema:"hard or soft"`
-	ExpiresAt  string `json:"expires_at,omitempty"     jsonschema:"optional RFC3339 expiry"`
-	VerifiedAt string `json:"verified_at,omitempty"    jsonschema:"last verification time (empty if never verified)"`
-	VerifiedBy string `json:"verified_by,omitempty"    jsonschema:"handle that last verified"`
+	ID              string `json:"id"                          jsonschema:"stable assumption identifier"`
+	Text            string `json:"text"                        jsonschema:"human-readable claim (preferred from registry; empty if neither present)"`
+	Severity        string `json:"severity"                    jsonschema:"hard or soft (per-intent; overrides registry default)"`
+	DefaultSeverity string `json:"default_severity,omitempty"  jsonschema:"registry default severity (B-3); empty if registry absent"`
+	Rationale       string `json:"rationale,omitempty"         jsonschema:"per-intent explanation of why this severity (B-3)"`
+	ExpiresAt       string `json:"expires_at,omitempty"        jsonschema:"optional RFC3339 expiry"`
+	VerifiedAt      string `json:"verified_at,omitempty"       jsonschema:"last verification time (empty if never verified)"`
+	VerifiedBy      string `json:"verified_by,omitempty"       jsonschema:"handle that last verified"`
 }
 
 type GetOutput struct {
@@ -169,13 +171,15 @@ type AssumeCheckInput struct {
 }
 
 type AssumeWarning struct {
-	IntentSlug    string `json:"intent_slug"             jsonschema:"slug of the intent owning the assumption"`
-	AssumptionID  string `json:"assumption_id"           jsonschema:"stable assumption identifier"`
-	Severity      string `json:"severity"                 jsonschema:"hard or soft"`
-	Text          string `json:"text"                     jsonschema:"human-readable claim"`
-	ExpiresAt     string `json:"expires_at,omitempty"     jsonschema:"optional RFC3339 expiry"`
-	DaysRemaining *int   `json:"days_remaining,omitempty" jsonschema:"optional days until expiry (negative if expired)"`
-	Verified      bool   `json:"verified"                jsonschema:"true if VerifiedAt is set"`
+	IntentSlug      string `json:"intent_slug"             jsonschema:"slug of the intent owning the assumption"`
+	AssumptionID    string `json:"assumption_id"           jsonschema:"stable assumption identifier"`
+	Severity        string `json:"severity"                 jsonschema:"hard or soft (per-intent; overrides registry default)"`
+	DefaultSeverity string `json:"default_severity,omitempty" jsonschema:"registry default severity (B-3); empty if registry absent"`
+	Text            string `json:"text"                     jsonschema:"human-readable claim (preferred from registry)"`
+	Rationale       string `json:"rationale,omitempty"     jsonschema:"per-intent explanation of why this severity (B-3)"`
+	ExpiresAt       string `json:"expires_at,omitempty"     jsonschema:"optional RFC3339 expiry"`
+	DaysRemaining   *int   `json:"days_remaining,omitempty" jsonschema:"optional days until expiry (negative if expired)"`
+	Verified        bool   `json:"verified"                jsonschema:"true if VerifiedAt is set"`
 }
 
 type AssumeCheckSummary struct {

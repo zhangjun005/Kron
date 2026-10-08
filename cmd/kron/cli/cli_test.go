@@ -234,3 +234,85 @@ func TestDefaultIntentBody(t *testing.T) {
 	assert.Contains(t, body, "## 权衡（Trade-offs）")
 	assert.Contains(t, body, "<!-- 边界假设")
 }
+
+// --- migrate -------------------------------------------------------
+
+func writeIntentWithAssumption(t *testing.T, dir, slug, body string) {
+	t.Helper()
+	intentYAML := `<!-- kron:frontmatter -->
+created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+assumptions:
+` + body + `<!-- /kron:frontmatter -->
+
+# x
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kron/intents", slug+".md"), []byte(intentYAML), 0o644))
+}
+
+func TestRunMigrate_Assumptions_DryRun(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	var out, errOut bytes.Buffer
+	require.NoError(t, runInit(nil, &out, &errOut))
+	out.Reset()
+	errOut.Reset()
+
+	writeIntentWithAssumption(t, dir, "uses-region", `  - id: single-region
+    text: 服务仅部署在单 region
+    severity: hard
+`)
+
+	err := runMigrate([]string{"assumptions", "--to-standalone", "--dry-run", "--yes"}, &out, &errOut)
+	require.NoError(t, err)
+	s := out.String()
+	assert.Contains(t, s, "would create .kron/assumptions/single-region.md")
+	assert.Contains(t, s, "summary: created=1")
+	// dry-run must not actually create the file
+	_, err = os.Stat(filepath.Join(dir, ".kron/assumptions/single-region.md"))
+	assert.True(t, os.IsNotExist(err), "dry-run must not write the file")
+}
+
+func TestRunMigrate_Assumptions_Applies(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	var out, errOut bytes.Buffer
+	require.NoError(t, runInit(nil, &out, &errOut))
+	out.Reset()
+	errOut.Reset()
+
+	writeIntentWithAssumption(t, dir, "uses-region", `  - id: single-region
+    text: 服务仅部署在单 region
+    severity: hard
+`)
+
+	err := runMigrate([]string{"assumptions", "--to-standalone", "--yes"}, &out, &errOut)
+	require.NoError(t, err)
+	// File should now exist.
+	data, err := os.ReadFile(filepath.Join(dir, ".kron/assumptions/single-region.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "id: single-region")
+	assert.Contains(t, string(data), "default_severity: hard")
+}
+
+func TestRunMigrate_Assumptions_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	var out, errOut bytes.Buffer
+	require.NoError(t, runInit(nil, &out, &errOut))
+	out.Reset()
+	errOut.Reset()
+
+	writeIntentWithAssumption(t, dir, "uses-region", `  - id: single-region
+    text: 服务仅部署在单 region
+    severity: hard
+`)
+
+	// First run: create.
+	require.NoError(t, runMigrate([]string{"assumptions", "--to-standalone", "--yes"}, &out, &errOut))
+	out.Reset()
+	errOut.Reset()
+	// Second run: skip, no failure.
+	require.NoError(t, runMigrate([]string{"assumptions", "--to-standalone", "--yes"}, &out, &errOut))
+	assert.Contains(t, out.String(), "[skip] single-region")
+}

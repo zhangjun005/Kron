@@ -51,7 +51,11 @@ func NewReader(root string) (*Reader, error) {
 }
 
 // Get returns the assumption file for id. If the file does not exist,
-// it returns ErrAssumptionNotFound.
+// it returns ErrAssumptionNotFound. If the file exists but its
+// frontmatter id does not match the file name, Get returns the file
+// AND a non-nil error of type ErrAssumptionFileIdMismatch — the
+// caller is expected to inspect the file (it parsed successfully)
+// AND surface the error as a lint diagnostic.
 func (r *Reader) Get(ctx context.Context, id string) (*model.AssumptionFile, error) {
 	_ = ctx
 	if err := parser.ValidateSlug(id); err != nil {
@@ -71,17 +75,23 @@ func (r *Reader) Get(ctx context.Context, id string) (*model.AssumptionFile, err
 		return nil, fmt.Errorf("assumption: parse %s: %w", path, err)
 	}
 
-	// Verify file name matches frontmatter id.
-	if fm.ID != id {
-		return nil, fmt.Errorf("%w: frontmatter id %q != file name %q", ErrAssumptionFileIdMismatch, fm.ID, id)
-	}
-
-	return &model.AssumptionFile{
+	af := &model.AssumptionFile{
 		Slug:        id,
 		Frontmatter: fm,
 		Body:        body,
 		SourcePath:  path,
-	}, nil
+	}
+	// B-3 (RFC 2026-10-08-assumptions-standalone): the id-mismatch
+	// check is no longer a hard error. The reader returns the file
+	// plus a wrapped ErrAssumptionFileIdMismatch so the caller
+	// (lint) can report it via RuleAssumptionFileIdMismatch while
+	// still using the parsed data. List() depends on this
+	// behaviour: a mismatched file MUST appear in the listing so
+	// lint can see it.
+	if fm.ID != "" && fm.ID != id {
+		return af, fmt.Errorf("%w: frontmatter id %q != file name %q", ErrAssumptionFileIdMismatch, fm.ID, id)
+	}
+	return af, nil
 }
 
 // List returns all assumption files in the registry, sorted by id.
@@ -98,9 +108,15 @@ func (r *Reader) List(ctx context.Context) ([]*model.AssumptionFile, error) {
 			continue
 		}
 		id := e.Name()[:len(e.Name())-len(".md")]
-		af, err := r.Get(ctx, id)
-		if err != nil {
-			// Skip files that fail to parse; lint will surface the error.
+		// Get now returns the file even when its frontmatter id
+		// doesn't match the file name (with a wrapped
+		// ErrAssumptionFileIdMismatch on the side). Surface the
+		// file so lint's RuleAssumptionFileIdMismatch can see
+		// it; lint calls Get directly when it needs the error.
+		af, _ := r.Get(ctx, id)
+		if af == nil {
+			// Genuine I/O or parse failure — skip; lint's
+			// A-class / frontmatter-invalid surfaces these.
 			continue
 		}
 		out = append(out, af)

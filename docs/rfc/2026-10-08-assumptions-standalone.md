@@ -409,7 +409,7 @@ done
 | PR 6 | **`cmd/kron/serve-mcp/handlers_assume_check.go` + `tools_list_get.go` 改** — 调 `assumption.Reader` 拿 text/severity + 2 集成测试 | PR 5 后 | 无 |
 | PR 7 | **`scripts/migrate-assumptions-standalone.sh` + `cmd/kron/cli/migrate.go` (新子命令)** | PR 5 后 | 无 |
 | PR 8 | **文档同步** (8 文件 — intent-structure.md / domain-model.md / AGENTS.md / business.md / README.md / how-it-works.md / architecture.md / migrate.md) | PR 6 后 | 无 |
-| PR 9 | **存量数据迁移** (本仓库自己的 `.kron/intents/*.md` 跑迁移) + 跑 `kron lint` 验证 | PR 7 + PR 8 后 | 无 |
+| PR 9 | **存量数据迁移** (本仓库自己的 `.kron/intents/*.md` 跑迁移) + 跑 `kron lint` 验证 | PR 7 + PR 8 后 | **agent 不做此步** (2026-10-08, zhangjun005 口头 — 由 owner 自行跑迁移脚本) |
 
 **总 PR 数**: 9. **总预计工时**: 2 周 (每个 PR 半天到 1 天).
 

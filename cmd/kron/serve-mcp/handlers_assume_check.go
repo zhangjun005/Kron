@@ -7,6 +7,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/xxx/kron/internal/assumption"
 	"github.com/xxx/kron/internal/model"
 	"github.com/xxx/kron/internal/parser"
 	"github.com/xxx/kron/internal/store"
@@ -23,8 +24,10 @@ import (
 //	  warnings: [{
 //	    intent_slug:    string,
 //	    assumption_id:  string,
-//	    severity:       string,    // "hard" | "soft"
-//	    text:           string,
+//	    severity:       string,    // "hard" | "soft"   (per-intent)
+//	    default_severity: string?, // from registry, if present
+//	    text:           string,    // from registry (preferred) or inline
+//	    rationale:      string?,   // from intent frontmatter (B-3)
 //	    expires_at:     string?,
 //	    days_remaining: int? (negative if expired),
 //	    verified:       bool,
@@ -32,19 +35,11 @@ import (
 //	  summary: { hard: int, soft: int, expired: int }
 //	}
 //
-// Signal source: SELF-VALIDATE — we read each intent's assumptions[]
-// from .kron/intents/*.md and check ExpiresAt < now + VerifiedAt
-// presence. We do NOT integrate with any external test signal in
-// v1.1+ (deliberate decision 2026-10-03; integration deferred to v1.2+).
-//
-// Filtering:
-//   - file_path omitted: every intent's assumptions are inspected.
-//   - file_path provided: only assumptions attached to intents that
-//     have an @kron:intent <slug> anchor in that file are inspected.
-//
-// "hard" severity assumptions that are past ExpiresAt AND unverified
-// contribute to summary.expired; soft assumptions with same shape
-// contribute to warnings but not expired.
+// B-3 (RFC 2026-10-08-assumptions-standalone): the handler reads the
+// assumption registry (.kron/assumptions/*.md) and prefers the
+// registry's text/default_severity over the inline fields. The
+// per-intent severity (a.Severity) always wins over the registry's
+// default_severity — the rationale is what justifies the override.
 func HandleAssumeCheck(ctx context.Context, _ *mcp.CallToolRequest, in AssumeCheckInput) (
 	*mcp.CallToolResult, AssumeCheckOutput, error,
 ) {
@@ -54,18 +49,8 @@ func HandleAssumeCheck(ctx context.Context, _ *mcp.CallToolRequest, in AssumeChe
 	root := repoRootFrom(ctx)
 
 	// Build the set of slugs the caller is interested in.
-	// ScanAnchors walks a directory recursively, so for a single
-	// file_path we walk the parent dir and filter. The skip-list
-	// in ScanAnchors matches our access layer's defaults, so this
-	// is cheap for source trees <10k files.
 	var slugsOfInterest map[string]struct{}
 	if in.FilePath != "" {
-		// parser.SlugsForFile opens the file directly and returns
-		// the set of intent slugs that file anchors (sorted,
-		// deduplicated). It replaces the prior "walk the parent
-		// directory, filter by FilePath" hack which was both slow
-		// (unnecessary walk) and platform-fragile (path-separator
-		// comparisons).
 		slugs, err := parser.SlugsForFile(in.FilePath)
 		if err != nil {
 			return nil, AssumeCheckOutput{}, fmt.Errorf("kron_assume_check: scan %s: %w", in.FilePath, err)
@@ -85,6 +70,14 @@ func HandleAssumeCheck(ctx context.Context, _ *mcp.CallToolRequest, in AssumeChe
 		return nil, AssumeCheckOutput{}, fmt.Errorf("kron_assume_check: load: %w", err)
 	}
 
+	// B-3: read the assumption registry when present. Absence is
+	// not a hard error — pre-migration repos have inline-only
+	// assumptions; we fall back to those.
+	var ar *assumption.Reader
+	if ard, ardErr := assumption.NewReader(root); ardErr == nil {
+		ar = ard
+	}
+
 	now := time.Now().UTC()
 	var warnings []AssumeWarning
 	summary := AssumeCheckSummary{}
@@ -96,13 +89,28 @@ func HandleAssumeCheck(ctx context.Context, _ *mcp.CallToolRequest, in AssumeChe
 			}
 		}
 		for _, a := range intent.Frontmatter.Assumptions {
+			// Registry (when present) is the source of truth for
+			// text + default_severity. Per-intent severity
+			// (a.Severity) and expires_at stay on the intent.
+			text := a.Text
+			defaultSev := ""
+			if ar != nil {
+				if af, gerr := ar.Get(ctx, a.ID); gerr == nil && af != nil {
+					if af.Frontmatter.Text != "" {
+						text = af.Frontmatter.Text
+					}
+					defaultSev = string(af.Frontmatter.DefaultSeverity)
+				}
+			}
 			w := AssumeWarning{
-				IntentSlug:   intent.Slug,
-				AssumptionID: a.ID,
-				Severity:     string(a.Severity),
-				Text:         a.Text,
-				ExpiresAt:    a.ExpiresAt,
-				Verified:     a.VerifiedAt != "",
+				IntentSlug:      intent.Slug,
+				AssumptionID:    a.ID,
+				Severity:        string(a.Severity),
+				DefaultSeverity: defaultSev,
+				Text:            text,
+				Rationale:       a.Rationale,
+				ExpiresAt:       a.ExpiresAt,
+				Verified:        a.VerifiedAt != "",
 			}
 			if a.ExpiresAt != "" {
 				if exp, err := time.Parse(time.RFC3339, a.ExpiresAt); err == nil {

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 
@@ -255,6 +256,7 @@ func MarshalAssumptionFrontmatter(fm *model.AssumptionFrontmatter) ([]byte, erro
 		ID              string   `yaml:"id"`
 		Text            string   `yaml:"text"`
 		DefaultSeverity string   `yaml:"default_severity"`
+		Status          string   `yaml:"status,omitempty"`
 		CreatedBy       string   `yaml:"created_by"`
 		UpdatedAt       string   `yaml:"updated_at"`
 		Reviewers       []string `yaml:"reviewers,omitempty"`
@@ -266,6 +268,7 @@ func MarshalAssumptionFrontmatter(fm *model.AssumptionFrontmatter) ([]byte, erro
 		ID:              fm.ID,
 		Text:            fm.Text,
 		DefaultSeverity: string(fm.DefaultSeverity),
+		Status:          string(fm.Status),
 		CreatedBy:       fm.CreatedBy,
 		UpdatedAt:       fm.UpdatedAt,
 		Reviewers:       fm.Reviewers,
@@ -380,6 +383,13 @@ func SerializeMarkdown(intent *model.Intent) ([]byte, error) {
 // It does NOT validate slug (caller's responsibility) or check for
 // cross-references (lint's job) or self-references (store.Load's job,
 // where the owner slug is in scope).
+//
+// B-3 (v1.3, RFC 2026-10-08-assumptions-standalone): assumption IDs are
+// kebab-case slugs (no "/" path separator) since they map 1:1 to
+// .kron/assumptions/<id>.md filenames. Rationale is required and must
+// be ≥ MinRationaleLen characters; v1.3 is a migration window so the
+// empty-rationale case (legacy A-path) is permitted at parse time and
+// surfaced as a lint warning via RuleAssumptionRationaleRequired.
 func validateFrontmatter(fm *model.Frontmatter) error {
 	if strings.TrimSpace(fm.CreatedBy) == "" {
 		return errors.New("created_by is required")
@@ -397,6 +407,15 @@ func validateFrontmatter(fm *model.Frontmatter) error {
 		if strings.TrimSpace(a.ID) == "" {
 			return fmt.Errorf("assumptions[%d].id is required", i)
 		}
+		// B-3: assumption IDs are file slugs, not intent slugs.
+		// They must NOT contain "/" because the on-disk file is
+		// .kron/assumptions/<id>.md (flat directory).
+		if strings.Contains(a.ID, "/") {
+			return fmt.Errorf("assumptions[%d].id %q must not contain '/' (assumption files are flat in .kron/assumptions/)", i, a.ID)
+		}
+		if err := ValidateSlug(a.ID); err != nil {
+			return fmt.Errorf("assumptions[%d].id: %w", i, err)
+		}
 		switch a.Severity {
 		case model.SeverityHard, model.SeveritySoft:
 			// ok
@@ -404,6 +423,14 @@ func validateFrontmatter(fm *model.Frontmatter) error {
 			return fmt.Errorf("assumptions[%d].severity is required", i)
 		default:
 			return fmt.Errorf("assumptions[%d].severity %q is invalid", i, a.Severity)
+		}
+		// B-3 rationale: required at parse time ONLY for v1.5+.
+		// v1.3 migration window accepts empty (lint surfaces warning).
+		// We DO enforce MinRationaleLen when rationale is present,
+		// so a half-migrated "rationale: 'a'" fails fast here
+		// instead of slipping through to lint.
+		if a.Rationale != "" && utf8.RuneCountInString(a.Rationale) < MinRationaleLen {
+			return fmt.Errorf("assumptions[%d].rationale must be ≥ %d characters when present (got %d)", i, MinRationaleLen, utf8.RuneCountInString(a.Rationale))
 		}
 	}
 	if err := validateSlugList("references", fm.References); err != nil {
@@ -414,6 +441,16 @@ func validateFrontmatter(fm *model.Frontmatter) error {
 	}
 	return nil
 }
+
+// MinRationaleLen is the minimum rationale length (rune count) required
+// when an assumption's rationale is present. Enforced at parse time so
+// trivially short values like "hard" or "x" don't reach lint.
+//
+// B-3 note: v1.3 accepts an empty rationale (lint surfaces
+// RuleAssumptionRationaleRequired as a Warning); v1.5+ will be a hard
+// Error. The 10-character floor is a separate gate to keep "present but
+// useless" values out of the system.
+const MinRationaleLen = 10
 
 // validateSlugList checks that every entry in refs parses as a valid
 // intent slug. The field name is included in error messages so the

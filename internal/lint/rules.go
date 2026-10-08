@@ -60,6 +60,52 @@ const (
 	// alerts). Severity: warning (the code still works; the warning
 	// asks a human to re-verify).
 	RuleExpiredHardAssumption Rule = "expired-hard-assumption"
+
+	// B-3 (RFC 2026-10-08-assumptions-standalone): assumption-related
+	// rules. These read from .kron/assumptions/<id>.md (the
+	// "registry") rather than the intent's inline frontmatter.
+
+	// RuleAssumptionRegistryIdMismatch (Error): an intent references
+	// an assumption id that does not exist in the registry. Always
+	// severity: error.
+	RuleAssumptionRegistryIdMismatch Rule = "assumption-registry-id-mismatch"
+
+	// RuleAssumptionOrphan (Warning): an assumption in the registry
+	// is not referenced by any intent. Purely informational; an
+	// orphan is still valid (a future intent may adopt it).
+	RuleAssumptionOrphan Rule = "assumption-orphan"
+
+	// RuleAssumptionMixedForm (Warning): an intent's assumptions[]
+	// mixes inline struct fields (text / expires_at) with B-3 fields
+	// (rationale). v1.3 migration window permits this at parse
+	// time; the rule nudges authors to clean up.
+	RuleAssumptionMixedForm Rule = "assumption-mixed-form"
+
+	// RuleAssumptionFileIdMismatch (Error): .kron/assumptions/<id>.md
+	// file's frontmatter id field does not match its file name.
+	// Always severity: error.
+	RuleAssumptionFileIdMismatch Rule = "assumption-file-id-mismatch"
+
+	// RuleAssumptionRationaleRequired (Error, v1.3+ Warning during
+	// migration window): an intent's assumptions[] entry has no
+	// rationale field. v1.3 emits Warning to ease the A→B
+	// migration; v1.5+ emits Error (hard gate). Severity is
+	// applied by the linter based on a MigrationMode flag.
+	RuleAssumptionRationaleRequired Rule = "assumption-rationale-required"
+
+	// RuleAssumptionRationaleStale (Warning): the rationale of an
+	// intent's assumption reference appears to quote a now-changed
+	// registry text. Detection is best-effort: a substring of the
+	// registry text that was removed in the current version triggers
+	// the warning. v1.3 detection scope is intentionally narrow to
+	// keep false positives low; future RFCs can extend it.
+	RuleAssumptionRationaleStale Rule = "assumption-rationale-stale"
+
+	// RuleAssumptionSeverityMismatch (Warning): an intent's
+	// per-intent severity differs from the registry's
+	// default_severity. Purely informational; an override is
+	// legitimate when the rationale explains why.
+	RuleAssumptionSeverityMismatch Rule = "assumption-severity-mismatch"
 )
 
 // Severity ranks a Diag's importance. Empty is treated as error by

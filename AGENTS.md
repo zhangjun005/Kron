@@ -33,6 +33,7 @@
 | 新 MCP 工具 | [`docs/process/mcp-tool.md`](docs/process/mcp-tool.md) |
 | 改 frontmatter schema | [`docs/process/migrate.md`](docs/process/migrate.md) |
 | 加 CI 检查 | [`docs/process/ci-enforcement.md`](docs/process/ci-enforcement.md) |
+| assumptions 数据架构 (A 行内 → B 独立文件) | [`docs/rfc/2026-10-08-assumptions-standalone.md`](docs/rfc/2026-10-08-assumptions-standalone.md) + 跑 `kron migrate assumptions --to-standalone` |
 | 新增访问层 (serve-lsp / serve-gui / 新协议) | **先开 RFC** [`docs/rfc/`](docs/rfc/) 拍板; 拍板**后**走对应 `docs/process/*` |
 
 > 流程图见 [`docs/process/README.md`](docs/process/README.md) 文档地图.

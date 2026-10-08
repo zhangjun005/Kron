@@ -94,7 +94,8 @@ type AssumptionFile struct {
 type AssumptionFrontmatter struct {
 	ID              string   `yaml:"id"`               // kebab-case; MUST equal file name without .md
 	Text            string   `yaml:"text"`             // human/AI description
-	DefaultSeverity Severity `yaml:"default_severity"`  // hard | soft — suggestion only; intents override
+	DefaultSeverity Severity `yaml:"default_severity"` // hard | soft — suggestion only; intents override
+	Status          Status   `yaml:"status,omitempty"` // draft | active | superseded (B-3: per-assumption lifecycle)
 	CreatedBy       string   `yaml:"created_by"`       // "@user" or "agent:<model>"
 	UpdatedAt       string   `yaml:"updated_at"`       // ISO 8601
 	Reviewers       []string `yaml:"reviewers,omitempty"`

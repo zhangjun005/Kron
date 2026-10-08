@@ -417,6 +417,105 @@ assumptions:
 	assert.Less(t, *r.Warnings[0].DaysRemaining, 0)
 }
 
+// --- kron_assume_check B-3 (RFC 2026-10-08-assumptions-standalone) ---
+
+func TestAssumeCheck_UsesRegistry_PreservesIntentSeverity(t *testing.T) {
+	// B-3: assume_check reads the registry for text, but uses the
+	// intent's own severity (per-intent override) as the
+	// authoritative severity. The registry's default_severity is
+	// reported as a separate field.
+	dir := initRepo(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".kron/assumptions"), 0o755))
+	// Registry: default_severity=soft.
+	assumptionYAML := `<!-- kron:frontmatter -->
+id: single-region
+text: REGISTRY TEXT (preferred)
+default_severity: soft
+created_by: "@a"
+updated_at: "2026-09-22T10:00:00Z"
+<!-- /kron:frontmatter -->
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kron/assumptions/single-region.md"), []byte(assumptionYAML), 0o644))
+	// Intent: severity=hard (override), rationale present.
+	intentYAML := `<!-- kron:frontmatter -->
+created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+assumptions:
+  - id: single-region
+    text: INLINE TEXT (overridden by registry)
+    severity: hard
+    rationale: "跨 region 时 token 失效爆炸, 必须保证单 region 部署"
+<!-- /kron:frontmatter -->
+
+# x
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kron/intents/uses-single-region.md"), []byte(intentYAML), 0o644))
+
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_assume_check",
+		Arguments: map[string]any{},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	var r AssumeCheckOutput
+	require.NoError(t, structuredInto(res, &r))
+	require.Len(t, r.Warnings, 1)
+	w := r.Warnings[0]
+	assert.Equal(t, "hard", w.Severity, "per-intent severity wins")
+	assert.Equal(t, "soft", w.DefaultSeverity, "registry default reported separately")
+	assert.Equal(t, "REGISTRY TEXT (preferred)", w.Text, "registry text preferred over inline")
+	assert.Equal(t, "跨 region 时 token 失效爆炸, 必须保证单 region 部署", w.Rationale)
+}
+
+func TestListGet_AssumesToWire_B3(t *testing.T) {
+	// B-3: kron_list / kron_get return assumesToWire entries with
+	// the registry text + default_severity.
+	dir := initRepo(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".kron/assumptions"), 0o755))
+	assumptionYAML := `<!-- kron:frontmatter -->
+id: redis
+text: REGISTRY-REDIS-TEXT
+default_severity: soft
+created_by: "@a"
+updated_at: "2026-09-22T10:00:00Z"
+<!-- /kron:frontmatter -->
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kron/assumptions/redis.md"), []byte(assumptionYAML), 0o644))
+	intentYAML := `<!-- kron:frontmatter -->
+created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+assumptions:
+  - id: redis
+    text: INLINE TEXT
+    severity: hard
+    rationale: "token revocation must remain fast under load"
+<!-- /kron:frontmatter -->
+
+# uses-redis
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kron/intents/uses-redis.md"), []byte(intentYAML), 0o644))
+
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_get",
+		Arguments: map[string]any{"slug": "uses-redis"},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	var r GetOutput
+	require.NoError(t, structuredInto(res, &r))
+	require.Len(t, r.Intent.Frontmatter.Assumptions, 1)
+	a := r.Intent.Frontmatter.Assumptions[0]
+	assert.Equal(t, "redis", a.ID)
+	assert.Equal(t, "REGISTRY-REDIS-TEXT", a.Text, "wire prefers registry text")
+	assert.Equal(t, "hard", a.Severity)
+	assert.Equal(t, "soft", a.DefaultSeverity, "wire reports default_severity")
+	assert.Equal(t, "token revocation must remain fast under load", a.Rationale)
+}
+
 // --- kron_impact -----------------------------------------------------
 
 func TestImpact_NotFound(t *testing.T) {
