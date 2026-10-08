@@ -67,8 +67,6 @@ func Execute() error {
 		return runAdd(os.Args[2:], out, os.Stderr)
 	case "lint":
 		return runLint(os.Args[2:], out, os.Stderr)
-	case "migrate":
-		return runMigrate(os.Args[2:], out, os.Stderr)
 	case "help", "-h", "--help":
 		printHelp(out)
 		return nil
@@ -88,7 +86,6 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  init         Create .kron/ skeleton in the current repository")
 	fmt.Fprintln(w, "  add <slug>   Scaffold a new intent file at .kron/intents/<slug>.md")
 	fmt.Fprintln(w, "  lint         Scan anchors and frontmatter; exit 0 on clean, 1 on errors")
-	fmt.Fprintln(w, "  migrate      One-shot data migrations (subcommand: assumptions)")
 	fmt.Fprintln(w, "  serve-mcp    Start the MCP stdio server (separate access layer; see cmd/kron/serve-mcp)")
 	fmt.Fprintln(w, "  help         Show this message")
 }

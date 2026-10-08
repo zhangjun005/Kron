@@ -201,7 +201,7 @@ func (v *RepoView) StaleView(now time.Time, thresholdDays int) StaleReport
 ### 3.1 P0 — 必修（数据/语义坏）
 
 #### ❶ 修 `Writer.Create` 的 `"TODO"` 字面量 BUG
-**业务动机**：现在 `migrate.go` 调 `Create` 出来的所有 assumption 文件，`updated_at` 字段是字面量 `"TODO"`。任何后续按 `updated_at` 排序 / 筛选 / 展示陈旧度的功能（`kron_stale` MCP 工具、未来的 assumption 时间线）都会被这个值污染。**6 个 B-3 规则暂时不查它所以没炸**——是定时炸弹。
+**业务动机**：当前 `Writer.Create` 把 `updated_at` 字段写成字面量 `"TODO"`。任何后续按 `updated_at` 排序 / 筛选 / 展示陈旧度的功能（`kron_stale` MCP 工具、未来的 assumption 时间线）都会被这个值污染。**6 个 B-3 规则暂时不查它所以没炸**——是定时炸弹。
 
 **修复**：`Create` 自动写 `now()`；`Update` 自动写 `now()` 且**不动** `created_by`；`Status` 默认 `active`。
 

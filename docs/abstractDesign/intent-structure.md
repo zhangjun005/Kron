@@ -155,7 +155,7 @@ assumptions:
 - **`default_severity` 取代 `severity`**（在 registry 文件里）：表示"该假设通常多严"；intent 各自的 `severity` 字段是 ground truth
 - **`rationale` 必填**（≥ 10 字符）：避免"凭直觉设 hard/soft"的反模式；v1.3 迁移期是 Warning，v1.5 改 Error
 - **跨意图 severity 可不同**：同一条假设（`single-region`）在 `auth/jwt.md` 可能是 `hard`、在 `ui/console.md` 可能是 `soft`，各自的 `rationale` 解释"为什么"
-- **本仓库无存量数据**：不需要 `kron migrate assumptions` 迁移脚本——见 [RFC §1.2](../../rfc/2026-10-08-assumptions-standalone.md) "无存量迁移"
+- **本仓库无存量数据**：不需要假设迁移脚本——见 [RFC §1.2](../../rfc/2026-10-08-assumptions-standalone.md) "无存量迁移"
 
 `severity` 语义：
 - `hard`：假设破裂时，相关代码逻辑必须修改。例如"Redis 可用性 ≥ 99.9%"破了意味着 token 吊销完全失效，必须改。

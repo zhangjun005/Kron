@@ -121,7 +121,7 @@ Position encoding、文档同步协议、capabilities。下沉到 `internal/` �
 | `internal/lint` | 业务层：扫描 + 校验组合（CLI 的 `kron lint` 与 MCP 的 `kron_lint` 共享引擎） | **v1 已实开**（含 `internal/lint/lint_test.go`）；CLI 与 MCP 共享引擎 |
 | `internal/relations` | 业务层：反向链接图（v1.2+ `references` / `depends_on` 的反向视图） | **v1.2 已实开**（含 `internal/relations/relations_test.go`） |
 | `internal/identity` | 业务层：`created_by` 解析（GitUser / Handle） | **v1 已实开**（含 `internal/identity/identity_test.go`） |
-| `internal/assumption` | 业务层：`.kron/assumptions/<id>.md` 独立文件 reader/writer（B-3, RFC `2026-10-08-assumptions-standalone.md`） | **v1.3 已实开**（含 `internal/assumption/{reader,writer}.go` + 测试）；CLI (`kron migrate`) + MCP (`kron_assume_check` / `kron_list` / `kron_get` / `kron_impact`) 共享 |
+| `internal/assumption` | 业务层：`.kron/assumptions/<id>.md` 独立文件 reader/writer（B-3, RFC `2026-10-08-assumptions-standalone.md`） | **v1.3 已实开**（含 `internal/assumption/{reader,writer}.go` + 测试）；MCP (`kron_assume_check` / `kron_list` / `kron_get` / `kron_impact`) 共享 |
 | `internal/...` | **不**预设更多 | 每个新 `internal/` 子包都要写"为什么开"的 commit 论证 |
 
 ---
