@@ -663,6 +663,53 @@ updated_at: 2026-09-22T10:00:00Z
 	assertDiagRule(t, diags, RuleAssumptionFileIdMismatch, SeverityError, "z")
 }
 
+func TestRun_AssumptionMixedForm(t *testing.T) {
+	// A intent frontmatter has assumptions[].text (A-path inline
+	// leftover) alongside B-3 id+severity+rationale — fires
+	// RuleAssumptionMixedForm as a Warning so authors clean up.
+	dir := t.TempDir()
+	writeAssumption(t, dir, "region", "服务仅部署在单 region", "hard", "active")
+	writeFile(t, dir, ".kron/intents/uses-mixed.md", `<!-- kron:frontmatter -->
+created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+assumptions:
+  - id: region
+    text: 服务仅部署在单 region
+    severity: hard
+    rationale: "this is a long enough rationale string"
+    expires_at: "2026-12-31T00:00:00Z"
+<!-- /kron:frontmatter -->
+
+# uses-mixed
+`)
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	assertDiagRule(t, diags, RuleAssumptionMixedForm, SeverityWarning, "uses-mixed")
+}
+
+func TestRun_AssumptionRationaleStale(t *testing.T) {
+	// Inline text on intent frontmatter diverges from registry text;
+	// fires RuleAssumptionRationaleStale as a Warning to nudge the
+	// author to drop the inline copy.
+	dir := t.TempDir()
+	writeAssumption(t, dir, "region", "服务仅部署在单 region, 新版描述", "hard", "active")
+	writeFile(t, dir, ".kron/intents/stale-rationale.md", `<!-- kron:frontmatter -->
+created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+assumptions:
+  - id: region
+    text: 服务仅部署在单 region, 旧版描述
+    severity: hard
+    rationale: "this is a long enough rationale string"
+<!-- /kron:frontmatter -->
+
+# stale-rationale
+`)
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	assertDiagRule(t, diags, RuleAssumptionRationaleStale, SeverityWarning, "stale-rationale")
+}
+
 // assertDiagRule is a tiny helper to keep the B-3 tests concise.
 func assertDiagRule(t *testing.T, diags []Diag, rule Rule, wantSev Severity, whereContains string) {
 	t.Helper()

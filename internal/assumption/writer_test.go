@@ -129,3 +129,44 @@ func TestWriter_Update_NotFound(t *testing.T) {
 		t.Error("Update nonexistent: expected error, got nil")
 	}
 }
+
+func TestWriter_Update_IdMismatch(t *testing.T) {
+	// Update is called with id="single-region" but fm.ID="different-id".
+	// Writer.Update must return ErrAssumptionFileIdMismatch.
+	dir := t.TempDir()
+	sub := filepath.Join(dir, ".kron", "assumptions")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<!-- kron:frontmatter -->
+id: single-region
+text: x
+default_severity: soft
+created_by: "@a"
+updated_at: "2026-09-22T10:00:00Z"
+<!-- /kron:frontmatter -->
+`
+	if err := os.WriteFile(filepath.Join(sub, "single-region.md"), []byte(fixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	w, err := NewWriter(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fm := &model.AssumptionFrontmatter{
+		ID:              "different-id",
+		Text:            "x",
+		DefaultSeverity: model.SeveritySoft,
+		CreatedBy:       "@a",
+		UpdatedAt:       "2026-09-22T10:00:00Z",
+	}
+	err = w.Update(nil, "single-region", fm, "")
+	if err == nil {
+		t.Fatal("Update with mismatched id: expected error, got nil")
+	}
+	if !errorsIs(err, ErrAssumptionFileIdMismatch) {
+		t.Errorf("Update: error = %v, want ErrAssumptionFileIdMismatch", err)
+	}
+}

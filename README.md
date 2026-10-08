@@ -21,7 +21,7 @@ AI 编程助手在清楚"为什么这么做、权衡了什么、放弃了什么"
 1. **决策写完即遗忘** — 写在 Notion / Slack / 脑里,半年后没人记得为何拒绝方案 B。  
    → Kron 把决策落为 `.kron/intents/*.md`,跟代码同 PR 同 review,`git diff` 直接看。
 2. **假设沉到代码里找不到** — 写代码时的前提(DAU ≤ 10K、Redis 99.9%)只在脑子里。  
-   → frontmatter 的 `assumptions[]` 把假设显式化,带 `severity: hard | soft` 与 `expires_at`。
+   → frontmatter 的 `assumptions[]` 把假设显式化,带 per-intent `severity: hard | soft` 与 `rationale`;共享 `text` 存于 `.kron/assumptions/<id>.md` 独立文件(B-3 架构)。
 3. **改代码不知道影响范围** — 改一个 API,下游多少文件多少意图跟着炸。  
    → MCP `kron_impact` 反向查"改这个意图牵连哪些代码 + 哪些下游意图"。
 4. **过期假设无人察觉** — "Redis 可用性 ≥ 99.9%" 已经过了一年,没人复审。  
@@ -64,11 +64,12 @@ symbol:
   - "store.ParseFrontmatter"
 created_by: "@zhangjun005"
 updated_at: "2026-09-19T22:30:00Z"
-<!-- 可选：边界假设结构化（见 docs/abstractDesign/intent-structure.md §三）
+<!-- 可选：边界假设结构化（B-3, 详见 docs/abstractDesign/intent-structure.md §三）
+     text 共享在 .kron/assumptions/<id>.md；intent 仅引用 id + 本意图 severity + rationale
 assumptions:
   - id: small-repo
-    text: 仓库规模在个人/小团队级别（<1k 条）
     severity: hard
+    rationale: "仓库规模在个人/小团队级别, 假设破裂需重构"
 -->
 <!-- /kron:frontmatter -->
 
@@ -88,7 +89,7 @@ assumptions:
 ```
 
 > 两点说明：
-> - `assumptions` 写在 frontmatter，不在正文重复（见 [`intent-structure.md` §三](./docs/abstractDesign/intent-structure.md#三意图文件内容模板)）。
+> - `assumptions` 写在 intent frontmatter（`[{id, severity, rationale, ...}]` 引用形式,B-3），共享 `text` 存于 `.kron/assumptions/<id>.md` 独立文件（不在正文重复, 见 [`intent-structure.md` §三](./docs/abstractDesign/intent-structure.md#三意图文件内容模板)）。
 > - 末尾的 `[ID 方案](id-scheme.md)` 就是一条意图引用——同一 `storage/` 目录下的横向依赖，普通编辑器 `Ctrl+单击` 可跳转。
 
 代码侧用极轻量锚点反向引用：

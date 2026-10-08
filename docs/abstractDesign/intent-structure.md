@@ -149,12 +149,13 @@ assumptions:
     verified_by: "@handle"   # （可选）确认人
 ```
 
-**B-3 关键变化**（v1.3, 走 `kron migrate assumptions --to-standalone` 迁移）：
+**B-3 关键变化**（v1.3, 落地无迁移）：
 
-- **共享 `text` 存于 registry**：`.kron/assumptions/<id>.md` 里的 `text:` 是单一真理源；intent frontmatter 的 `text:` 是迁移期兼容的 inline copy，迁移完成后**应**清空
+- **共享 `text` 存于 registry**：`.kron/assumptions/<id>.md` 里的 `text:` 是单一真理源；intent frontmatter 的 `text:` 是迁移期兼容的 inline copy，B-3 起**不再需要**——新写的 intent **直接**只引用 id 即可
 - **`default_severity` 取代 `severity`**（在 registry 文件里）：表示"该假设通常多严"；intent 各自的 `severity` 字段是 ground truth
 - **`rationale` 必填**（≥ 10 字符）：避免"凭直觉设 hard/soft"的反模式；v1.3 迁移期是 Warning，v1.5 改 Error
 - **跨意图 severity 可不同**：同一条假设（`single-region`）在 `auth/jwt.md` 可能是 `hard`、在 `ui/console.md` 可能是 `soft`，各自的 `rationale` 解释"为什么"
+- **本仓库无存量数据**：不需要 `kron migrate assumptions` 迁移脚本——见 [RFC §1.2](../../rfc/2026-10-08-assumptions-standalone.md) "无存量迁移"
 
 `severity` 语义：
 - `hard`：假设破裂时，相关代码逻辑必须修改。例如"Redis 可用性 ≥ 99.9%"破了意味着 token 吊销完全失效，必须改。
@@ -240,12 +241,11 @@ status: "active"
 
 assumptions:
   - id: single-region
-    text: 服务仅部署在单 region，无跨区时钟漂移问题
     severity: hard
-    expires_at: "2026-12-31"
+    rationale: "跨 region 时 token 失效爆炸, 必须保证单 region 部署"
   - id: csrf-protected
-    text: 续期接口已加 CSRF token 防护
     severity: hard
+    rationale: "续期接口已加 CSRF token 防护, 跨意图共享"
 <!-- /kron:frontmatter -->
 
 # JWT 滑动窗口续期

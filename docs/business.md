@@ -99,7 +99,7 @@ AI 需要在写代码前后取意图（LSP hover 让人类就地核验），GUI 
 - **调用树做不到假设语义**:IDE 自带 Call Hierarchy 能画调用树,但不能给"这个函数依赖什么假设"——意图节点是 Kron 独有的维度
 
 **与其他业务的关系**:
-这 4 个工具是 2.3 的扩展,不替代 §2.3 原有三种入口;它们依赖 2.1(frontmatter 中的 `assumptions` / `expires_at` / `status` 等结构化字段)和 2.2(锚点 → 反向 anchor 查询)。
+这 4 个工具是 2.3 的扩展,不替代 §2.3 原有三种入口;它们依赖 2.1（frontmatter 中的 `status` / `references` / `depends_on` 等结构化字段 + `assumptions[]` B-3 引用形式）和 2.2（锚点 → 反向 anchor 查询）。共享的 `assumptions` 描述文本在 `.kron/assumptions/<id>.md` 独立文件里,见 RFC `2026-10-08-assumptions-standalone`。
 
 ---
 
