@@ -15,25 +15,34 @@ Cursor-native companion to [AGENTS.md](../../AGENTS.md) and [architecture.md](..
 - TOML for config (`BurntSushi/toml`)
 - YAML for frontmatter (`gopkg.in/yaml.v3`)
 - testify for test assertions
-- TypeScript only when GUI phase begins
+- MCP SDK: `github.com/modelcontextprotocol/go-sdk` (locked v1.2+)
+- **v1.3 main**: GUI backend (Go Wails v2), GUI frontend (TypeScript + shadcn/ui in `frontend/`)
+- **v1.4+ pending**: LSP SDK (`go.lsp.dev/protocol`), VSCode extension (副 GUI 路径, 复用 `kron serve-mcp` stdio)
+- `ts-style` skill 已就位但 **v1 / v1.2 不启用** (没 .ts 代码)
 
 ## Repo layout
 
 ```
-cmd/kron/        ← thin CLI entry; dispatches to subcommands
-├── main.go      ← wiring only
-├── cli/         ← cobra command implementations (kron init / add / lint)
-└── serve-mcp/   ← MCP stdio server (planned)
+cmd/kron/                  ← thin CLI entry; dispatches to subcommands
+├── main.go                ← wiring only
+├── cli/                   ← cobra command implementations (kron init / add / lint)
+├── serve-mcp/             ← MCP stdio server (v1.2+ shipped)
+├── serve-lsp/             ← (planned v1.3+) LSP socket server
+└── serve-gui/             ← (planned v1.3+) Wails GUI server (Go + TS frontend)
 
-internal/        ← bottom-layer packages only, no access-layer code
-├── model/
-├── store/
-├── parser/
-└── lint/        ← (proposed, phase 2 第 1 步开包)
+internal/                  ← bottom-layer packages only, no access-layer code
+├── model/                 ← domain types (Intent, Frontmatter, Config, Anchor)
+├── store/                 ← file I/O + MoveToTrash / RestoreFromTrash
+├── parser/                ← markdown / anchor scan / slug / template
+├── relations/             ← reverse-link graph (used by kron_impact / kron_delete)
+├── lint/                  ← anchor-dangling + frontmatter + cycle + staleness
+└── identity/              ← created_by resolution
 
-docs/             ← design notes
-.cursor/skills/   ← detailed style rules (auto-loaded)
-.cursor/rules/    ← Cursor-native rule format (this file)
+frontend/                  ← (planned v1.3+) Wails GUI frontend (TS + shadcn) — gitignored in v1 / v1.2
+
+docs/                      ← design notes + RFC + process docs
+.cursor/skills/            ← detailed style rules (auto-loaded)
+.cursor/rules/             ← Cursor rule format (this file)
 ```
 
 **Business logic goes in `internal/` (bottom layer) or in access-layer subcommands under `cmd/kron/<sub>/`. `internal/` MUST NOT import `cmd/kron/`. Access-layer subcommands MUST NOT import each other.**
@@ -42,12 +51,14 @@ docs/             ← design notes
 
 Source: `docs/abstractDesign/architecture.md` §〇. Brief:
 
-1. **Core decoupled from access layer** — `internal/store` / `parser` / `model` do not know whether the caller is CLI, MCP, LSP, IDE, or GUI.
-2. **No cross-access-layer calls** — CLI / MCP / LSP / IDE / GUI must not import or call each other; shared logic is sunk into `internal/`.
+1. **Core decoupled from access layer** — `internal/store` / `parser` / `model` do not know whether the caller is CLI, MCP, or LSP.
+2. **No cross-access-layer calls** — CLI / MCP / LSP three protocol access layers must not import or call each other; shared logic is sunk into `internal/`.
+   > **(2026-10-08 变更)** 协议访问层**枚举**为 CLI / MCP / LSP 三种；IDE / GUI 是**客户端层**（外部），不直接 import `internal/`，只通过协议访问层**之一**调能力。
 3. **Caller identity via `context.Context`** — every store/parser fn takes `ctx context.Context` first; access layer injects caller key.
+   > **变更 (2026-10-08)**: caller 注入 API **不再推荐**。`model.WithCaller` / `CallerFrom` 等函数 **保留**（兼容既有 import + `cmd/kron/serve-mcp` 的 `callerInjectMiddleware`），但**新**访问层代码**不**再调用 `model.WithCaller`；`internal/` **不**依赖 ctx 上的 caller key 做行为分支。原因：`context.Context` 注入身份属性**不便于开发**（调试栈不直观 / 单元测试需额外包装 / 类型安全弱）。详见 [`internal/model/caller.go`](../../internal/model/caller.go) 头注释。`ctx` 仍保留在 store / parser 函数签名中**用于取消 / 超时传播**。
 4. **One-way deps** — `cmd → cli → {parser, store} → model`; no cycles; `model` has zero external imports. `internal/**` never imports `cmd/kron/**`.
 5. **CI lint is the only gate** — no runtime implicit state.
-6. **CLI minimal subset** — only `init` / `add` / `lint` / `serve-mcp`. `list` / `get` / `update` / `delete` / `restore` are MCP-only.
+6. **CLI minimal subset** — only `init` / `add` / `lint` / `serve-mcp` / `serve-lsp` (v1.3+). `list` / `get` / `update` / `delete` / `restore` are MCP-only.
 
 ## Workflow
 
@@ -60,19 +71,19 @@ Source: `docs/abstractDesign/architecture.md` §〇. Brief:
 
 ## Off-limits without explicit human approval
 
-- Adding new top-level dependencies (`go.mod` `require` block)
+- Adding new top-level dependencies (`go.mod` `require` block) — Wails / `go.lsp.dev/protocol` / shadcn 全部要走 explicit approval
 - Modifying the Go version in `go.mod`
 - Renaming or moving packages
 - Reflection or `go generate` (must have a `// why` comment)
 - Force-pushes, history rewrites on shared branches
 - Changing the `.kron/intents/*.md` frontmatter schema
-- Adding CLI subcommands beyond `init` / `add` / `lint` / `serve-mcp`
+- Adding CLI subcommands beyond `init` / `add` / `lint` / `serve-mcp` — and **v1.3+** `serve-lsp` / `serve-gui` 必走 [`docs/process/new-access-layer.md`](../../docs/process/new-access-layer.md)（待写）
 - Adding `config.toml` fields beyond `intents_dir`
-- Implementing `serve-lsp`, IDE plugin, GUI, hard-delete / GC (all Phase 2)
+- Implementing `serve-lsp`, `serve-gui` (v1.3+ pending), IDE plugin, hard-delete / GC — 全部走 `docs/process/new-access-layer.md` 流程
 
 ## Skills (auto-loaded per language)
 
-- `go-style` → see [SKILL.md](../skills/go-style/SKILL.md)
-- `ts-style` → see [SKILL.md](../skills/ts-style/SKILL.md)
+- `go-style` → see [SKILL.md](../skills/go-style/SKILL.md) — **当前唯一生效** (v1 / v1.2 仓库仅 Go 代码)
+- `ts-style` → see [SKILL.md](../skills/ts-style/SKILL.md) — **v1.3+ 启用** (frontend/ 目录出现后)
 
 When in doubt: pick the more conservative / explicit option. Ask before adding deps or changing schemas.

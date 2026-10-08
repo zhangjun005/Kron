@@ -163,7 +163,7 @@ v1 简化：仅列清单，不做 diff 对比（留 TODO）。
 ## 3 底层实现
 
 - 每个工具底层映射到 `internal/store` / `internal/parser` / `internal/lint` 函数
-- 签名带 `ctx context.Context`，caller 由 MCP server 注入为 `"mcp:<agent>"`（如 `"mcp:claude-3.7"`）
+- 签名带 `ctx context.Context`，caller 由 MCP server 注入为 `"mcp:<agent>"`（如 `"mcp:claude-3.7"`）—— **(2026-10-08 变更) caller 注入 API 不再推荐**；`cmd/kron/serve-mcp` 仍**注入**以兼容既有内部代码路径，详见 architecture.md §2.3
 - JSON-RPC 序列化 / 反序列化留在 `cmd/kron/serve-mcp/`，不做下沉
 - v1 扩展的 4 个工具（`kron_assume_check` / `kron_impact` / `kron_intent_density` / `kron_stale`）
   是 `internal/store` + `internal/parser` 现成能力的**组合调用**，**不**下沉到新包；
@@ -183,16 +183,98 @@ v1 简化：仅列清单，不做 diff 对比（留 TODO）。
 
 ---
 
-## 5 GUI API 边界（设计性预留接口）
+## 5 GUI API 边界（~~设计性预留接口~~ → 已作废 2026-10-08）
 
-GUI 不走 CLI 的 `--json` flag，而是通过**单独的 API 包**消费同一份 `internal/store` / `internal/parser`。
+> **(2026-10-08 作废)** 本节原"HTTP server 子命令 (`kron serve-gui`) 启动轻量 HTTP 服务"的设计被推翻。理由：
+> 1. **架构变更**：GUI **不再是 access layer**——是**客户端层**。Kron 主仓访问层**只有** CLI / MCP / LSP 三种 wire protocol。
+> 2. **GUI 客户端**（VSCode 扩展 / Wails / Cursor / Web）**只**通过协议访问层**之一**（拼 JSON 走 serve-mcp 子进程 / spawn serve-lsp 子进程）调能力；**不**直接 import `internal/`、**不**调独立 GUI API。
+> 3. **不开** `kron serve-gui` 子命令——请求是与 AI 工具**共用** `serve-mcp` 实例（拼同样 JSON-RPC 拿 list / get / update）。
+> 4. **Wails 客户端**轻量（多项目概览 + 意图树预览），不重复造 HTTP 端。
+>
+> **旧设计性预留**（保留作 changelog，但**不**实施）：
 
-建议形态：
+- ~~HTTP server 子命令（`kron serve-gui`）启动轻量 HTTP 服务~~
+- ~~端点对应 MCP 工具集：`POST /intents` / `GET /intents` / `PATCH /intents/:slug` / `DELETE /intents/:slug` / `GET /lint`~~
+- ~~共享同一个 `internal/store` / `internal/parser` 函数，访问层之间通过 `internal/` 解耦~~
 
-- **HTTP server 子命令**（`kron serve-gui`）启动轻量 HTTP 服务
-- 端点对应 MCP 工具集：`POST /intents` / `GET /intents` / `PATCH /intents/:slug` / `DELETE /intents/:slug` / `GET /lint`
-- 共享同一个 `internal/store` / `internal/parser` 函数，访问层之间通过 `internal/` 解耦
+> **访问层之间禁止互相调用**（architecture.md §〇 铁律 #3）。**新版图**：协议访问层 = CLI / MCP / LSP 三种 wire protocol；客户端层 = VSCode 扩展 / Wails / Cursor / Web GUI（外部项目，独立仓库）。详见 [`docs/abstractDesign/architecture.md`](../abstractDesign/architecture.md) §〇 铁律 #9 + §一。
 
-> **访问层之间禁止互相调用**（architecture.md §〇 铁律 #3）。GUI API 与 CLI/MCP 是平级访问层，各自独立 import `internal/`。
+v1 不实现 `kron serve-gui`（**永不**实现——GUI 不走 HTTP）。客户端层接入示例见 [`docs/implementation/ide-interaction.md`](./ide-interaction.md)（待重写，2026-10-08 同步）。
 
-v1 不实现 `serve-gui`，但 `cmd/kron/cli` 的函数签名要为它留口（已是 `ctx` 透传形态）。
+## 6 MCP 进程寿命与并发安全 (2026-10-08 拍板)
+
+> 拍板 RFC: [`docs/rfc/2026-10-08-mcp-lifecycle.md`](../rfc/2026-10-08-mcp-lifecycle.md)
+
+### 6.1 进程寿命 = stdio 父进程寿命
+
+MCP server 进程**不**是常驻 daemon。它的寿命 = spawn 它的 stdio 父进程寿命:
+
+```
+┌──────────────────────┐
+│ AI 工具 (Claude 等)  │  session 开始 → spawn "kron serve-mcp" → stdio pipe → session 结束 → kill
+├──────────────────────┤
+│ VSCode 扩展          │  VSCode 启动 → spawn → VSCode 寿命内复用 → VSCode 退出 → kill
+├──────────────────────┤
+│ Wails GUI            │  Wails 启动 → spawn → Wails 窗口寿命内复用 → 窗口关闭 → kill
+└──────────────────────┘
+```
+
+**一个项目可能同时存在 N 个 MCP 实例** (N = client 数)。这是 MCP 协议的设计本意, **不**是 bug。
+
+### 6.2 并发安全 = `internal/store` 文件锁
+
+**MCP 协议不防打架** (只管 JSON-RPC 格式 + 长连接); **OS 进程隔离不防打架** (多进程都跑同一文件)。防打架靠 `internal/store/writer.go` 的 `flock` (per-file, 跨进程可见, OS 保障):
+
+```go
+// internal/store/writer.go (v1.1 增补)
+func (w *Writer) Write(ctx context.Context, intent *model.Intent) error {
+    // ... 校验 ...
+    
+    f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o644)
+    if err != nil { return err }
+    defer f.Close()
+    
+    // 关键: 跨进程文件锁
+    if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+        return fmt.Errorf("%w: %s", model.ErrConcurrentWrite, intent.Slug)
+    }
+    defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+    
+    return writeFileAtomic(path, data, 0o644)
+}
+```
+
+### 6.3 锁粒度 = per-file (per-slug)
+
+| 锁 | 粒度 | 是否阻塞其他 slug |
+|---|---|---|
+| ✅ `flock` on `auth/jwt.md` | 细 | **不**阻塞 (MCP-A 锁 jwt, MCP-B 同时锁 token-storage, **并行**)|
+| ❌ 锁整个 `.kron/intents/` | 粗 | 阻塞所有 (性能差) |
+| ❌ 锁整个仓库 | 粗 | 阻塞所有 (最差) |
+
+### 6.4 错误码
+
+锁冲突时**不**阻塞重试 (会增复杂度) — **直接返回错误**:
+
+```go
+var ErrConcurrentWrite = errors.New("concurrent write detected, retry")
+```
+
+JSON-RPC 映射: `ErrConcurrentWrite` → `internal_error` (code -32603), 客户端**自行重试** (AI 工具 SDK 一般自带重试)。
+
+### 6.5 不做的事 (合规)
+
+- ❌ **不**做 daemon / HTTP server / Unix socket / PID 文件
+- ❌ **不**做启动期 `pgrep` 单例检查
+- ❌ **不**加 `--path` flag (MCP 不接 path, 走 cwd)
+- ❌ **不**锁整个目录
+- ✅ **只**加 `flock` (OS 管的, Kron **不**持状态) — 符合 `architecture.md` §〇 铁律 #6 #7
+
+### 6.6 客户端层注意事项
+
+VSCode 扩展 / Wails / AI 工具**不**需要做单例检查 — `kron serve-mcp` **不**拒绝多实例, 也不报告"已有实例"。
+
+- **要**做: 复用 stdio pipe (一次 spawn, 整个 session 复用)
+- **不**要做: 启动前 `pgrep -f "kron serve-mcp"` 检查
+
+如果多 client 同时操作同一 .md 文件, **直接交给 `internal/store` flock 处理** — 错误 (`ErrConcurrentWrite`) 由客户端决定重试或显示给用户。

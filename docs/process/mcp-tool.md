@@ -44,10 +44,9 @@
 
 > **代码 PR 与 docs PR 可分开**：docs PR 不阻塞代码合并，但**新工具的 MCP 契约必须在代码 PR 合之前进 `mcp.md`**，否则下游消费者无法对齐。
 
-### Step 3 — 在 `docs/process/references-snapshot.md` 标记本批
+### Step 3 — 同步更新 `docs-map.md` §五 索引
 
-在 §一 引用图里把新工具名（如果出现在其他文件中）补一行；§二 入度排名会自动变化，无需手工改。
-**重生成脚本**：见 [`references-snapshot.md`](./references-snapshot.md) §五。
+若新工具引入新文档，把该文档加进 [`docs-map.md`](../abstractDesign/docs-map.md) §五 "所有文件索引" 表。`references-snapshot.md` 2026-10-08 已软删 (见 [`.deprecated/`](../../.deprecated/README.md)), **不**再需要手动维护快照; **新工具的引用关系在 code review 时人工检查单向链即可** ([`docs-map.md`](../abstractDesign/docs-map.md) §三)。
 
 ### Step 4 — CI 验证
 

@@ -56,9 +56,11 @@ lint 阶段发现的 `ErrAnchorDangling` 和 `ErrFrontmatterInvalid` 需要带�
 [error] frontmatter invalid: missing required field 'created_by' in .kron/intents/auth/jwt.md
 ```
 
-调用方身份（`ctx` 中的 caller key）用于：
-- lint 输出里标注调用方
-- 未来审计日志（v1 不实现，但接口要留）
+~~调用方身份（`ctx` 中的 caller key）用于：~~
+- ~~lint 输出里标注调用方~~
+- ~~未来审计日志（v1 不实现，但接口要留）~~
+
+> **(2026-10-08 变更) caller 注入 API 不再推荐**。ctx 上的 caller key **不再**用于 lint 输出 / 审计标注；未来审计日志会**单独**走 access-layer-level 标注**不**走 ctx。详见 architecture.md §2.3。
 
 ---
 

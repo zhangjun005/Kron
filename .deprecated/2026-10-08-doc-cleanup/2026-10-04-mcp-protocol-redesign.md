@@ -544,7 +544,7 @@ func validateArguments(schema, args map[string]any) error { ... }
 
 | 层级 | 测试 | 状态 |
 |---|---|---|
-| 单元 | `caller_test.go` + 5 常量测试 | ✅ 已有,commit 1 不动 |
+| 单元 | `caller_test.go` + 5 常量测试 | ✅ 已有,commit 1 不动 | **(2026-10-08 历史注)**: caller 注入 API **不再推荐**，caller_test.go 仍**保留**以兼容；详见 architecture.md §2.3。 |
 | 单元 | `protocol_test.go` (新增) handshake 4 测试 | 计划 commit 1 |
 | 单元 | `tools_schema_test.go` (新增) schema 完整性 | 计划 commit 2 |
 | 单元 | `handle_tools_call_test.go` (新增) envelope 行为 | 计划 commit 3 |

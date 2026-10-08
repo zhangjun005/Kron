@@ -85,5 +85,5 @@
 | 方向 | 触发条件 |
 |---|---|
 | 新增 `kron_call_graph` 工具（完整调用树 + 意图标签） | 消费方持续反馈 "用 `kron_impact` 拼调用树太麻烦"；当前 `kron_impact` + `kron_intent_density` 组合已够用 |
-| 视图进入 LSP server | v1 不在范围（见 [`architecture.md`](../abstractDesign/architecture.md) §一） |
-| 视图进入 `cmd/kron/serve-gui/` | GUI phase 启动后；当前不在 v1 |
+| 视图进入 LSP server | v1.3+ (LSP 接入见 [`architecture.md`](../abstractDesign/architecture.md) §一 + [`docs/rfc/2026-10-07-lsp-sdk.md`](../rfc/2026-10-07-lsp-sdk.md) §5) |
+| 视图进入 Wails 多项目 GUI (客户端层) | **(2026-10-08 变更)** GUI 移到客户端层，不开 `cmd/kron/serve-gui/`；Wails overview-only + 意图树预览 (轻)；详见 [`architecture.md`](../abstractDesign/architecture.md) §一 |

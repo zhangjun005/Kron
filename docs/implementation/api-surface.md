@@ -73,7 +73,7 @@ func RestoreFromTrash(ctx context.Context, slug string) (string, error)
 func ValidateFrontmatter(fm *model.Frontmatter) error
 ```
 
-> 所有 store 函数第一个参数 `ctx context.Context`。caller 由访问层注入（`"cli"` / `"mcp"` / ...）。
+> 所有 store 函数第一个参数 `ctx context.Context`。caller 由访问层注入（`"cli"` / `"mcp"` / ...）—— **(2026-10-08 变更) caller 注入 API 不再推荐**，详见 §4。`ctx` 仍保留以用于取消 / 超时传播。
 
 ### 1.3 `internal/parser/`（业务层）
 
@@ -162,7 +162,7 @@ func main() {
     srv.Serve() // stdio JSON-RPC loop
 }
 
-// ctx always passed; caller = "mcp:<agent-id>" injected by server
+// ctx always passed; caller = "mcp:<agent-id>" injected by server **(2026-10-08 变更 caller 注入 API 不再推荐，详见 §4)**
 ```
 
 ---
@@ -186,6 +186,8 @@ var (
 
 ## 4 Caller 身份约定
 
+> **(2026-10-08 变更) caller 注入 API 不再推荐**。本节作为历史 / 兼容说明**保留**。新访问层代码**不**再调 `model.WithCaller` 注入身份属性；`internal/` **不**依赖 ctx 上的 caller key 做行为分支。`model.WithCaller` / `CallerFrom` 等 API **保留**以兼容既有 import + `cmd/kron/serve-mcp` 的 `callerInjectMiddleware`。原因：`context.Context` 注入身份属性**不便于开发**。详见 [`internal/model/caller.go`](../../internal/model/caller.go) 头注释与 architecture.md §2.3 变更记录。
+
 | 访问层 | caller 值 | 示例 |
 |---|---|---|
 | CLI | `"cli"` | — |
@@ -194,4 +196,4 @@ var (
 | IDE 插件 | `"ide"` | — |
 | GUI | `"gui"` | — |
 
-在 `context.Context` 中以 `context.WithValue(ctx, callerKey, "cli")` 注入，store/parser/lint 函数通过 `ctx.Value(callerKey)` 读取。
+~~在 `context.Context` 中以 `context.WithValue(ctx, callerKey, "cli")` 注入，store/parser/lint 函数通过 `ctx.Value(callerKey)` 读取。~~ → **不再推荐**。`ctx` 仍保留在 store / parser 函数签名中**用于取消 / 超时传播**。

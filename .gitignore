@@ -36,3 +36,8 @@ frontend/.vite/
 
 # Temporary commit messages written by automated agent sessions
 .cursor/commit-msg-*.txt
+
+# Soft-deleted documents (moved to .deprecated/<date>-<reason>/ for audit;
+# restore with `git mv .deprecated/<date>-<reason>/<file> <original-path>`).
+# DO NOT git add files inside .deprecated/ — they're archived, not live.
+.deprecated/

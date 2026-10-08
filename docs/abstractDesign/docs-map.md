@@ -10,12 +10,11 @@
 | 角色 | 标识 | 说明 | 文件数 |
 |---|---|---|---|
 | **A 需求事实** | A | 从外部输入的约束；工具本身不能否定它 | 1 |
-| **B 架构真理** | B | Kron 的不可妥协边界；其他所有文件都不得与之矛盾 | 1 |
+| **B 架构真理** | B | Kron 的不可妥协边界；其他所有文件都不得与之矛盾 | 2 |
 | **C 数据格式真理** | C | `.kron/intents/*.md` 的文件 schema；跨工具一致 | 1 |
 | **D 业务边界** | D | Kron 对外提供哪些能力；决定 B 的适用范围 | 1 |
-| **E 技术选型** | E | 各层技术栈建议；B 的技术依据 | 1 |
 | **F 实施建议** | F | 具体 API 签名、工具契约；B 的展开，不可与之矛盾 | 7 |
-| **G 实施流程** | G | 决策树与检查清单；触发时强制遵循 | 5 |
+| **G 实施流程** | G | 决策树与检查清单；触发时强制遵循 | 7 |
 | **H 哲学愿景** | H | 学术论文摘要与设计原则；D 的来源之一 | 2 |
 | **K 实景** | K | 真实代码 + 真实场景下的 Kron 行为示例；人类友好的入口 | 1 |
 
@@ -42,6 +41,9 @@ D (业务边界)
   └──► B (架构真理)            "业务决定架构职责"
 
 E (技术选型)
+```
+> E 角色文档 (`tech-stack.md`) 2026-10-08 软删, 内容并入 AGENTS.md. 若 E 角色需恢复, 新增 `docs/abstractDesign/tech-stack.md` 时按下列关系挂载即可.
+```
   │
   └──► B (架构真理)            "技术支撑架构实现"
 
@@ -91,7 +93,7 @@ C ──► B
   │
   └──► I
 
-E ──► B
+E ──► B    *(保留为占位; E 角色 2026-10-08 软删, 若恢复见上面 E 块说明)*
 
 H ──► D ──► B
 ```
@@ -162,9 +164,9 @@ A (requirements.md)  ──►  D (business.md)  ──►  B (architecture.md)
 |---|---|---|
 | **A** | `docs/requirements.md` | —（外部输入） |
 | **B** | `docs/abstractDesign/architecture.md` | A, D, E |
+| **B** | `docs/abstractDesign/view-call-tree-intent.md` | B, C (call-tree intent 视图) |
 | **C** | `docs/abstractDesign/intent-structure.md` | —（数据事实） |
 | **D** | `docs/business.md` | A, H |
-| **E** | `docs/abstractDesign/tech-stack.md` | — |
 | **F** | `docs/implementation/api-surface.md` | B, C |
 | **F** | `docs/implementation/cli.md` | B |
 | **F** | `docs/implementation/domain-model.md` | B, C |
@@ -178,12 +180,19 @@ A (requirements.md)  ──►  D (business.md)  ──►  B (architecture.md)
 | **G** | `docs/process/lint-rule.md` | B |
 | **G** | `docs/process/migrate.md` | B, C |
 | **G** | `docs/process/ci-enforcement.md` | B |
-| **G** | `docs/process/mcp-tool.md` | B |
+| **G** | `docs/process/new-access-layer.md` | B (v1.3+ 新增访问层流程) |
+| **G** | `docs/process/new-internal-api.md` | B (改 `internal/` 公开 API 流程) |
+| **G** | `docs/process/pending-decisions.md` | — (决策链路审计日志, 2026-10-07 封档; 2026-10-08 软删审计见末尾 C1) |
+| **G** | `docs/process/github-branch-protection.md` | — (GitHub 网页操作清单, **不**是文档真理) |
+| **G** | `docs/process/ci-enforcement.md` | B |
 | **H** | `docs/article.md` | — |
 | **H** | `docs/persuasion.md` | — |
 | **K** | `docs/how-it-works.md` | `internal/model/intent.go` (代码示例的真实类型) |
 | **I** | `AGENTS.md` | B, C, F, G |
 | **J** | `.cursor/rules/project-conventions.mdc` | B, F |
+| **Z** | `.deprecated/` | — (软删归档, 2026-10-08 起; `.gitignore` 显式排除新文件, 已 index 文件保留) |
+
+> **2026-10-08 软删**: 8 文件移入 [`.deprecated/2026-10-08-doc-cleanup/`](../../.deprecated/2026-10-08-doc-cleanup/) — `tech-stack.md` / `references-snapshot.md` / `phase-archive/*` (3) / `mcp-protocol.md` / `2026-10-04-mcp-protocol-redesign.md` / `2026-10-04-source-files-reverse-view.md`. 详见该目录 README + `pending-decisions.md` C1.
 
 ---
 

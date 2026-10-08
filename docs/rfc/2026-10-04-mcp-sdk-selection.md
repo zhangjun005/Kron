@@ -1,7 +1,7 @@
 # MCP SDK 选型:go-sdk vs 手写(2026-10-04 调研)
 
 > **状态:已采纳** — 官方 SDK (`github.com/modelcontextprotocol/go-sdk/mcp`) 已采用；实施见 [`2026-10-04-mcp-sdk-adoption.md`](./2026-10-04-mcp-sdk-adoption.md)，落地于 commit `55820ed refactor(serve-mcp): adopt official go-sdk` (2026-10-04)。本文作为**决策记录**保留，不再引导新决策。
-> 关联: [`2026-10-04-mcp-protocol-redesign.md`](./archive/2026-10-04-mcp-protocol-redesign.md) (5 commit 手写计划,被本文挑战) — **SUPERSEDED，归档**
+> 关联：[`2026-10-04-mcp-protocol-redesign.md`](../../.deprecated/2026-10-08-doc-cleanup/2026-10-04-mcp-protocol-redesign.md) (5 commit 手写计划,被本文挑战) — **SUPERSEDED，2026-10-08 软删**
 > 调研日期:2026-10-04
 
 ---
@@ -223,7 +223,7 @@ SDK 升级到 v1.7+ 时再评估(spec 2026-07-28 是大改)。
 
 ### 路线 2:不批准, 走原 RFC 10.5h
 
-5 个 commit 全部按 `docs/rfc/2026-10-04-mcp-protocol-redesign.md` §3 执行。
+5 个 commit 全部按 `docs/rfc/2026-10-04-mcp-protocol-redesign.md` §3 执行（原 RFC 已 2026-10-08 移入 [`.deprecated/`](../../.deprecated/2026-10-08-doc-cleanup/2026-10-04-mcp-protocol-redesign.md)）。
 
 ### 路线 3:折中
 
@@ -240,7 +240,7 @@ SDK 升级到 v1.7+ 时再评估(spec 2026-07-28 是大改)。
 | 风险 | 严重度 | 缓解 |
 |---|---|---|
 | 12 handler 改签名引入 bug | 中 | 测试套完整覆盖,改完跑全测 |
-| SDK 与现有 `caller` API 冲突 | 低 | SDK 自己有 ctx,但我们的 `model.WithCaller` 不冲突 |
+| SDK 与现有 `caller` API 冲突 | 低 | SDK 自己有 ctx,但我们的 `model.WithCaller` 不冲突 | **(2026-10-08 历史注)**: caller 注入 API **不再推荐**，详见 architecture.md §2.3 |
 | SDK 未来大改 API,我们跟不上 | 中 | pin v1.x,自己控制升级节奏 |
 | 依赖膨胀 | 中 | SDK 自己也用 `jsonschema` 包(官方子项目) |
 | 第三方安全审计 | 中 | Apache-2.0 + Google 背书,社区审计 |
@@ -261,8 +261,8 @@ SDK 升级到 v1.7+ 时再评估(spec 2026-07-28 是大改)。
 
 ## 8 文档关联
 
-- 旧 RFC (待废弃): `docs/rfc/2026-10-04-mcp-protocol-redesign.md`
-- 当前差距清单: `docs/process/mcp-protocol.md`
+- 旧 RFC (已 2026-10-08 软删): [`docs/rfc/2026-10-04-mcp-protocol-redesign.md`](../../.deprecated/2026-10-08-doc-cleanup/2026-10-04-mcp-protocol-redesign.md)
+- 当前差距清单: [`docs/process/mcp-protocol.md`](../../.deprecated/2026-10-08-doc-cleanup/mcp-protocol.md) (2026-10-08 软删, 协议层已通过官方 SDK 自动实现, 见 [§0 决策摘要](./2026-10-04-mcp-sdk-adoption.md))
 - AGENTS.md 铁律 #5: `AGENTS.md` line 101
 - off-limits 列表: `AGENTS.md` line 160
 - 现有 go.mod 状态: `go.mod` (3 deps: testify, yaml.v3, go.yaml.in/yaml/v3 indirect)

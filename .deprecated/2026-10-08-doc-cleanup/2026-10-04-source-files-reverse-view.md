@@ -321,7 +321,7 @@ Windows 下 `filepath.WalkDir` 用 `\`。测试需覆盖：
 
 ### 5.9 `internal/identity/` / `internal/model/`
 
-**完全无影响**。身份解析与 caller 注入与本 RFC 无关。
+**完全无影响**。身份解析与 caller 注入与本 RFC 无关。**(2026-10-08 历史注)**: caller 注入 API **不再推荐**，详见 architecture.md §2.3。本节对当前 caller API 状态仍适用。
 
 ---
 

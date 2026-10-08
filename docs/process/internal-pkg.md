@@ -50,7 +50,7 @@
 <说明为什么不适合 internal/store / internal/parser / 访问层内>
 
 **3. 有多少个访问层要用它？**
-<列出 CLI / MCP / LSP / IDE / GUI>
+<列出 CLI / MCP / LSP>  + 客户端层（VSCode 扩展 / Wails / Cursor / Web GUI）**不**直接调用 internal/，**走**协议访问层之一间接访问——本节**不**列客户端层
 
 **4. 如果以后只剩一个访问层用它，会拆分吗？**
 <是 / 否，说明条件>

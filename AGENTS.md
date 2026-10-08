@@ -20,28 +20,41 @@ Kron is a Git-native intent management system for AI-assisted development. It st
 | Config format | TOML | `config.toml`, parsed via `BurntSushi/toml` |
 | Frontmatter | YAML | `gopkg.in/yaml.v3` |
 | Tests | `testing` + `testify/assert` | standard library + assertions |
-| Future UI | Tauri 2 (Rust) or pure web (TS) | undecided; will document when phase starts |
+| MCP SDK | `github.com/modelcontextprotocol/go-sdk` | locked in `go.mod` since v1.2 |
+| LSP SDK | `go.lsp.dev/protocol` | **v1.3+ pending RFC** — see [`docs/rfc/2026-10-07-lsp-sdk.md`](docs/rfc/2026-10-07-lsp-sdk.md) |
+| GUI (Wails) backend | **Go Wails v2** (WebView2 / WebKit) | **v1.3 main path** — see [`docs/rfc/2026-10-07-gui-stack.md`](docs/rfc/2026-10-07-gui-stack.md) §1.1 |
+| VSCode extension (副路径) | TS + VSCode Extension API | **v1.4+ pending** — 复用 `kron serve-mcp` stdio |
+| GUI (Wails) frontend | **TypeScript + shadcn/ui** (React) | **v1.3+**; v1 / v1.2 阶段 **不**引入 .ts 代码, 仍只走 Go |
+| Future skill | strict (ready-to-load) | 已有 `ts-style` skill 等 v1.3 启用 |
 
-The `.gitignore` already excludes `frontend/` — that's intentional, not stale.
+> **v1 / v1.2 阶段**: 仓库**仍只**有 Go 代码 — TS 前端 / Wails 后端 / VSCode 扩展都在 v1.3+ 引入.
+> The `.gitignore` already excludes `frontend/` — that's intentional, not stale. (v1.3 启动**时**改: 取消整目录忽略, 改**只**忽略 `frontend/{dist,build/bin,node_modules}/`.)
 
 ## Repository layout (Go)
 
 ```
 kron/
 ├── cmd/
-│   └── kron/              ← CLI entry, thin wiring only
+│   └── kron/
+│       ├── main.go        ← CLI entry, thin wiring only
+│       ├── cli/           ← cobra commands (kron init / add / lint)
+│       ├── serve-mcp/     ← MCP stdio server (v1.2+)
+│       ├── serve-lsp/     ← (planned v1.3+) LSP socket server
+│       └── serve-gui/     ← (planned v1.3+) Wails HTTP/WebSocket server
 ├── internal/
-│   ├── model/             ← domain types (Intent, Config)
-│   ├── store/             ← file I/O, frontmatter parsing
-│   ├── parser/            ← markdown/CLI argument parsing
-│   └── lint/              ← (proposed) scan + validate组合；phase 2 第 1 步开包
+│   ├── model/             ← domain types (Intent, Config, Frontmatter, Anchor)
+│   ├── store/             ← file I/O, frontmatter parsing, MoveToTrash / RestoreFromTrash
+│   ├── parser/            ← markdown / CLI argument / anchor scanning / slug validation
+│   ├── relations/         ← reverse-link graph (Prereqs / Dependents / ReverseLinks)
+│   ├── lint/              ← anchor-dangling + frontmatter + ref/cycle + staleness
+│   └── identity/          ← created_by resolution (GitUser / Handle)
+├── frontend/              ← (planned v1.3+) Wails GUI frontend (TS + shadcn/ui) — .gitignore'd in v1 / v1.2
 ├── docs/
 │   ├── article.md
 │   ├── business.md
 │   ├── requirements.md
 │   ├── abstractDesign/
 │   │   ├── intent-structure.md
-│   │   ├── tech-stack.md
 │   │   ├── architecture.md   ← ARCHITECTURE TRUTH
 │   │   └── docs-map.md       ← 文档关系图谱
 │   ├── how-it-works.md       ← 实景示例（人类入口）
@@ -96,8 +109,10 @@ These constraints come from the architecture doc and are non-negotiable in v1:
 
 1. **Business logic only in `internal/`** — `cmd/kron/` is wiring only.
 2. **Core decoupled from access layer** — `internal/store`, `internal/parser`, `internal/model` are pure libraries; they do not know whether the caller is CLI, MCP, LSP, IDE, or GUI.
-3. **No cross-access-layer calls** — CLI / MCP / LSP / IDE / GUI five access layers must NEVER import or call each other. Any capability that needs to be shared across access layers must be **sunk into `internal/`** and called independently by each access layer. Code where one access layer invokes another is an architectural violation.
+3. **No cross-access-layer calls** — CLI / MCP / LSP three protocol access layers must NEVER import or call each other. Any capability that needs to be shared across access layers must be **sunk into `internal/`** and called independently by each access layer. Code where one access layer invokes another is an architectural violation.
+   > **变更 (2026-10-08)**: 协议访问层**枚举**为 CLI / MCP / LSP 三种（**不**含 IDE / GUI）。IDE / GUI 是**客户端层**（外部），只通过协议访问层**之一**调能力，**不**直接 import `internal/`。详见 [`docs/abstractDesign/architecture.md`](docs/abstractDesign/architecture.md) §〇 铁律 #9 + §一。
 4. **Caller identity flows via `context.Context`** — every store/parser function takes `ctx context.Context` as the first parameter; the access layer injects the caller key (`"cli"` / `"mcp"` / `"lsp"` / `"ide"` / `"gui"`).
+   > **变更 (2026-10-08)**: caller 注入 API **不再推荐**用于新访问层代码。`model.WithCaller` / `CallerFrom` 等函数 **保留**（兼容既有 import + `cmd/kron/serve-mcp` 的 `callerInjectMiddleware`），但**新**访问层代码**不**再调用 `model.WithCaller`；`internal/` **不**依赖 ctx 上的 caller key 做行为分支。原因：`context.Context` 注入身份属性**不便于开发**（调试栈不直观 / 单元测试需额外包装 / 类型安全弱）。详见 [`internal/model/caller.go`](internal/model/caller.go) 头注释。`ctx` 仍保留在 store / parser 函数签名中**用于取消 / 超时传播**。
 5. **Zero new dependencies** — any new top-level dep needs explicit approval (see off-limits below).
 6. **Markdown + YAML frontmatter is the data truth** — binaries hold no project data; no state machines, no dual-source sync.
 7. **CI lint is the only enforceable gate** — no runtime implicit state; strong constraints are expressed as `kron lint` errors in CI, not runtime defaults.
@@ -111,18 +126,28 @@ These constraints come from the architecture doc and are non-negotiable in v1:
 
 > Example violation to refuse in code review: `cmd/kron/serve-ide/main.go` importing
 > `cmd/kron/serve-lsp/...`. If IDE and LSP need shared logic, lift it into `internal/`.
+> **(2026-10-08 变更)** `cmd/kron/serve-ide/` 不再存在——IDE 是**客户端层**，不在 Kron 主仓。
 
-## Access layers (CLI / MCP / LSP / IDE / GUI)
+## Access layers (CLI / MCP / LSP) + Client layer (IDE / GUI)
 
-> Source: [`docs/abstractDesign/architecture.md`](docs/abstractDesign/architecture.md) §一.
+> Source: [`docs/abstractDesign/architecture.md`](docs/abstractDesign/architecture.md) §〇 铁律 #9 + §一.
+> **(2026-10-08 变更)** 原五访问层 (CLI / MCP / LSP / IDE / GUI) 改为 **3 协议访问层 + 客户端层**: 协议访问层 (CLI / MCP / LSP) 在 Kron 主仓；客户端层 (VSCode 扩展 / Cursor / Wails / Web GUI) **不在**主仓，独立项目。
 
-Kron exposes the same `.md` data through five entry points:
+Kron exposes the same `.md` data through protocol access layers; client-layer UI consumers reach the server via one of the protocol layers:
 
-- **CLI** (human / CI): `kron init` / `kron add` / `kron lint` / `kron serve-mcp` — minimal subset.
-- **MCP server** (AI Agent): stdio JSON-RPC, 8 tools covering init / add / list / get / update / delete / restore / lint.
-- **LSP server**: editor-side hover + definition. 不在 v1 必需范围。
-- **IDE plugin**: hosts LSP / MCP, does **not** directly import `internal/`. 不在 v1 必需范围。
-- **GUI**: independent HTTP API boundary (`serve-gui`), not coupled to CLI flags. 不在 v1 必需范围。
+**协议访问层 (3 个, Kron 主仓)**:
+
+- **CLI** (human / CI): `kron init` / `kron add` / `kron lint` / `kron serve-mcp` / `kron serve-lsp` (v1.3+) — minimal subset.
+- **MCP server** (AI Agent): stdio JSON-RPC, 12 tools covering init / add / list / get / update / delete / restore / lint / assume_check / impact / intent_density / stale.
+- **LSP server** (editor-side): hover + definition over `// @kron:intent` anchors. **v1.3+** — protocol选型见 [`docs/rfc/2026-10-07-lsp-sdk.md`](docs/rfc/2026-10-07-lsp-sdk.md)（**SUPERSEDED, 已标——待重写**）.
+
+**客户端层 (外部项目, 不在 Kron 主仓)**:
+
+- **VSCode extension / Cursor / 其他 VSCode 兼容 IDE**: 拼 JSON 走 serve-mcp 子进程 + spawn serve-lsp 子进程拿 hover/go-def; 一个项目 = 一个 MCP 实例（与 AI 工具**共用**）.
+- **Wails (多项目概览 + 意图树预览)**: 进程内 Go ↔ TS 桥 → 走 serve-mcp (与 VSCode 扩展共用) — **轻**, 不做完整单项目 GUI.
+- **Web GUI (TBD)**: 同 Wails 模式 (拼 serve-mcp).
+
+> **关键原则**: 客户端层**不**直接 import `internal/`; 客户端层**不** import Kron 主仓 Go 代码 (VSCode 扩展**不** import `serve-mcp` Go 包, 只通过 stdio JSON-RPC 通信); 客户端层之间 (Wails / VSCode 扩展) 互相**不** import.
 
 CLI explicitly does NOT implement `list` / `get` / `update` / `delete` / `restore` — those live in MCP only. Don't add them as CLI subcommands without consulting architecture.md §一.
 
@@ -165,10 +190,12 @@ CLI explicitly does NOT implement `list` / `get` / `update` / `delete` / `restor
 - Adding CLI subcommands beyond `init` / `add` / `lint` / `serve-mcp` — see architecture.md §1.1.
 - Adding config fields beyond `intents_dir` — see architecture.md §3.5 (zero-config).
 - Adding `--path` / stdin / external-template flags to existing commands without consulting `docs/process/cli-flag.md`.
-- Implementing `serve-lsp`, IDE plugin, GUI, hard-delete / GC — 这些都不在 v1 必需范围。
+- Adding **`serve-lsp`** / **`serve-gui`** subcommand / new access-layer package — 必走 [`docs/process/new-access-layer.md`](docs/process/new-access-layer.md)（v1.3+ 解锁, **不**在 v1 必需范围）.
+- Implementing **IDE plugin** / **hard-delete / GC** — 仍不在 v1 必需范围.
 - Adding new lint rules without following `docs/process/lint-rule.md`.
 - Modifying frontmatter schema without following `docs/process/migrate.md`.
 - Adding new `internal/` packages without following `docs/process/internal-pkg.md`.
+- Adding new top-level dependencies to `go.mod` `require` block (Wails / `go.lsp.dev/protocol` / shadcn 都要走 explicit approval).
 
 ## Storage format reminder
 

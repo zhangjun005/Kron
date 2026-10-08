@@ -308,4 +308,4 @@ A：把 `status: "active"` 改为 `status: "superseded"`，再写一个 supersed
 | **新贡献者**（想改 Kron 代码）| [`AGENTS.md`](../../AGENTS.md) | [`docs/abstractDesign/architecture.md`](abstractDesign/architecture.md) |
 | **AI Agent 操作员**（想配置 MCP）| §7（已完成）| [`docs/implementation/mcp.md`](implementation/mcp.md) |
 | **CLI 用户**（想在 CI 里跑）| §6（已完成）| [`docs/implementation/cli.md`](implementation/cli.md) |
-| **文档维护者** | [`docs/abstractDesign/docs-map.md`](abstractDesign/docs-map.md) | [`docs/process/references-snapshot.md`](process/references-snapshot.md) |
+| **文档维护者** | [`docs/abstractDesign/docs-map.md`](abstractDesign/docs-map.md) | — *(references-snapshot.md 2026-10-08 软删, 暂无替代快照工具)* |
