@@ -125,7 +125,7 @@ v1 简化：仅列清单，不做 diff 对比（留 TODO）。
 | 字段 | 值 |
 |---|---|
 | 入参 | `slug` (string, required) |
-| 出参 | `{ intent: IntentSummary, incoming_anchors: [Anchor], references: [string], prerequisites: [string] }` |
+| 出参 | `{ intent: IntentSummary, incoming_anchors: [Anchor], references: [string], prerequisites: [string] }` (v1.3+: `incoming_anchors[].kind: "code" | "markdown"`) |
 | 错误码 | `ErrIntentNotFound` |
 
 **说明**：

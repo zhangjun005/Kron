@@ -78,6 +78,19 @@ AI:    我帮你跑了 kron_assume_check + kron_stale:
 
 这是 §5.2 提到的 **`kron_assume_check` + `kron_stale`** 在实际场景里的用法——AI 主动 query 假设清单 + 主动告警过期,人类不需要挨个翻文件。
 
+### 2.1 (2026-10-08 合规) 仓库普通 MD 也可用锚点
+
+按 [`docs/rfc/2026-10-08-md-anchors.md`](rfc/2026-10-08-md-anchors.md) 拍板, **`.kron/` 文件夹外**的任何 `.md` 文件 (含 `README.md` / `docs/**/*.md`) 也可使用同一锚点语法 `// @kron:intent <slug>` 反向引用意图. 例 (`README.md`):
+
+```markdown
+// @kron:intent auth/refresh-token
+# Refresh Token 滚动过期策略
+
+> 引用的开发背景说明 ...
+```
+
+`kron lint` 扫描全仓库 `.md` (除 `.kron/intents/` 自己), 与代码共用同一种语法与同一套规则 (悬空/自引用/非法 slug). 影响图 `kron_impact.incoming_anchors` 增 `kind: "code" | "markdown"` 维度.
+
 ```markdown
 <!-- kron:frontmatter -->
 symbol:

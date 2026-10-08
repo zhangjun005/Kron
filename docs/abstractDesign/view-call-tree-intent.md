@@ -33,9 +33,9 @@
 
 | 数据需求 | 工具类别 | 输出字段 |
 |---|---|---|
-| 哪些源文件依赖某个意图（反向锚点） | 影响分析类 | `incoming_anchors` |
-| 哪些意图没有任何锚点（意图盲区） | 量化审计类 | `coverage.intents_without_anchors` |
-| 哪些源文件 > 50 行且 0 锚点（代码盲区） | 量化审计类 | `files_without_intent` |
+| 哪些源文件依赖某个意图（反向锚点; **v1.3+ 扩**: 增 `kind: code/markdown` 维度, 见 [`docs/rfc/2026-10-08-md-anchors.md`](../rfc/2026-10-08-md-anchors.md)) | 影响分析类 | `incoming_anchors` |
+| 哪些意图没有任何锚点（意图盲区; **v1.3+ 扩**: 含 MD 锚点统计） | 量化审计类 | `coverage.intents_without_anchors` |
+| 哪些源文件 > 50 行且 0 锚点（代码盲区; **v1.3+ 扩**: 哪些 .md > 100 行且 0 锚点为新维度 `docs_without_intent`） | 量化审计类 | `files_without_intent` |
 | 意图间的横向关联（共享 `symbol`） | 影响分析类 | `depends_on_intents` |
 
 工具的入参 / 出参 / 错误码完整契约位于 [`architecture.md`](../abstractDesign/architecture.md) §1.2；F 层不在本文档展开。
