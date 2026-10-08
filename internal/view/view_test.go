@@ -181,6 +181,37 @@ func TestBuildIntentTree_NilEntriesSkipped(t *testing.T) {
 	assert.Len(t, leaves, 2)
 }
 
+// TestBuildIntentTree_READMEDirNode asserts the "module README" shape:
+// store is the canonical simplifier of "auth/README.md" → slug "auth",
+// but the tree shape is documented and tested independently so a
+// future refactor of the store shortcut cannot silently break the
+// view layer. The expected node is BOTH a directory (it has children
+// "jwt" and "password") AND carries the module README's Intent.
+func TestBuildIntentTree_READMEDirNode(t *testing.T) {
+	// Slugs as they look AFTER store's README shorthand (PR-A).
+	// "auth" is the module README; "auth/jwt" and "auth/password"
+	// are sibling leaves.
+	authReadme := mkIntent("auth", "# Auth module overview")
+	jwt := mkIntent("auth/jwt", "")
+	pwd := mkIntent("auth/password", "")
+	tree := BuildIntentTree([]*model.Intent{authReadme, jwt, pwd})
+
+	require.Len(t, tree.Children, 1)
+	auth := tree.Children[0]
+	assert.Equal(t, "auth", auth.Slug)
+	assert.Equal(t, "auth", auth.Name)
+	assert.True(t, auth.IsDir, "auth is a dir (has children)")
+	assert.Same(t, authReadme, auth.Intent, "auth carries the README's Intent")
+
+	// Children: jwt, password (no README leaf — store already collapsed).
+	require.Len(t, auth.Children, 2)
+	assert.Equal(t, "jwt", auth.Children[0].Name)
+	assert.Equal(t, "password", auth.Children[1].Name)
+	for _, c := range auth.Children {
+		assert.False(t, c.IsDir, "leaves are not dirs")
+	}
+}
+
 func TestIntentTitle_FromH1(t *testing.T) {
 	in := mkIntent("auth/jwt", "# JWT Sliding Window\n\nbody text")
 	assert.Equal(t, "JWT Sliding Window", IntentTitle(in))

@@ -73,12 +73,13 @@ type IntentTreeNode struct {
 // not in intents, it does not appear in the tree. This matches
 // the in-memory "no I/O" rule of the relations package.
 //
-// README.md handling: a file like "auth/README.md" is loaded by
-// store as a leaf with slug "auth/README" (or similar). BuildIntentTree
-// treats it as a regular leaf under the "auth" directory. The
-// architectural question of whether "auth/README" should be
-// addressable as slug "auth" (for `// @kron:intent auth` shorthand)
-// is a storage-layer RFC and is intentionally NOT solved here.
+// README.md handling: a file like "auth/README.md" is collapsed by
+// store.walkIntentSlugs to slug "auth" (the directory-name shorthand
+// — RFC 2026-10-08-intent-tree-api.md §3.1, A1). BuildIntentTree
+// therefore receives "auth" (carrying the README's Intent) alongside
+// any "auth/<child>" slugs, and the existing "dir + Intent coexist"
+// logic (see TestBuildIntentTree_READMEDirNode) places the README on
+// the dir node automatically. No view-layer special-casing needed.
 func BuildIntentTree(intents []*model.Intent) *IntentTreeNode {
 	root := &IntentTreeNode{Slug: "", Name: "", IsDir: true}
 

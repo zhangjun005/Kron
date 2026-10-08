@@ -53,6 +53,32 @@ func (r *Reader) IntentPath(slug string) string {
 	return filepath.Join(r.Root, model.IntentPath(slug))
 }
 
+// resolveIntentPath returns the absolute disk path for slug, applying
+// the README shorthand (RFC 2026-10-08-intent-tree-api.md §3.1):
+//
+//	<root>/.kron/intents/<slug>.md          (canonical)
+//	<root>/.kron/intents/<slug>/README.md   (shorthand, if canonical absent)
+//
+// Returns model.ErrIntentNotFound (wrapped with the slug) if neither
+// file exists. The shorthand applies to any depth — "a/b/c" resolves
+// to ".kron/intents/a/b/c/README.md" when that path is the only one.
+func (r *Reader) resolveIntentPath(slug string) (string, error) {
+	canonical := r.IntentPath(slug)
+	if _, err := os.Stat(canonical); err == nil {
+		return canonical, nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("store: stat %s: %w", canonical, err)
+	}
+	// Canonical missing — try the README shorthand.
+	readme := filepath.Join(r.Root, model.KronDir, model.IntentDir, slug, "README.md")
+	if _, err := os.Stat(readme); err == nil {
+		return readme, nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("store: stat %s: %w", readme, err)
+	}
+	return "", fmt.Errorf("%w: %s", model.ErrIntentNotFound, slug)
+}
+
 // TrashPath returns the absolute path of a trashed intent's .md file.
 func (r *Reader) TrashPath(slug string) string {
 	return filepath.Join(r.Root, model.TrashPath(slug))
@@ -65,15 +91,28 @@ func (r *Reader) KronDir() string {
 
 // Load reads a single intent by slug.
 //
-// Returns model.ErrIntentNotFound (wrapped) if the file is absent.
+// Slug resolution (per RFC 2026-10-08-intent-tree-api.md §3.1):
+// the canonical on-disk file is "<root>/.kron/intents/<slug>.md".
+// If that path is missing AND a "<root>/.kron/intents/<slug>/README.md"
+// exists, the README is read instead. This is the "directory
+// shorthand" that lets `// @kron:intent auth` resolve to a
+// module-level README.md intent.
+//
+// Returns model.ErrIntentNotFound (wrapped) if neither path exists.
 // Returns model.ErrFrontmatterInvalid (wrapped) if the YAML block is malformed.
-// SourcePath on the returned Intent is set to the absolute disk path.
+// SourcePath on the returned Intent is set to the absolute disk path
+// that was actually read (i.e. the README path when the shorthand
+// was used).
 func (r *Reader) Load(ctx context.Context, slug string) (*model.Intent, error) {
 	_ = ctx // reserved for cancellation; no-op in v1
 	if slug == "" {
 		return nil, fmt.Errorf("%w: slug is empty", model.ErrSlugInvalid)
 	}
-	path := r.IntentPath(slug)
+
+	path, err := r.resolveIntentPath(slug)
+	if err != nil {
+		return nil, err
+	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -151,8 +190,19 @@ func (r *Reader) LoadAll(ctx context.Context) ([]*model.Intent, error) {
 // slug prefix (e.g., contain uppercase letters or "..") are pruned
 // to avoid surprises on malformed filesystems; the files inside are
 // not loaded. Slugs are returned in lexicographic order.
+//
+// README shorthand (RFC 2026-10-08-intent-tree-api.md §3.1, A1):
+// "auth/README.md"  → "auth"
+// "a/b/c/README.md" → "a/b/c"
+// "README.md"       → "README"
+//
+// Collision rule: when BOTH "<slug>.md" AND "<slug>/README.md" exist
+// for the same slug, the directory-name wins — only ONE slug entry
+// is emitted, and the on-disk resolution is "<slug>.md" (canonical,
+// per resolveIntentPath). Lint layer surfaces the duplicate file as
+// `intent-slug-collision` (v1.2+).
 func walkIntentSlugs(root string) ([]string, error) {
-	slugs := make([]string, 0)
+	slugSet := make(map[string]struct{})
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			// If the root itself is missing, return empty (not an
@@ -176,14 +226,41 @@ func walkIntentSlugs(root string) ([]string, error) {
 		// Convert filesystem path separators to "/"-slugs. On Windows
 		// filepath.Rel returns "auth\jwt.md"; we want "auth/jwt".
 		slug := strings.TrimSuffix(filepath.ToSlash(rel), model.IntentExtension)
-		slugs = append(slugs, slug)
+		// Collapse README.md → directory-name shorthand (A1).
+		slug = collapseReadmeSlug(slug)
+		slugSet[slug] = struct{}{}
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("store: walk %s: %w", root, err)
 	}
+	slugs := make([]string, 0, len(slugSet))
+	for s := range slugSet {
+		slugs = append(slugs, s)
+	}
 	sort.Strings(slugs)
 	return slugs, nil
+}
+
+// collapseReadmeSlug maps a README.md slug to its directory-name
+// shorthand, per RFC 2026-10-08-intent-tree-api.md §3.1.
+//
+//	"auth/README"     → "auth"      (module-level node intent)
+//	"a/b/c/README"    → "a/b/c"     (deeply-nested node intent)
+//	"README"          → "README"    (root-level node intent; the literal
+//	                                 string "README" is the canonical
+//	                                 slug for the top-level README.md —
+//	                                 store keeps it as-is to avoid a
+//	                                 special-case in model.IntentPath,
+//	                                 which is a pure string concat)
+//
+// Any other slug is returned unchanged. The function is pure
+// (no I/O, no global state) so it is trivially unit-testable.
+func collapseReadmeSlug(slug string) string {
+	if strings.HasSuffix(slug, "/README") {
+		return strings.TrimSuffix(slug, "/README")
+	}
+	return slug
 }
 
 // Exists reports whether an intent with the given slug is present

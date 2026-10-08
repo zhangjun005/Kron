@@ -284,3 +284,133 @@ func TestNewReader_Errors(t *testing.T) {
 		assert.Contains(t, err.Error(), "root not accessible")
 	})
 }
+
+// README-as-intent shorthand (RFC 2026-10-08-intent-tree-api.md §3.1, A1):
+// a file like "auth/README.md" is loadable via the slug "auth", not
+// "auth/README". The walk layer collapses the slug and the load
+// layer resolves it through model.IntentPath("auth") = ".kron/intents/auth/README.md".
+
+func TestReader_LoadAll_READMEShorthand_SingleLevel(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/intents/auth/README.md", sampleIntent)
+	writeFile(t, dir, ".kron/intents/auth/jwt.md", sampleIntent)
+	writeFile(t, dir, ".kron/intents/auth/password.md", sampleIntent)
+
+	r, err := NewReader(dir)
+	require.NoError(t, err)
+
+	intents, err := r.LoadAll(context.Background())
+	require.NoError(t, err)
+
+	got := make([]string, 0, len(intents))
+	for _, in := range intents {
+		got = append(got, in.Slug)
+	}
+	sort.Strings(got)
+	assert.Equal(t, []string{"auth", "auth/jwt", "auth/password"}, got)
+
+	// The "auth" intent is loadable directly by the directory-name slug.
+	auth, err := r.Load(context.Background(), "auth")
+	require.NoError(t, err)
+	assert.Equal(t, "auth", auth.Slug)
+	assert.Contains(t, auth.SourcePath, filepath.Join("auth", "README.md"))
+}
+
+func TestReader_LoadAll_READMEShorthand_Nested(t *testing.T) {
+	// Deeply-nested README: "a/b/c/README.md" → slug "a/b/c".
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/intents/a/b/c/README.md", sampleIntent)
+	writeFile(t, dir, ".kron/intents/a/b/c/inner.md", sampleIntent)
+
+	r, err := NewReader(dir)
+	require.NoError(t, err)
+
+	intents, err := r.LoadAll(context.Background())
+	require.NoError(t, err)
+
+	got := make([]string, 0, len(intents))
+	for _, in := range intents {
+		got = append(got, in.Slug)
+	}
+	sort.Strings(got)
+	assert.Equal(t, []string{"a/b/c", "a/b/c/inner"}, got)
+
+	// "a/b/c" must round-trip through Load + resolve to README.md on disk.
+	c, err := r.Load(context.Background(), "a/b/c")
+	require.NoError(t, err)
+	assert.Equal(t, "a/b/c", c.Slug)
+}
+
+func TestReader_LoadAll_READMEShorthand_Root(t *testing.T) {
+	// Top-level "README.md" → slug "README". The literal "README"
+	// is the canonical slug for the top-level node intent (the
+	// root of the intent tree). An empty-slug root intent would
+	// require special-casing model.IntentPath, which is a pure
+	// string concat; keeping the literal "README" avoids that.
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/intents/README.md", sampleIntent)
+	writeFile(t, dir, ".kron/intents/other.md", sampleIntent)
+
+	r, err := NewReader(dir)
+	require.NoError(t, err)
+
+	intents, err := r.LoadAll(context.Background())
+	require.NoError(t, err)
+
+	got := make([]string, 0, len(intents))
+	for _, in := range intents {
+		got = append(got, in.Slug)
+	}
+	sort.Strings(got)
+	assert.Equal(t, []string{"README", "other"}, got)
+
+	// "README" must round-trip through Load (the file is on disk
+	// as .kron/intents/README.md, and the resolved path is non-empty).
+	root, err := r.Load(context.Background(), "README")
+	require.NoError(t, err)
+	assert.Equal(t, "README", root.Slug)
+}
+
+func TestReader_LoadAll_READMEShorthand_NoReadmeIsUnaffected(t *testing.T) {
+	// Regression guard: a directory WITHOUT a README.md must not
+	// accidentally have a synthetic "auth" intent created. Only
+	// an on-disk README.md triggers the shorthand.
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/intents/auth/jwt.md", sampleIntent)
+	writeFile(t, dir, ".kron/intents/auth/password.md", sampleIntent)
+
+	r, err := NewReader(dir)
+	require.NoError(t, err)
+
+	intents, err := r.LoadAll(context.Background())
+	require.NoError(t, err)
+
+	got := make([]string, 0, len(intents))
+	for _, in := range intents {
+		got = append(got, in.Slug)
+	}
+	sort.Strings(got)
+	assert.Equal(t, []string{"auth/jwt", "auth/password"}, got)
+
+	// "auth" must NOT exist (no README to back it).
+	_, err = r.Load(context.Background(), "auth")
+	assert.ErrorIs(t, err, model.ErrIntentNotFound)
+}
+
+func TestCollapseReadmeSlug(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"auth/README", "auth"},
+		{"a/b/c/README", "a/b/c"},
+		{"README", "README"},
+		{"auth/jwt", "auth/jwt"},
+		{"single", "single"},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			assert.Equal(t, tc.want, collapseReadmeSlug(tc.in))
+		})
+	}
+}
