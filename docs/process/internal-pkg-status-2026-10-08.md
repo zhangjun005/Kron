@@ -1,9 +1,16 @@
-# Kron 内部包现状（2026-10-08 收口版 v2）
+# Kron 内部包现状（2026-10-08 收口版 v3）
 
 > 范围：`internal/` 下所有包。CLI / MCP / 未来的 LSP / IDE / GUI 都从这些包拿数据。
 > 这是**业务数据层**的现状报告。架构原则见 `docs/abstractDesign/architecture.md`。
 >
-> **v2 增量**（相对 v1，同日二次封档）：
+> **v3 增量**（相对 v2，同日三次封档）：
+> - ✅ **新包** `internal/view/`：intent 目录树构建（`BuildIntentTree` / `IntentTreeNode` / `Flatten` / `Sort` / `IntentTitle`）—— 12 测试过
+> - ✅ 空论证 commit `7944f32`：`internal-pkg.md` §3 五问模板
+> - 📝 RFC 草案：`docs/rfc/2026-10-08-intent-tree-api.md` —— 记录 README-as-intent 语义 gap
+> - ⏸️ **MCP `kron_list` / `kron_get` / 新 `kron_tree` 工具**：不接 view 包（access-layer 改动，后续 PR）
+> - ⏸️ `model.Anchor` 加 `Kind` 字段：backlog，等 md-anchors RFC 实施路径 PR
+>
+> **v2 增量**（前一次封档）：
 > - ✅ **T1**: `parser.ValidateAssumptionFrontmatter` + `assumption.Writer.Update` 写前调用（拒空 Text / 拒空 CreatedBy 等）
 > - ✅ **T2**: `parser.validateFrontmatter` 加 Symbol 校验（拒空 / 拒 ".."）；`store.Writer.Update` 写前已调，自动覆盖
 > - ✅ **`relations.ReferencingIntents(intents, assumptionID) []string`** + 4 测试（Intent ↔ Assumption 反向）
@@ -81,7 +88,22 @@
 
 **输出**：`[]Diag`（机器）+ `StaleReport`（结构化陈旧视图，给 MCP `kron_stale` 用）。
 
-### 1.4 关系图（`internal/relations/`）—— 完整
+### 1.4 视图（`internal/view/`）—— 完整 ✅ NEW
+
+接受预加载的 `[]*model.Intent`，**零 IO**。3 个视图能力：
+
+| 函数 | 输出 | 用例 |
+|---|---|---|
+| `BuildIntentTree(intents) *IntentTreeNode` | 树根节点（含 dir + leaf 混合结构） | 未来 MCP `kron_tree` / IDE 树视图 / Wails 预览 |
+| `(*IntentTreeNode).Flatten() []*IntentTreeNode` | pre-order 平铺 | 任何需要"目录顺序叶子"的下游 |
+| `IntentTitle(*model.Intent) string` | Body 第一行 H1（fallback: slug TitleCase） | 树视图 / LSP hover / MCP list display |
+
+**关键设计**：
+- **dir 节点 + Intent 节点可共存**：slug "auth" 有 Intent 时，节点 `IsDir=true AND Intent != nil`（如果同时有 "auth/jwt"）
+- **不识别 README-as-intent**：`auth/README.md` 当前被 store slugify 成 `auth/README`，在树里是 `auth/README` leaf ——**不是** `auth` 节点。`// @kron:intent auth` → `auth/README.md` 的语义映射是 RFC 草案 `docs/rfc/2026-10-08-intent-tree-api.md` 的范围
+- **不存任何反向索引**：view = "从 `[]*model.Intent` 现算"，与 relations 一致
+
+### 1.5 关系图（`internal/relations/`）—— 完整
 
 接受预加载的 `[]*model.Intent`，**零 IO**。4 个反向 view：
 
@@ -92,7 +114,7 @@
 | `Prerequisites(intents, target)` | 排序的 `[]string` | `kron_impact` 前置条件 |
 | `ReferencingIntents(intents, assumptionID)` ✅ NEW | 排序去重的 `[]string`（哪些 intent 在 `Assumptions[].ID` 里引了这个 assumption） | 未来 `kron_assumption_delete` 提示"删之前哪些 intent 在用" |
 
-### 1.5 写 API 风格一致性（**今天对齐了**）
+### 1.6 写 API 风格一致性（**今天对齐了**）
 
 `store.Writer.Update` 与 `assumption.Writer.Update` 现在**完全对称**：
 
@@ -159,6 +181,10 @@
 | T1 (assumption pre-write 校验) | ✅ 拍板 | 修 |
 | T2 (store Symbol 校验) | ✅ 拍板 | 修 |
 | `relations.ReferencingIntents` 范围 | ✅ 拍板 | **只 internal 层**——不接 lint / 不开 MCP 工具 |
+| v3 `internal/view/` 包论证 | ✅ 拍板 | 5 问模板（commit `7944f32`） |
+| v3 `view.IntentTitle` 取标题策略 | ✅ 拍板 | Body 第一行 H1 → fallback TitleCase(slug) |
+| v3 `view.BuildIntentTree` README 处理 | ✅ 拍板 | 树含所有 .md（**不**做 README-as-intent 语义映射）—— RFC 草案留 |
+| v3 RFC `// @kron:intent auth` → `auth/README.md` | ⏳ 草案 | `docs/rfc/2026-10-08-intent-tree-api.md` |
 
 ---
 
@@ -169,18 +195,37 @@
 | **T3** | `assumption.Writer.Delete` / `Restore` 仍改 `CreatedBy` 为 actor | 注释里说"v1.4+ 审计日志时再统一"；当前是**有意保留的 Delete 例外**——不视作 bug |
 | T4 | 4 个上层调用方未迁到 `Update` | 设计选择（留 `Write` + 加 `Update` 并存），**不**算尾巴 |
 | T5 | `gofmt -l .` 报 `internal/relations/relations_test.go` 之前是 pre-existing | 本次 PR 已修（`gofmt -w`） |
+| **T6** | RFC: `// @kron:intent auth` → `auth/README.md` 语义映射 | `walkIntentSlugs` 把 `auth/README.md` slugify 成 `auth/README`；`Get("auth")` 失败——`docs/rfc/2026-10-08-intent-tree-api.md` 草案 |
+| T7 | `model.Anchor` 加 `Kind` 字段 | md-anchors RFC 实施路径，跨包改动 |
+| T8 | MCP `kron_list` / `kron_get` / 新 `kron_tree` 工具消费 `view.BuildIntentTree` | access-layer PR（不在 internal 范围） |
 
 ---
 
-## 6. 文件变更清单（今天）
+## 6. 文件变更清单（v1 + v2 同日合并）
 
 | 文件 | 变化 |
 |---|---|
 | `internal/store/writer.go` | 加 `UpdatePatch` / `UpdateOption` / `WithAllowCreatorChange` / `Writer.Update` / `validStatus`；写前 `ValidateFrontmatter` |
-| `internal/store/writer_test.go` | 加 9 个 `TestWriter_Update_*`（single / multi / body / nil-vs-empty / CreatedBy opt-in / empty patch / actor required / invalid slug / not found） |
-| `internal/store/errors.go` | **新文件**：`ErrEmptyPatch` + `ErrCreatorChangeNotAllowed`（镜像 `assumption/errors.go`） |
+| `internal/store/writer_test.go` | 加 9 个 `TestWriter_Update_*`（single / multi / body / nil-vs-empty / CreatedBy opt-in / empty patch / actor required / invalid slug / not found）+ 3 个 `TestWriter_Update_Rejects*`（T2 校验） |
+| `internal/store/errors.go` | **新文件（v1）**：`ErrEmptyPatch` + `ErrCreatorChangeNotAllowed`（镜像 `assumption/errors.go`） |
+| `internal/parser/frontmatter.go` | 加 `ValidateAssumptionFrontmatter`（T1）+ `validateFrontmatter` 加 Symbol 校验（T2） |
+| `internal/assumption/writer.go` | `Update` 写前调 `ValidateAssumptionFrontmatter`（T1） |
+| `internal/assumption/writer_test.go` | 加 3 个 `TestWriter_Update_Rejects*`（T1 校验） |
+| `internal/relations/relations.go` | 加 `ReferencingIntents(intents, assumptionID) []string` |
+| `internal/relations/relations_test.go` | 加 4 个 `TestReferencingIntents_*`（none / multiple / sorted-dedup / empty input） |
 | `docs/process/migrate.md` | `git mv` 到 `.deprecated/2026-10-08-store-update-patch/migrate.md` |
 | `internal-pkg-status-2026-10-08.md` | **本文件**（v1 推倒重写 → v2 二次封档） |
+
+## 7. v3 文件变更清单（今日三次封档）
+
+| 文件 | 变化 |
+|---|---|
+| `internal/view/view.go` | **新包**：`IntentTreeNode` / `BuildIntentTree` / `Sort` / `Flatten` / `IntentTitle` |
+| `internal/view/view_test.go` | 12 个测试（empty / single / nested / deep / dirs-before-leaves / flatten / dir-with-intent / nil / 标题抽取 4 个） |
+| `docs/process/internal-pkg-status-2026-10-08.md` | v3：本节 |
+| `docs/rfc/2026-10-08-intent-tree-api.md` | **RFC 草案**：README-as-intent 语义 gap 记录 |
+
+> commit `7944f32`（论证）+ `pending`（实现）
 
 ## 7. v2 文件变更清单（今日二次封档）
 
