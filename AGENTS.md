@@ -79,6 +79,8 @@ PR 含: 测试 + `docs/` 同步 (真理改 → `abstractDesign/`; 流程改 → 
 - **不**猜 — **问**人
 - **不**双份维护 — `docs/` 是真理, AGENTS.md **不**复制
 - **不**在 AGENTS.md 加**新**流程 / **新**红线 — 直接走 `docs/process/` 开 PR 改
+- **人命 > 文档实施计划** — 任何 "可以以后做" / "建议 v1.5 评估" / "RFC 拍板后再说" 的实施提案, **先**问人**是否**真的**要**纳入; 默认**不**主动加, 默认**不**主动提. 文档实施计划是**辅助**, **不**是任务清单. 人类说"以后再考虑" = 删, 不是留 todo.
+- **慎给阶段性实施提案** — 任何"v1.3+ 拍板 / v1.4+ 评估 / v1.5 收口"等分阶段实施提案**显著拉高**实施成本: (a) 制造跟踪债 (b) 给后续 PR 强加"该实现 X" 的隐性承诺 (c) 与"plan-first, **不**是 stage-first" 流程纪律冲突. 拍板时**只**说"现在做不做" + "做哪个", **不**说"分 3 阶段" / "先骨架后填充". 例外: 架构 §7 已有 "不做的事" 表, 那**不**算提案, **不**重写.
 
 ---
 
@@ -97,3 +99,46 @@ PR 含: 测试 + `docs/` 同步 (真理改 → `abstractDesign/`; 流程改 → 
 | Workflow (Before writing code 5 步) | `docs/process/README.md` 文档地图 |
 
 > **2026-10-08 改**: 旧版"Adding `serve-lsp` 必走 `docs/process/new-access-layer.md`" 引用 — **该文件不存在**; 新指令是"**先开 RFC** [`docs/r/`](docs/rfc/) 拍板, 拍板后走对应 `docs/process/*`". 见本文档 §2 表格最后一行.
+
+---
+
+## 7 客户端层 (Client Layer) 分工 (2026-10-09)
+
+按 [`architecture.md` §〇·五·1 + §0 铁律 #9](../docs/abstractDesign/architecture.md), 客户端层 (VSCode 扩展 / Wails GUI / Cursor / 其他 IDE / Web) **不**进 Kron 主仓, **只**通过协议访问层 (CLI / MCP / LSP) 调能力. 客户端层**之间**也**不**互相 import.
+
+### 7.1 职责分工 (人 2026-10-09 拍板)
+
+| 客户端 | 形态 | 职责范围 | 调的能力 |
+|---|---|---|---|
+| **GUI (Wails 桌面 / Web)** | 整体项目管理软件 | **只**做**整体预览**: 多项目概览 + 意图树预览 + 状态条; **不**做编辑/搜索/跳转/补全等**深度功能** | `serve-mcp` 拼 JSON (走 list / get / read 类工具) |
+| **IDE (VSCode 扩展 / Cursor 兼容层)** | 编辑器侧 UI | **功能最全**: hover / definition / 侧边栏 / 弹窗 / 跳转 / 补全 / 错误诊断; 编辑器生命周期内的所有 kron 能力**全**在 IDE 这层聚合 | `serve-mcp` 拼 JSON (业务能力) + `serve-lsp` 子进程 (编辑器 UI 集成) |
+
+**关键边界**:
+
+- GUI **不**做 hover / 跳转 / 实时诊断 (那是 IDE 职责)
+- IDE **不**做项目管理 (那是 GUI 职责)
+- 同一个项目可以**同时**有 GUI 实例 (Wails) + IDE 实例 (VSCode) + AI 工具实例 (Claude MCP), **各自**调**各自**需要的协议访问层子进程, **互不**通讯, 互不锁
+
+### 7.2 实施位置 (主仓**不**存)
+
+| 客户端 | 仓库 | 与 Kron Go 主仓关系 |
+|---|---|---|
+| VSCode 扩展 | 独立仓 (`extensions/vscode-kron/` 或类似) | **不**进主仓 (architecture §0 铁律 #9); 通过 stdio 子进程调 `kron serve-mcp` + `kron serve-lsp` |
+| Wails GUI | 独立仓 (`kron-wails/` 或类似) | **不**进主仓; 进程内 Go ↔ TS 桥, 拼 JSON 调 `kron serve-mcp` |
+| Cursor 客户端 | 复用 VSCode 扩展 | Cursor **不**需要单独扩展; 复用 VSCode extension LSP / MCP 集成 |
+| Neovim / Helix | 各编辑器生态**自**写 | **不**下沉到 Kron 仓库; 各自实现 LSP client (lspconfig / 内置 LSP) |
+
+### 7.3 客户端 SDK 选型 (拍板约束)
+
+- **VSCode 扩展**: 用 `vscode-languageclient` (TypeScript, 事实标准) 处理 LSP; MCP 客户端**用 SDK** (`@modelcontextprotocol/sdk` 或 VSCode 1.85+ 内置 MCP 客户端) **不**手写 JSON-RPC. UI 渲染走 VSCode Webview API + 任意前端框架 (React / Svelte / Vue 自由).
+- **Wails GUI**: 走 Wails 自身 React/Svelte 绑定; 拼 JSON 调 `kron serve-mcp`.
+- **LSP server SDK 锁定**: `go.lsp.dev/protocol v3.17+` (RFC `2026-10-07-lsp-sdk.md` §3). 加 dep 走 explicit approval (AGENTS.md §3 红线).
+
+### 7.4 不在 Kron Go 仓库范围内
+
+- ❌ **不**在主仓建 `extensions/vscode-kron/`
+- ❌ **不**在主仓实装 Wails 代码 (Go 端或 TS 端)
+- ❌ **不**给 IDE 客户端写**任何** TypeScript 代码
+- ❌ **不**在 `frontend/` 加**任何** 实施代码 (本目录是 README 占位, 见 [`frontend/README.md`](../frontend/README.md))
+
+v1.3 启动时按 [`docs/process/new-access-layer.md`](../docs/process/new-access-layer.md) §3 + 客户端 RFC 拍板. **不**是 Kron Go 主仓的范畴.
