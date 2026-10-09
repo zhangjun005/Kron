@@ -55,6 +55,7 @@
 - 改 **intents/ assumptions 数据架构** (走 `migrate.md` + RFC)
 - 新 **lint 规则** (走 `lint-rule.md`)
 - 新 **`internal/` 包** (走 `internal-pkg.md`)
+- **不**把"仅一个模块有意义"的行为塞进 `internal/` (走 [`internal-discretion.md`](docs/process/internal-discretion.md) 4 问)
 - **不**改 5 铁律 + 8 import 边界 (架构 §〇 + §二.2; 违反 = 架构违规, 拒绝 review)
 - **不**让 access layer (CLI / MCP / LSP) 互调 (架构 §〇 铁律 #2)
 - **不**让 `internal/` import `cmd/kron/` (架构 §二.2)

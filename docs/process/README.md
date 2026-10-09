@@ -14,6 +14,7 @@
 | [`lint-rule.md`](./lint-rule.md) | 想给 `kron lint` 增加新检查规则 |
 | [`mcp-tool.md`](./mcp-tool.md) | 想给 `kron serve-mcp` 增加新 MCP 工具 |
 | [`migrate.md`](./migrate.md) | 想修改 frontmatter schema |
+| [`internal-discretion.md`](./internal-discretion.md) | 想下沉代码到 `internal/`，**先**问 4 问；3 人协作纪律 |
 
 ---
 
