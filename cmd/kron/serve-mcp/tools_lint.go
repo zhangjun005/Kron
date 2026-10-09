@@ -26,7 +26,7 @@ import (
 // the v1.1 behaviour where root was baked into each handleXxx(root)
 // closure; the v1.2 refactor centralises that wiring in one place
 // (the middleware) so all 12 handlers can share it.
-func HandleLint(ctx context.Context, _ *mcp.CallToolRequest, _ LintInput) (
+func HandleLint(ctx context.Context, _ *mcp.CallToolRequest, in LintInput) (
 	*mcp.CallToolResult, LintOutput, error,
 ) {
 	if err := assertCallerMCP(ctx); err != nil {
@@ -37,7 +37,16 @@ func HandleLint(ctx context.Context, _ *mcp.CallToolRequest, _ LintInput) (
 	if err != nil {
 		return nil, LintOutput{}, fmt.Errorf("lint: %w", err)
 	}
-	return nil, lintOutputFromDiags(diags), nil
+	out := lintOutputFromDiags(diags)
+	// reporter="text" adds a human-readable summary (CLI parity
+	// with `kron lint` text output). Default is json; the
+	// structured fields above are the canonical payload.
+	if in.Reporter == "text" {
+		out.Text = lintTextSummary(diags)
+	} else if in.Reporter != "" && in.Reporter != "json" {
+		return nil, LintOutput{}, fmt.Errorf("kron_lint: invalid reporter %q (must be json or text)", in.Reporter)
+	}
+	return nil, out, nil
 }
 
 // lintOutputFromDiags converts internal/lint.Diag to the wire LintOutput
@@ -66,5 +75,30 @@ func lintOutputFromDiags(diags []lint.Diag) LintOutput {
 		}
 	}
 	out.Passed = out.Summary.Errors == 0
+	return out
+}
+
+// lintTextSummary renders diags as a human-readable multi-line
+// string mirroring the CLI `kron lint` text output. Used by
+// kron_lint when reporter=text. Mirrors the formatting in
+// cmd/kron/cli/lint.go writeLintText; kept here rather than
+// imported because the CLI's writer is io.Writer-coupled and the
+// MCP wire shape is a string field.
+func lintTextSummary(diags []lint.Diag) string {
+	if len(diags) == 0 {
+		return "[ok] 0 errors, 0 warnings"
+	}
+	errors, warnings := 0, 0
+	for _, d := range diags {
+		if d.Severity == lint.SeverityError || d.Severity == "" {
+			errors++
+		} else {
+			warnings++
+		}
+	}
+	out := fmt.Sprintf("[summary] %d errors, %d warnings", errors, warnings)
+	if errors == 0 && warnings == 0 {
+		return "[ok] " + out
+	}
 	return out
 }

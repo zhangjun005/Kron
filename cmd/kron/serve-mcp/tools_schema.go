@@ -34,10 +34,16 @@ type InitOutput struct {
 
 // --- kron_lint --------------------------------------------------------
 
-type LintInput struct{} // no parameters
+type LintInput struct {
+	// Reporter selects the output format. "json" (default) returns
+	// the structured LintOutput. "text" returns a human-readable
+	// summary string. Both formats contain identical data; "text" is
+	// intended for interactive use in terminals that cannot parse JSON.
+	Reporter string `json:"reporter,omitempty" jsonschema:"output format: json (default) or text"`
+}
 
 type LintDiag struct {
-	Rule     string `json:"rule"     jsonschema:"rule code, e.g. A1 / A5 / A6 / D1"`
+	Rule     string `json:"rule"     jsonschema:"rule code, e.g. anchor-dangling / frontmatter-invalid"`
 	Where    string `json:"where"    jsonschema:"file:line or slug where the issue is"`
 	Severity string `json:"severity" jsonschema:"error or warning"`
 	Detail   string `json:"detail"   jsonschema:"human-readable description"`
@@ -52,6 +58,9 @@ type LintOutput struct {
 	Passed  bool        `json:"passed"  jsonschema:"true iff no error-severity diagnostics"`
 	Errors  []LintDiag  `json:"errors"  jsonschema:"full diagnostic list"`
 	Summary LintSummary `json:"summary" jsonschema:"aggregate counters"`
+	// Text is populated only when reporter=text. It is the
+	// human-readable summary (e.g. "[ok]" or "[error] 2 errors, 1 warning").
+	Text string `json:"text,omitempty" jsonschema:"human-readable summary (only when reporter=text)"`
 }
 
 // --- kron_list / kron_get --------------------------------------------
@@ -74,6 +83,11 @@ type ListOutput struct {
 
 type GetInput struct {
 	Slug string `json:"slug" jsonschema:"slug of the intent to load"`
+	// IncludeRelations augments the response with reverse-link and
+	// prerequisite views (computed by internal/relations). Off by
+	// default to keep the common case small; GUI/IDE detail panels
+	// set it true.
+	IncludeRelations bool `json:"include_relations,omitempty" jsonschema:"if true, include references / depends_on / incoming_anchors / prerequisites alongside the body"`
 }
 
 type IntentBody struct {
@@ -83,6 +97,31 @@ type IntentBody struct {
 	SourcePath  string            `json:"source_path"                  jsonschema:"absolute on-disk path"`
 	References  []string          `json:"references,omitempty"          jsonschema:"soft links to other intents"`
 	DependsOn   []string          `json:"depends_on,omitempty"         jsonschema:"hard dependencies on other intents"`
+
+	// Relations is populated only when include_relations=true.
+	// Field shape mirrors kron_impact's relevant fields so GUI/IDE
+	// detail panels can render directly.
+	Relations *GetRelations `json:"relations,omitempty" jsonschema:"reverse-link and prerequisite views (only when include_relations=true)"`
+}
+
+// GetRelations is the subset of relations.ReverseLinks + relations.Prerequisites
+// output exposed in kron_get's include_relations=true path. Lives in
+// tools_schema.go (not internal/relations) because it is a wire
+// projection.
+type GetRelations struct {
+	// References is the soft-link reverse: slugs that list this slug
+	// in their Frontmatter.References. Sorted.
+	References []string `json:"references,omitempty" jsonschema:"slugs whose References list contains this intent (sorted)"`
+	// DependsOnDependents is the hard-link reverse: slugs that list
+	// this slug in their Frontmatter.DependsOn. Sorted.
+	DependsOnDependents []string `json:"depends_on_dependents,omitempty" jsonschema:"slugs whose depends_on list contains this intent (sorted)"`
+	// SymbolInferred is the symbol-based inferred soft dependency:
+	// slugs whose Symbol set intersects this intent's Symbol set,
+	// excluding explicit dependents. Sorted.
+	SymbolInferred []string `json:"symbol_inferred,omitempty" jsonschema:"slugs with overlapping symbols (sorted)"`
+	// Prerequisites is the forward view: explicit depends_on ∪
+	// symbol-inferred deps. Sorted.
+	Prerequisites []string `json:"prerequisites,omitempty" jsonschema:"explicit depends_on ∪ symbol-inferred (sorted)"`
 }
 
 type IntentFrontmatter struct {
@@ -234,6 +273,39 @@ type IntentDensityOutput struct {
 	FilesWithoutIntent []string `json:"files_without_intent" jsonschema:"repo-relative paths of source files >50 lines with no anchors (sorted)"`
 }
 
+// --- kron_tree -------------------------------------------------------
+
+// TreeInput is empty in v1; future fields may include depth limit /
+// status filter / with_anchors.
+type TreeInput struct{}
+
+// TreeNode is one entry in the kron_tree response. Mirrors
+// internal/view.IntentTreeNode's projection to the wire: when a
+// node has no Intent (purely-synthetic intermediate directory),
+// Slug/Name/IsDir still describe the grouping but Title/Status are
+// empty. Directories sort before leaves at the same level.
+//
+// Children is typed as []any (pre-serialised to a slice at handler
+// time) rather than []*TreeNode because the official go-sdk v1.1
+// jsonschema inference panics on recursive struct pointers ("cycle
+// detected"). The wire-level shape is identical to a JSON array of
+// TreeNode objects; consumers decode with their language's normal
+// JSON-array-of-objects API. This is a SDK-induced wire-shape
+// quirk; if a future SDK version fixes the cycle detection we can
+// revert to []*TreeNode.
+type TreeNode struct {
+	Slug     string `json:"slug"                 jsonschema:"full slug of this node (empty for root)"`
+	Name     string `json:"name"                 jsonschema:"final path segment (empty for root)"`
+	IsDir    bool   `json:"is_dir"               jsonschema:"true when this node has children"`
+	Title    string `json:"title,omitempty"      jsonschema:"first H1 from intent body, empty for synthetic intermediate dirs"`
+	Status   string `json:"status,omitempty"     jsonschema:"draft / active / superseded, empty for synthetic intermediate dirs"`
+	Children []any  `json:"children,omitempty"   jsonschema:"child nodes (directories first, then lexicographic name) — []any to break schema cycle on go-sdk v1.1"`
+}
+
+type TreeOutput struct {
+	Root *TreeNode `json:"root" jsonschema:"root of the intent directory tree"`
+}
+
 // --- kron_stale ------------------------------------------------------
 
 type StaleInput struct {
@@ -279,5 +351,6 @@ func registerTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{Name: "kron_list", Description: "List every intent (with optional prefix filter)."}, HandleList)
 	mcp.AddTool(server, &mcp.Tool{Name: "kron_restore", Description: "Restore a soft-deleted intent from .kron/.trash/."}, HandleRestore)
 	mcp.AddTool(server, &mcp.Tool{Name: "kron_stale", Description: "Find active intents older than days_threshold and expired hard assumptions."}, HandleStale)
+	mcp.AddTool(server, &mcp.Tool{Name: "kron_tree", Description: "Return the full intent directory tree (root + nested children) for GUI/IDE tree views."}, HandleTree)
 	mcp.AddTool(server, &mcp.Tool{Name: "kron_update", Description: "Patch an existing intent (PATCH semantics; only supplied fields are touched)."}, HandleUpdate)
 }

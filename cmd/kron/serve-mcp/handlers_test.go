@@ -698,6 +698,218 @@ func TestStale_DefaultThreshold(t *testing.T) {
 	assert.False(t, res.IsError, "default threshold should be 90 and not fail")
 }
 
+// --- kron_lint reporter --------------------------------------------
+
+// TestLint_DefaultJSON verifies the default output is the structured
+// JSON form (LintOutput.Errors/Errors[]/Summary/Passed) with no Text
+// field populated. This is the canonical GUI/IDE consumption path.
+func TestLint_DefaultJSON(t *testing.T) {
+	dir := initRepo(t)
+	addIntent(t, dir, "alpha", "", "")
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_lint",
+		Arguments: map[string]any{},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	var r LintOutput
+	require.NoError(t, structuredInto(res, &r))
+	assert.True(t, r.Passed, "clean repo should pass")
+	assert.Equal(t, 0, r.Summary.Errors)
+	assert.Empty(t, r.Text, "text field is only populated when reporter=text")
+}
+
+// TestLint_TextReporter populates the Text field and leaves Errors
+// populated too (consumers can pick either). The text string should
+// reflect zero diagnostics on a clean repo.
+func TestLint_TextReporter(t *testing.T) {
+	dir := initRepo(t)
+	addIntent(t, dir, "alpha", "", "")
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_lint",
+		Arguments: map[string]any{"reporter": "text"},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	var r LintOutput
+	require.NoError(t, structuredInto(res, &r))
+	assert.Contains(t, r.Text, "0 errors")
+}
+
+// TestLint_InvalidReporter returns a tool error for unknown
+// reporter values; preserves the v1 contract of "fail loud on bad
+// input rather than silently default".
+func TestLint_InvalidReporter(t *testing.T) {
+	dir := initRepo(t)
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_lint",
+		Arguments: map[string]any{"reporter": "yaml"},
+	})
+	require.NoError(t, err)
+	assert.True(t, res.IsError, "unknown reporter must be a tool error")
+}
+
+// --- kron_get include_relations ------------------------------------
+
+// TestGet_IncludeRelations seeds a 3-intent repo and verifies the
+// reverse-link + prerequisite views match the relationships hand-set
+// via kron_update.
+func TestGet_IncludeRelations(t *testing.T) {
+	dir := initRepo(t)
+	addIntent(t, dir, "auth", "AuthService", "# Auth\n")
+	addIntent(t, dir, "auth/jwt", "AuthService", "# JWT\n")
+	addIntent(t, dir, "billing", "BillingService", "# Billing\n")
+
+	// auth depends_on auth/jwt; billing references auth.
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	_, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_update",
+		Arguments: map[string]any{"slug": "auth", "depends_on": []string{"auth/jwt"}},
+	})
+	require.NoError(t, err)
+	_, err = ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_update",
+		Arguments: map[string]any{"slug": "billing", "references": []string{"auth"}},
+	})
+	require.NoError(t, err)
+
+	// Now fetch auth with include_relations=true.
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_get",
+		Arguments: map[string]any{"slug": "auth", "include_relations": true},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	var r GetOutput
+	require.NoError(t, structuredInto(res, &r))
+	require.NotNil(t, r.Intent.Relations, "relations must be populated when include_relations=true")
+	assert.Equal(t, []string{"billing"}, r.Intent.Relations.References, "billing references auth")
+	assert.Empty(t, r.Intent.Relations.DependsOnDependents, "no intent depends_on auth")
+	assert.Equal(t, []string{"auth/jwt"}, r.Intent.Relations.Prerequisites, "auth depends_on auth/jwt")
+}
+
+// TestGet_NoRelationsByDefault confirms the default (no flag) keeps
+// the response small — Relations stays nil. This is the common case
+// (read-only `kron_get` without GUI detail-panel augmentation).
+func TestGet_NoRelationsByDefault(t *testing.T) {
+	dir := initRepo(t)
+	addIntent(t, dir, "alpha", "", "")
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_get",
+		Arguments: map[string]any{"slug": "alpha"},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	var r GetOutput
+	require.NoError(t, structuredInto(res, &r))
+	assert.Nil(t, r.Intent.Relations, "default kron_get must not populate relations")
+}
+
+// --- kron_tree -----------------------------------------------------
+
+// TestTree_Empty verifies an empty repo returns a synthetic root
+// with no children. The root has slug="", name="", is_dir=true.
+func TestTree_Empty(t *testing.T) {
+	dir := initRepo(t)
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_tree",
+		Arguments: map[string]any{},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	var r TreeOutput
+	require.NoError(t, structuredInto(res, &r))
+	require.NotNil(t, r.Root)
+	assert.Empty(t, r.Root.Slug, "root slug is empty by convention")
+	assert.True(t, r.Root.IsDir)
+	assert.Empty(t, r.Root.Children, "empty repo has no children")
+}
+
+// TestTree_NestedLayout seeds a 3-intent repo with one nested under
+// a parent and asserts the tree shape: root → [auth (dir + Intent),
+// billing (leaf)] and auth → [auth/jwt (leaf)].
+func TestTree_NestedLayout(t *testing.T) {
+	dir := initRepo(t)
+	addIntent(t, dir, "auth", "", "")
+	addIntent(t, dir, "auth/jwt", "", "")
+	addIntent(t, dir, "billing", "", "")
+
+	// Replace each intent's body with a first H1 the test can assert on.
+	// kron_add only appends a `## Why` section; the H1 is part of the
+	// template. Use kron_update body=<custom> to set a custom H1.
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	for _, c := range []struct{ slug, h1 string }{
+		{"auth", "# Auth Module\n"},
+		{"auth/jwt", "# JWT\n"},
+		{"billing", "# Billing\n"},
+	} {
+		body := c.h1 + "\n## Why\n\nplaceholder\n"
+		_, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "kron_update",
+			Arguments: map[string]any{"slug": c.slug, "body": body},
+		})
+		require.NoError(t, err)
+	}
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_tree",
+		Arguments: map[string]any{},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	var r TreeOutput
+	require.NoError(t, structuredInto(res, &r))
+	require.NotNil(t, r.Root)
+	assert.True(t, r.Root.IsDir)
+	// Root.Children is []any (SDK cycle workaround). After JSON
+	// round-trip through the SDK, each element lands as
+	// map[string]any (the SDK's default decoder target for
+	// unstructured arrays). We assert via field access rather
+	// than type-assertion so the test stays decoupled from the
+	// SDK's intermediate type.
+	require.NotEmpty(t, r.Root.Children, "expected at least 2 top-level children")
+	assert.GreaterOrEqual(t, len(r.Root.Children), 2)
+
+	// Find the "auth" dir node and check it has the "auth/jwt" child.
+	var authNode, billingNode map[string]any
+	for _, c := range r.Root.Children {
+		m, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch m["slug"] {
+		case "auth":
+			authNode = m
+		case "billing":
+			billingNode = m
+		}
+	}
+	require.NotNil(t, authNode, "auth should appear at the top level")
+	require.NotNil(t, billingNode, "billing should appear at the top level")
+	assert.Equal(t, true, authNode["is_dir"], "auth has a child, so it is a dir")
+	assert.Equal(t, "Auth Module", authNode["title"], "title comes from first H1")
+
+	// auth.Children is also []any; descend one level.
+	authChildren, _ := authNode["children"].([]any)
+	require.Len(t, authChildren, 1)
+	jwt, ok := authChildren[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "auth/jwt", jwt["slug"])
+	assert.Equal(t, "JWT", jwt["title"])
+	assert.Equal(t, false, jwt["is_dir"])
+}
+
 // --- AllToolsRegistered ---------------------------------------------
 
 func TestServer_AllToolsRegistered(t *testing.T) {
@@ -712,6 +924,7 @@ func TestServer_AllToolsRegistered(t *testing.T) {
 		"kron_init":           nil,
 		"kron_intent_density": nil,
 		"kron_stale":          nil,
+		"kron_tree":           nil,
 		// Required-param tools: provide minimal valid values.
 		"kron_get":          {"slug": "does-not-exist"},
 		"kron_add":          {"slug": "smoke-test-add"},
@@ -725,6 +938,7 @@ func TestServer_AllToolsRegistered(t *testing.T) {
 		"kron_lint", "kron_list", "kron_get",
 		"kron_init", "kron_add", "kron_update", "kron_delete", "kron_restore",
 		"kron_assume_check", "kron_impact", "kron_intent_density", "kron_stale",
+		"kron_tree",
 	} {
 		t.Run(name, func(t *testing.T) {
 			ts := newTestSession(t, dir)

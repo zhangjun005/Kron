@@ -10,6 +10,7 @@ import (
 
 	"github.com/xxx/kron/internal/assumption"
 	"github.com/xxx/kron/internal/model"
+	"github.com/xxx/kron/internal/relations"
 	"github.com/xxx/kron/internal/store"
 )
 
@@ -93,7 +94,26 @@ func HandleGet(ctx context.Context, _ *mcp.CallToolRequest, in GetInput) (
 	if ard, ardErr := assumption.NewReader(root); ardErr == nil {
 		ar = ard
 	}
-	return nil, GetOutput{Intent: intentFromModel(intent, ar)}, nil
+	body := intentFromModel(intent, ar)
+	if in.IncludeRelations {
+		// Compute reverse-link + prerequisite views from a fresh
+		// LoadAll. We re-load (rather than caching) so the views
+		// are always consistent with the current on-disk state.
+		// For repos with O(100) intents this is sub-millisecond;
+		// a future cache layer (per docs/process/new-internal-api.md)
+		// can replace this if benchmarks warrant.
+		all, loadErr := r.LoadAll(ctx)
+		if loadErr == nil {
+			refs, deps, syms := relations.ReverseLinks(all, in.Slug)
+			body.Relations = &GetRelations{
+				References:          refs,
+				DependsOnDependents: deps,
+				SymbolInferred:      syms,
+				Prerequisites:       relations.Prerequisites(all, in.Slug),
+			}
+		}
+	}
+	return nil, GetOutput{Intent: body}, nil
 }
 
 // intentSummaryFromIntent converts an internal Intent to the wire
