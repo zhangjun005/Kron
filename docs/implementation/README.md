@@ -49,3 +49,12 @@
 
 任何新 `internal/` API、新 MCP 工具、新 lint 规则落地时，**先**改 `internal/*` 代码 + 测，
 **然后**按需重写 `docs/implementation/<topic>.md`（不走本 README——本 README 只起"已归档"提示作用）。
+
+## 客户端层与 LSP 协议访问层（v1.3+ 待重写）
+
+| 文档 | 状态 | 触发条件 |
+|---|---|---|
+| `lsp.md` (LSP 协议实现细节) | 🔜 v1.3 待写 | `cmd/kron/serve-lsp/` 实施时（按 `docs/process/new-access-layer.md` §3 交付物 2 + 5）|
+| `vscode-extension.md` (VSCode 扩展) | 📦 外部 | 不进主仓；外部项目按 architecture §0 铁律 #9 |
+| `gui.md` / `wails.md` (Wails GUI) | 📦 外部 + 占位 | `frontend/` README 已是占位；实施时进独立仓 |
+| `mcp.md` (MCP 协议实现细节) | 🔜 待重写 | 与 `lsp.md` 同批——MCP 工具加到 13+ 时需要重写（见 v1.3+ `kron_assumption_*` 工具候选）|

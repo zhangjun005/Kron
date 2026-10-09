@@ -13,8 +13,8 @@
 | **B 架构真理** | B | Kron 的不可妥协边界；其他所有文件都不得与之矛盾 | 2 |
 | **C 数据格式真理** | C | `.kron/intents/*.md` 的文件 schema；跨工具一致 | 1 |
 | **D 业务边界** | D | Kron 对外提供哪些能力；决定 B 的适用范围 | 1 |
-| **F 实施建议** | F | 具体 API 签名、工具契约；B 的展开，不可与之矛盾 | 7 |
-| **G 实施流程** | G | 决策树与检查清单；触发时强制遵循 | 7 |
+| **F 实施建议** | F | 具体 API 签名、工具契约；B 的展开，不可与之矛盾 | 0 active (8 份已 2026-10-09 归档, 见下) |
+| **G 实施流程** | G | 决策树与检查清单；触发时强制遵循 | 8 |
 | **H 哲学愿景** | H | 学术论文摘要与设计原则；D 的来源之一 | 2 |
 | **K 实景** | K | 真实代码 + 真实场景下的 Kron 行为示例；人类友好的入口 | 1 |
 
@@ -165,17 +165,17 @@ A (requirements.md)  ──►  D (business.md)  ──►  B (architecture.md)
 | **A** | `docs/requirements.md` | —（外部输入） |
 | **B** | `docs/abstractDesign/architecture.md` | A, D, E |
 | **B** | `docs/abstractDesign/view-call-tree-intent.md` | B, C (call-tree intent 视图) |
-| **B** | `docs/abstractDesign/internal-coverage-2026-10-09.md` | B, C (§三 内部包能力对账, 2026-10-09 新建) |
+| **B** | `docs/abstractDesign/internal-coverage-2026-10-09.md` | B, C (§三 内部包能力对账, 2026-10-09 新建 → **2026-10-09 归档**到 `.deprecated/2026-10-09-process-cleanup/`, 含 8+ 事实错误) |
 | **C** | `docs/abstractDesign/intent-structure.md` | —（数据事实） |
 | **D** | `docs/business.md` | A, H |
-| **F** | `docs/implementation/api-surface.md` | B, C |
-| **F** | `docs/implementation/cli.md` | B |
-| **F** | `docs/implementation/domain-model.md` | B, C |
-| **F** | `docs/implementation/error-catalog.md` | B |
-| **F** | `docs/implementation/ide-interaction.md` | B |
-| **F** | `docs/implementation/mcp.md` | B |
-| **F** | `docs/implementation/testing.md` | B |
-| **F** | `docs/abstractDesign/view-call-tree-intent.md` | B, C |
+| **F** | `docs/implementation/api-surface.md` | B, C (→ **2026-10-09 归档**到 `.deprecated/2026-10-09-process-cleanup/`, 签名与 internal/ 严重错位) |
+| **F** | `docs/implementation/cli.md` | B (→ **2026-10-09 归档**, 流程图调 store.ResolveIntent 但实际是 lint.Run 链) |
+| **F** | `docs/implementation/domain-model.md` | B, C (→ **2026-10-09 归档**, 缺 AnchorKind/Kind, 类型不一致) |
+| **F** | `docs/implementation/error-catalog.md` | B (→ **2026-10-09 归档**, 缺 8 个 sentinel) |
+| **F** | `docs/implementation/ide-interaction.md` | B (→ **2026-10-09 归档**, serve-lsp 标"未实施"但能力混淆) |
+| **F** | `docs/implementation/mcp.md` | B (→ **2026-10-09 归档**, references 标 v1.2+ 但已在 v1 frontmatter) |
+| **F** | `docs/implementation/testing.md` | B (→ **2026-10-09 归档**, CI 表缺 go vet) |
+| **F** | `docs/implementation/lsp.md` | B (→ **2026-10-09 归档**; 重写待 v1.3 启动, 见 `docs/process/new-access-layer.md` §3 交付物 2 + 5) |
 | **G** | `docs/process/cli-flag.md` | B |
 | **G** | `docs/process/internal-pkg.md` | B |
 | **G** | `docs/process/lint-rule.md` | B |
@@ -184,6 +184,7 @@ A (requirements.md)  ──►  D (business.md)  ──►  B (architecture.md)
 | **G** | `docs/process/new-access-layer.md` | B (v1.3+ 新增访问层流程) |
 | **G** | `docs/process/new-internal-api.md` | B (改 `internal/` 公开 API 流程) |
 | **G** | `docs/process/github-branch-protection.md` | — (GitHub 网页操作清单, **不**是文档真理) |
+| **G** | `docs/process/mcp-tool.md` | B (MCP 新 tool 流程, **不**走 process/pending-decisions.md —— 那个文件已归档) |
 | **H** | `docs/article.md` | — |
 | **H** | `docs/persuasion.md` | — |
 | **K** | `docs/how-it-works.md` | `internal/model/intent.go` (代码示例的真实类型) |
@@ -196,6 +197,10 @@ A (requirements.md)  ──►  D (business.md)  ──►  B (architecture.md)
 > **2026-10-09 process 收口**: 2 process 文档 (`pending-decisions.md` 决策链路审计 + `internal-pkg-status-2026-10-08.md` 时点收口报告) 移入 [`.deprecated/2026-10-09-process-cleanup/`](../../.deprecated/2026-10-09-process-cleanup/). 详见该目录 README.
 >
 > **2026-10-09 RFC 归档**: 8 RFC (`2026-10-04-mcp-sdk-{selection,adoption}` / `2026-10-07-gui-stack` / `2026-10-08-{intent-tree-api,md-anchors,writer-readme-symmetry,assumptions-standalone}` / `2026-10-09-markdown-anchors`) 移入 [`docs/rfc/archive/`](../../docs/rfc/archive/README.md). 详见 `docs/rfc/archive/README.md`.
+>
+> **2026-10-09 实施参考归档**: 8 份 `docs/implementation/*` 文档 (api-surface / cli / domain-model / error-catalog / ide-interaction / lsp / mcp / testing) 移入 [`.deprecated/2026-10-09-process-cleanup/`](../../.deprecated/2026-10-09-process-cleanup/). 原因: 内部 API 表面已大改, 旧描述严重过时. 详见 `docs/implementation/README.md` (已改为"已归档"banner). 重写待 `docs/process/new-internal-api.md` 流程触发.
+>
+> **2026-10-09 LSP/客户端层初始化**: `cmd/kron/serve-lsp/` (3-of-3 协议访问层骨架, 包 `lsp`, **不**含 go.lsp.dev/protocol — 该 dep 仍需 explicit approval) + `frontend/README.md` (客户端层占位, **不**实施代码, 实施时按 architecture §0 铁律 #9 走独立仓) 创建. v1.3 启动时由 `docs/process/new-access-layer.md` §3 流程接管.
 
 ---
 
