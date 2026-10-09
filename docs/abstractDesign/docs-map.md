@@ -201,6 +201,8 @@ A (requirements.md)  ──►  D (business.md)  ──►  B (architecture.md)
 > **2026-10-09 实施参考归档**: 8 份 `docs/implementation/*` 文档 (api-surface / cli / domain-model / error-catalog / ide-interaction / lsp / mcp / testing) 移入 [`.deprecated/2026-10-09-process-cleanup/`](../../.deprecated/2026-10-09-process-cleanup/). 原因: 内部 API 表面已大改, 旧描述严重过时. 详见 `docs/implementation/README.md` (已改为"已归档"banner). 重写待 `docs/process/new-internal-api.md` 流程触发.
 >
 > **2026-10-09 LSP/客户端层初始化**: `cmd/kron/serve-lsp/` (3-of-3 协议访问层骨架, 包 `lsp`, **不**含 go.lsp.dev/protocol — 该 dep 仍需 explicit approval) + `frontend/README.md` (客户端层占位, **不**实施代码, 实施时按 architecture §0 铁律 #9 走独立仓) 创建. v1.3 启动时由 `docs/process/new-access-layer.md` §3 流程接管.
+>
+> **2026-10-09 客户端方案 RFC**: [`docs/rfc/2026-10-09-gui-ide-plan.md`](../rfc/2026-10-09-gui-ide-plan.md) 新建 (草案). 拍板 GUI = Wails 整体预览 only / IDE = VSCode 扩展功能最全 (LSP+sidebar+webview) / 关系图渲染 visx 候选 (在 VSCode webview 内, **不**在 Wails) / 客户端层全部不进主仓. 旧 RFC `2026-10-07-gui-stack.md` 头部状态**保留** SUPERSEDED, 旧 §2/§3 Wails + VSCode 选型**沿用**, 旧职责范围**重新**拍. visx dep 锁定走 v1.3 启动时子 RFC + 4 段论证 (AGENTS.md §3 红线).
 
 ---
 
