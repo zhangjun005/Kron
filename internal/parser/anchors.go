@@ -51,6 +51,15 @@ func ScanAnchors(dir string) ([]model.Anchor, error) {
 
 	var anchors []model.Anchor
 	err := WalkSourceFiles(dir, func(path string) error {
+		// RFC 2026-10-08-md-anchors.md §1.1: code anchors live
+		// in source files; markdown anchors are produced by
+		// ScanMarkdownAnchors. Skip .md here so the two
+		// surfaces don't double-count or fight for the same
+		// line. isMarkdownFile is the same predicate
+		// ScanMarkdownAnchors uses (case-sensitive .md suffix).
+		if isMarkdownFile(path) {
+			return nil
+		}
 		relPath := toRepoRelative(path, rootAbs)
 		f, err := os.Open(path)
 		if err != nil {
@@ -154,10 +163,16 @@ func scanFile(r io.Reader, path string) ([]model.Anchor, error) {
 		if !ok {
 			continue
 		}
+		// Code anchors (Go/TS/Python/... source files). Markdown
+		// anchors are produced by ScanMarkdownAnchors with
+		// model.AnchorKindMarkdown so the two streams are
+		// distinguishable downstream (RFC
+		// 2026-10-08-md-anchors.md §2.5).
 		out = append(out, model.Anchor{
 			Slug:       slug,
 			FilePath:   path,
 			LineNumber: lineNo,
+			Kind:       model.AnchorKindCode,
 		})
 	}
 	if err := sc.Err(); err != nil {

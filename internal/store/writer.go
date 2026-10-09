@@ -17,7 +17,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/xxx/kron/internal/model"
@@ -89,19 +88,19 @@ func (w *Writer) TrashPath(slug string) string {
 // This keeps the existence check consistent with the read path
 // (so callers don't falsely flag `// @kron:intent auth` as
 // dangling when the module-level README.md is the actual intent).
+//
+// The implementation is a thin wrapper around resolveReadPath so
+// reader and writer share one source of truth for the
+// canonical-then-README fallback. Error discrimination (EACCES vs
+// ErrNotExist) is intentionally suppressed: a read that can't be
+// performed for any reason is "doesn't exist" from the caller's
+// perspective.
 func (w *Writer) Exists(ctx context.Context, slug string) bool {
 	_ = ctx
 	if slug == "" {
 		return false
 	}
-	if _, err := os.Stat(w.IntentPath(slug)); err == nil {
-		return true
-	}
-	// README shorthand (delegate to shared helper for parity with
-	// Reader.resolveIntentPath; the Reader also handles the
-	// "README" top-level special case).
-	if path, err := resolveReadPath(w.Root, slug); err == nil {
-		_ = path
+	if _, err := resolveReadPath(w.Root, slug); err == nil {
 		return true
 	}
 	return false
@@ -386,16 +385,11 @@ func (w *Writer) Update(ctx context.Context, slug string, p UpdatePatch, opts ..
 	// Determine the on-disk kind from the resolved path. Update
 	// must write back to the SAME form it read from — otherwise
 	// we silently flip a node intent to a leaf or vice versa.
-	// The path either ends in "/README.md" (node) or ".md"
-	// (leaf / canonical). The top-level "README.md" (no slash
-	// before README) is also node-shaped by convention, so
-	// the path's suffix decides.
-	var existingKind model.IntentKind
-	if strings.HasSuffix(path, string(filepath.Separator)+"README.md") {
-		existingKind = model.IntentKindNode
-	} else {
-		existingKind = model.IntentKindLeaf
-	}
+	// Use store.KindFromPath (the canonical helper) rather than a
+	// hand-rolled string check: the helper handles all the
+	// edge cases (top-level "README.md" is leaf-shaped on disk,
+	// any deeper "*/README.md" is node-shaped) in one place.
+	existingKind := KindFromPath(path)
 
 	// Apply patch
 	if p.Symbol != nil {

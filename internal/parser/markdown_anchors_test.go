@@ -129,3 +129,31 @@ func TestScanMarkdownAnchors_MultipleFilesSorted(t *testing.T) {
 		t.Errorf("anchors[1] = %q, want z-anchor", anchors[1].Slug)
 	}
 }
+
+// TestScanMarkdownAnchors_KindMarkdown locks the v1.2 contract
+// (RFC 2026-10-08-md-anchors.md §2.5): every anchor returned by
+// ScanMarkdownAnchors must report Kind=markdown. We use
+// IsMarkdown() rather than ==-compare so callers that only need
+// the "yes this is markdown" boolean don't have to know the
+// constant name. This is what lets downstream consumers
+// (kron_impact, kron_intent_density, lint) dispatch on Anchor.Kind
+// instead of on the call site.
+func TestScanMarkdownAnchors_KindMarkdown(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "README.md"),
+		[]byte("// @kron:intent auth/jwt\n// @kron:intent auth/refresh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	anchors, err := ScanMarkdownAnchors(dir)
+	if err != nil {
+		t.Fatalf("ScanMarkdownAnchors: %v", err)
+	}
+	if len(anchors) != 2 {
+		t.Fatalf("anchors count = %d, want 2", len(anchors))
+	}
+	for i, a := range anchors {
+		if !a.Kind.IsMarkdown() {
+			t.Errorf("anchors[%d].Kind = %q, must be markdown", i, a.Kind)
+		}
+	}
+}

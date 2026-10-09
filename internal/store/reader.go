@@ -273,16 +273,18 @@ func collapseReadmeSlug(slug string) string {
 // so that callers (notably internal/lint.RuleAnchorDangling) do not
 // falsely flag `// @kron:intent auth` as dangling when the
 // module-level README.md is the actual intent.
+//
+// Implementation is a thin wrapper around resolveReadPath (the
+// shared helper backing Reader.resolveIntentPath), so writer and
+// reader share one source of truth for the canonical-then-README
+// fallback. Error discrimination is intentionally suppressed: any
+// I/O failure is "doesn't exist" from the caller's perspective.
 func (r *Reader) Exists(ctx context.Context, slug string) bool {
 	_ = ctx
 	if slug == "" {
 		return false
 	}
-	if _, err := os.Stat(r.IntentPath(slug)); err == nil {
-		return true
-	}
-	readme := filepath.Join(r.Root, model.KronDir, model.IntentDir, slug, "README.md")
-	if _, err := os.Stat(readme); err == nil {
+	if _, err := resolveReadPath(r.Root, slug); err == nil {
 		return true
 	}
 	return false

@@ -14,11 +14,30 @@ const (
 	// Always severity: error.
 	RuleAnchorDangling Rule = "anchor-dangling"
 
+	// RuleMarkdownAnchorDangling reports a markdown anchor (a
+	// "// @kron:intent <slug>" line in any .md file OUTSIDE
+	// .kron/intents/ and .kron/.trash/, per RFC
+	// 2026-10-08-md-anchors.md §2.1) whose slug does not resolve
+	// to an existing .kron/intents/<slug>.md. Always severity:
+	// error. Kept as a separate rule id from RuleAnchorDangling
+	// so CI dashboards / editor plugin filters can distinguish
+	// the two surfaces; both share the same wire-level enum
+	// (model.ErrAnchorDangling).
+	RuleMarkdownAnchorDangling Rule = "markdown-anchor-dangling"
+
 	// RuleFrontmatterInvalid reports that at least one intent's
 	// frontmatter could not be parsed or validated by parser.ParseFrontmatter.
 	// Always severity: error. Per-file isolation is a Phase 2 follow-up;
 	// v1 reports the first failing load as a single repo-wide Diag.
 	RuleFrontmatterInvalid Rule = "frontmatter-invalid"
+
+	// RuleLoadAllFailed is the companion warning emitted when a
+	// LoadAll failure causes all per-intent checks (C-class
+	// relations, S-class staleness, T-class tree shape, B-3
+	// assumption rules) to be skipped. Severity: warning (advisory;
+	// the underlying error is already reported as
+	// RuleFrontmatterInvalid at error severity).
+	RuleLoadAllFailed Rule = "load-all-failed"
 
 	// RuleDanglingReference reports that an intent's Frontmatter.References
 	// lists a slug that does not resolve to an existing .kron/intents/<slug>.md.

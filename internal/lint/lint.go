@@ -133,11 +133,20 @@ func RunWith(ctx context.Context, root string, opts RunOptions) ([]Diag, error) 
 
 	diags := make([]Diag, 0)
 
-	// A-class: scan every source file for anchors; report each one that
-	// does not resolve to an existing intent.
+	// A-class: scan every source file for code anchors; report each
+	// one that does not resolve to an existing intent.
 	anchors, err := parser.ScanAnchors(root)
 	if err != nil {
 		return nil, fmt.Errorf("lint: scan anchors: %w", err)
+	}
+	// RFC 2026-10-08-md-anchors.md §3.2: also scan .md anchors
+	// (any .md outside .kron/intents/ and .kron/.trash/) under a
+	// separate rule id so the two surfaces can be filtered apart
+	// on the wire. The two streams share the same envelope
+	// (model.Anchor) and the same enum (model.ErrAnchorDangling).
+	markdownAnchors, err := parser.ScanMarkdownAnchors(root)
+	if err != nil {
+		return nil, fmt.Errorf("lint: scan markdown anchors: %w", err)
 	}
 	r, err := store.NewReader(root)
 	if err != nil {
@@ -153,13 +162,25 @@ func RunWith(ctx context.Context, root string, opts RunOptions) ([]Diag, error) 
 			})
 		}
 	}
+	for _, a := range markdownAnchors {
+		if !r.Exists(ctx, a.Slug) {
+			diags = append(diags, Diag{
+				Rule:     RuleMarkdownAnchorDangling,
+				Where:    relPath(root, a.FilePath) + ":" + itoa(a.LineNumber),
+				Detail:   fmt.Sprintf("markdown anchor points to non-existent intent %q", a.Slug),
+				Severity: SeverityError,
+			})
+		}
+	}
 
 	// B + C-class + S-class: load every intent, then run the
 	// frontmatter-relation and staleness rules on each. A failure to
 	// load any single intent (LoadAll is fail-fast) becomes a single
 	// repo-wide Diag and the per-intent checks are skipped — but the
 	// A-class results above are still meaningful and have already been
-	// appended.
+	// appended. The companion rule RuleLoadAllFailed is a Warning
+	// (advisory) so consumers can see "per-intent checks were skipped"
+	// without it being conflated with the underlying parse error.
 	intents, loadErr := r.LoadAll(ctx)
 	if loadErr != nil {
 		diags = append(diags, Diag{
@@ -167,6 +188,12 @@ func RunWith(ctx context.Context, root string, opts RunOptions) ([]Diag, error) 
 			Where:    "<root>",
 			Detail:   loadErr.Error(),
 			Severity: SeverityError,
+		})
+		diags = append(diags, Diag{
+			Rule:     RuleLoadAllFailed,
+			Where:    "<root>",
+			Detail:   "per-intent checks (C-class relations, S-class staleness, T-class tree shape, B-3 assumption rules) were skipped because LoadAll failed; fix the frontmatter above and re-run",
+			Severity: SeverityWarning,
 		})
 		return diags, nil
 	}

@@ -1,8 +1,14 @@
 # RFC: FilePath 字段约定
 
-> 状态：**DRAFT** (2026-10-08)
+> 状态：**DRAFT (2026-10-08) + 2026-10-09 标记待重开**
 > 范围：`internal/model`、`internal/parser`、`internal/store` 中所有"标识文件"的路径字段
 > 触发：实现 RFC `2026-10-08-intent-tree-api.md` 时发现 `Intent.SourcePath` / `Anchor.FilePath` 走的是**两套**约定（绝对 vs 跟随调用方），没有规范
+>
+> **2026-10-09 标记**：本 RFC §2.1 / §2.4 / §5 决策表末行引用了 `view.IntentTreeNode.Path` 字段（"段名 `[]string`"），但 2026-10-09 实施时 `internal/view/view.go` **未**加该字段（RFC 写时基于"view 包会有 Path"的假设，实施时 view 包实际**不**带 Path）。**§2.1 "view.IntentTreeNode.Path 段名" 决策实质悬空**。
+>
+> 处置：本 RFC 留根（[`docs/rfc/archive/README.md`](../archive/README.md) "留根理由"段已注），**不**撤销决策；待**重开 RFC** 重拍 view 段名表达方式（选项：加 `Path []string` 字段 / 让调用方用 `Name` + 父链推 / 干脆不暴露）。重开前 **`internal/view.IntentTreeNode` 对外**无** `Path` 字段**，任何消费方**不**应依赖它。
+>
+> §2.1 表的"**不动**"列对 view 段名**不**适用（路径根本未存在）；其余 3 行（`Intent.SourcePath` / `AssumptionFile.FilePath` / `Anchor.FilePath`）的"不动 / 改"决策**仍**有效。
 
 ## 1 背景
 

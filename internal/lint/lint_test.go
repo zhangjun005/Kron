@@ -115,35 +115,42 @@ func TestRun_FrontmatterLoadFailureRepromDiag(t *testing.T) {
 	// v1 LoadAll is fail-fast: the first broken intent surfaces as a Go
 	// error. Run() converts that error into a single repo-wide Diag so
 	// the v1 contract "rule failures are observations, not exceptions"
-	// holds uniformly across both rule classes.
+	// holds uniformly across both rule classes. The companion warning
+	// RuleLoadAllFailed tells the user that per-intent checks were
+	// skipped.
 	dir := t.TempDir()
 	writeFile(t, dir, ".kron/intents/broken.md", "not a frontmatter block\njust body\n")
 
 	diags, err := Run(context.Background(), dir)
 	require.NoError(t, err)
-	require.Len(t, diags, 1)
+	require.Len(t, diags, 2)
 	assert.Equal(t, RuleFrontmatterInvalid, diags[0].Rule)
 	assert.Equal(t, SeverityError, diags[0].Severity)
 	assert.Equal(t, "<root>", diags[0].Where)
 	assert.NotEmpty(t, diags[0].Detail)
+	assert.Equal(t, RuleLoadAllFailed, diags[1].Rule)
+	assert.Equal(t, SeverityWarning, diags[1].Severity)
+	assert.Equal(t, "<root>", diags[1].Where)
+	assert.Contains(t, diags[1].Detail, "per-intent checks")
 }
 
 func TestRun_FrontmatterLoadFailureWithValidAnchor(t *testing.T) {
 	// A dangling anchor combined with a broken frontmatter file: both
-	// diags must appear (anchor scan succeeds, LoadAll fails). Run does
-	// NOT short-circuit on LoadAll failure.
+	// the A-class diag AND the B-class diag AND the load-all-failed
+	// warning must appear. Run does NOT short-circuit on LoadAll failure.
 	dir := t.TempDir()
 	writeFile(t, dir, "x.go", "// @kron:intent missing/slug\npackage x\n")
 	writeFile(t, dir, ".kron/intents/broken.md", "not a frontmatter block\n")
 
 	diags, err := Run(context.Background(), dir)
 	require.NoError(t, err)
-	require.Len(t, diags, 2)
+	require.Len(t, diags, 3)
 
-	// Order is deterministic: A-class runs first (anchor), B-class runs
-	// second (frontmatter load).
+	// Order is deterministic: A-class runs first (anchor), then
+	// frontmatter-invalid, then the load-all-failed warning.
 	assert.Equal(t, RuleAnchorDangling, diags[0].Rule)
 	assert.Equal(t, RuleFrontmatterInvalid, diags[1].Rule)
+	assert.Equal(t, RuleLoadAllFailed, diags[2].Rule)
 }
 
 func TestRun_EmptyRoot(t *testing.T) {
@@ -198,13 +205,99 @@ func TestRuleConstantsAreStable(t *testing.T) {
 	// Guard against accidental rename of the public Rule constants.
 	// lint consumers (CI, editor plugins) depend on these string values.
 	assert.Equal(t, Rule("anchor-dangling"), RuleAnchorDangling)
+	assert.Equal(t, Rule("markdown-anchor-dangling"), RuleMarkdownAnchorDangling)
 	assert.Equal(t, Rule("frontmatter-invalid"), RuleFrontmatterInvalid)
+	assert.Equal(t, Rule("load-all-failed"), RuleLoadAllFailed)
 	assert.Equal(t, Rule("dangling-reference"), RuleDanglingReference)
 	assert.Equal(t, Rule("dangling-depends-on"), RuleDanglingDependsOn)
 	assert.Equal(t, Rule("depends-on-cycle"), RuleDependsOnCycle)
 	assert.Equal(t, Rule("self-reference"), RuleSelfReference)
 	assert.Equal(t, Rule("stale-superseded-candidate"), RuleStaleSupersededCandidate)
 	assert.Equal(t, Rule("expired-hard-assumption"), RuleExpiredHardAssumption)
+}
+
+// --- A-class: markdown anchor (RFC 2026-10-08-md-anchors.md §3.2) ---
+//
+// A "// @kron:intent <slug>" line in any .md file OUTSIDE
+// .kron/intents/ and .kron/.trash/ must be reported as
+// RuleMarkdownAnchorDangling when the slug doesn't resolve.
+
+func TestRun_MarkdownAnchorDangling(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "docs/notes.md", `# Notes
+
+// @kron:intent auth/never-existed
+This is a documentation file.
+`)
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	require.Len(t, diags, 1)
+	assert.Equal(t, RuleMarkdownAnchorDangling, diags[0].Rule)
+	assert.Equal(t, SeverityError, diags[0].Severity)
+	assert.Contains(t, diags[0].Where, "docs/notes.md")
+	assert.Contains(t, diags[0].Where, ":3")
+	assert.Contains(t, diags[0].Detail, "auth/never-existed")
+}
+
+func TestRun_MarkdownAnchorValid(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "docs/notes.md", "// @kron:intent auth/jwt\n")
+	// Both the leaf and its parent node so orphan-under-no-node
+	// does not fire.
+	writeFile(t, dir, ".kron/intents/auth/README.md", sampleIntent)
+	writeFile(t, dir, ".kron/intents/auth/jwt.md", sampleIntent)
+
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	assert.Empty(t, diags)
+}
+
+func TestRun_MarkdownAnchorInFence_Skipped(t *testing.T) {
+	// Anchors inside a fenced code block must NOT be parsed
+	// (RFC 2026-10-08-md-anchors.md §2.4). The fixture references
+	// a missing slug, so if the in-fence check regresses we'd see
+	// a RuleMarkdownAnchorDangling and the test would fail.
+	dir := t.TempDir()
+	writeFile(t, dir, "docs/example.md", `# Example
+
+`+"```"+`go
+// @kron:intent auth/never-existed
+`+"```"+`
+`)
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	assert.Empty(t, diags, "in-fence anchors must be skipped, got: %v", diags)
+}
+
+func TestRun_CodeAndMarkdownSurfacesAreDisjoint(t *testing.T) {
+	// The same anchor in a .md file must surface ONLY as
+	// RuleMarkdownAnchorDangling (never as RuleAnchorDangling)
+	// because ScanAnchors is supposed to skip .md files. If a
+	// future refactor drops that filter, this test catches the
+	// double-counting regression.
+	dir := t.TempDir()
+	writeFile(t, dir, "README.md", "// @kron:intent auth/never-existed\n")
+	writeFile(t, dir, "x.go", "// @kron:intent auth/never-existed\n")
+
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	// Exactly 2 diags: one markdown, one code, NO double-emission.
+	require.Len(t, diags, 2)
+	var codeCount, mdCount int
+	for _, d := range diags {
+		switch d.Rule {
+		case RuleAnchorDangling:
+			codeCount++
+			assert.Contains(t, d.Where, "x.go")
+		case RuleMarkdownAnchorDangling:
+			mdCount++
+			assert.Contains(t, d.Where, "README.md")
+		default:
+			t.Errorf("unexpected rule %q for %s", d.Rule, d.Where)
+		}
+	}
+	assert.Equal(t, 1, codeCount, "exactly one code-anchor diag")
+	assert.Equal(t, 1, mdCount, "exactly one markdown-anchor diag")
 }
 
 // --- C-class rules (intent → intent frontmatter relations) -----------

@@ -255,6 +255,16 @@ func TestValidateSlug_TableDriven(t *testing.T) {
 		{slug: "single-region", wantErr: false},
 		{slug: "abc_123", wantErr: false},
 		{slug: "a/b/c/d", wantErr: false},
+		// Top-level "README" is the one uppercase exception (RFC
+		// 2026-10-08-writer-readme-symmetry §3.3): the top-level
+		// node intent's literal slug is "README", mapping to
+		// .kron/intents/README.md.
+		{slug: "README", wantErr: false},
+		// Lowercase "readme" is a valid slug (regex accepts it).
+		// The RFC special case targets the uppercase form only (to
+		// avoid "README/README.md" recursion); lowercase is fine.
+		{slug: "readme", wantErr: false},
+		{slug: "auth/readme", wantErr: false},
 		{slug: "", wantErr: true, contains: "empty"},
 		{slug: "Auth", wantErr: true, contains: "invalid characters"},
 		{slug: "auth/jwt.md", wantErr: true, contains: ".md"},

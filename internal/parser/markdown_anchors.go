@@ -10,7 +10,7 @@ import (
 	"github.com/xxx/kron/internal/model"
 )
 
-// ScanMarkdownmodel.Anchors walks dir recursively and returns every
+// ScanMarkdownAnchors walks dir recursively and returns every
 // "@kron:intent <slug>" line in .md files OUTSIDE the skip-list
 // (notably .kron/intents/, .kron/.trash/, node_modules/, vendor/, .git/).
 //
@@ -124,10 +124,16 @@ func scanMarkdownFileWithPath(filePath, emitPath string) ([]model.Anchor, error)
 		if !ok {
 			continue
 		}
+		// Markdown anchors (RFC 2026-10-08-md-anchors.md §1.1):
+		// scanned from .md files outside .kron/intents/ and
+		// .kron/.trash/. The Kind field is what downstream
+		// consumers (kron_impact, kron_intent_density, lint) read
+		// to dispatch the per-surface rules.
 		out = append(out, model.Anchor{
 			Slug:       slug,
 			FilePath:   emitPath,
 			LineNumber: lineNo,
+			Kind:       model.AnchorKindMarkdown,
 		})
 	}
 	if err := sc.Err(); err != nil {

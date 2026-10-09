@@ -502,6 +502,16 @@ func validateSlugList(field string, refs []string) error {
 //	"auth/"                (trailing /)
 //	"../etc/passwd"        (path traversal)
 //	"auth/jwt.md"          (extension included)
+//
+// Special case: the literal slug "README" is accepted for the
+// top-level intent (.kron/intents/README.md). RFC
+// 2026-10-08-writer-readme-symmetry §3.3 special-cases the
+// top-level node intent to avoid a "README/README.md" recursion;
+// that decision lives in store.resolveWritePath, but the slug
+// itself must still pass ValidateSlug or Write would reject the
+// input before reaching the path resolver. The literal "README"
+// is the only uppercase exception; it is the canonical slug for
+// .kron/intents/README.md and is not a generic escape hatch.
 var slugSegmentRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 func ValidateSlug(slug string) error {
@@ -516,6 +526,12 @@ func ValidateSlug(slug string) error {
 	}
 	if strings.HasSuffix(slug, model.IntentExtension) {
 		return fmt.Errorf("%w: %q must not include %s", model.ErrSlugInvalid, slug, model.IntentExtension)
+	}
+	// Top-level "README" is the one uppercase escape (see doc
+	// above). It must be the whole slug — "auth/README" is still
+	// rejected because the prefix "auth" has its own rules.
+	if slug == "README" {
+		return nil
 	}
 	segments := strings.Split(slug, "/")
 	for _, seg := range segments {

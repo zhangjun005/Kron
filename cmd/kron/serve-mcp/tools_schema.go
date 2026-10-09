@@ -208,7 +208,7 @@ type ImpactInput struct {
 type AnchorRef struct {
 	FilePath string `json:"file_path" jsonschema:"repo-relative path of the source file containing the anchor"`
 	Line     int    `json:"line"      jsonschema:"1-based line number of the @kron:intent line"`
-	Kind     string `json:"kind"      jsonschema:"anchor kind: 'code' (source) or 'markdown' (docs/.md); added in v1.2 per docs/rfc/2026-10-08-md-anchors.md"`
+	Kind     string `json:"kind"      jsonschema:"anchor surface: 'code' (source file) or 'markdown' (.md outside .kron/intents/); carried by model.Anchor.Kind per RFC 2026-10-08-md-anchors.md §2.5"`
 }
 
 type ImpactOutput struct {

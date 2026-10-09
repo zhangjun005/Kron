@@ -48,14 +48,27 @@ func HandleIntentDensity(ctx context.Context, _ *mcp.CallToolRequest, _ IntentDe
 		return nil, IntentDensityOutput{}, fmt.Errorf("kron_intent_density: load: %w", err)
 	}
 
-	anchors, err := parser.ScanAnchors(root)
+	// RFC 2026-10-08-md-anchors.md §2.5: density counts BOTH code
+	// anchors and markdown anchors. The two streams are kept
+	// separate at the parser boundary (different skip-list
+	// semantics, different file extensions) and merged here for
+	// the withAnchor / total_anchors / anchoredFiles aggregates.
+	codeAnchors, err := parser.ScanAnchors(root)
 	if err != nil {
-		return nil, IntentDensityOutput{}, fmt.Errorf("kron_intent_density: scan anchors: %w", err)
+		return nil, IntentDensityOutput{}, fmt.Errorf("kron_intent_density: scan code anchors: %w", err)
+	}
+	markdownAnchors, err := parser.ScanMarkdownAnchors(root)
+	if err != nil {
+		return nil, IntentDensityOutput{}, fmt.Errorf("kron_intent_density: scan markdown anchors: %w", err)
 	}
 
-	withAnchor := make(map[string]struct{}, len(anchors))
-	anchoredFiles := make(map[string]struct{}, len(anchors))
-	for _, a := range anchors {
+	withAnchor := make(map[string]struct{}, len(codeAnchors)+len(markdownAnchors))
+	anchoredFiles := make(map[string]struct{}, len(codeAnchors)+len(markdownAnchors))
+	for _, a := range codeAnchors {
+		withAnchor[a.Slug] = struct{}{}
+		anchoredFiles[a.FilePath] = struct{}{}
+	}
+	for _, a := range markdownAnchors {
 		withAnchor[a.Slug] = struct{}{}
 		anchoredFiles[a.FilePath] = struct{}{}
 	}
@@ -83,7 +96,7 @@ func HandleIntentDensity(ctx context.Context, _ *mcp.CallToolRequest, _ IntentDe
 
 	return nil, IntentDensityOutput{
 		TotalIntents: len(all),
-		TotalAnchors: len(anchors),
+		TotalAnchors: len(codeAnchors) + len(markdownAnchors),
 		Coverage: Coverage{
 			IntentsWithAnchors:    len(withAnchor),
 			IntentsWithoutAnchors: withoutAnchor,

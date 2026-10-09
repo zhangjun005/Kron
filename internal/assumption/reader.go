@@ -50,12 +50,17 @@ func NewReader(root string) (*Reader, error) {
 	return &Reader{root: dir}, nil
 }
 
-// Get returns the assumption file for id. If the file does not exist,
-// it returns ErrAssumptionNotFound. If the file exists but its
-// frontmatter id does not match the file name, Get returns the file
-// AND a non-nil error of type ErrAssumptionFileIdMismatch — the
-// caller is expected to inspect the file (it parsed successfully)
-// AND surface the error as a lint diagnostic.
+// Get returns the assumption file for id.
+//
+// Returns ErrAssumptionNotFound (wrapped) when the file does not
+// exist. Returns ErrAssumptionFileIdMismatch (wrapped) when the
+// file exists but its frontmatter id does not match the file
+// name — the file's parsed content is NOT returned in this case,
+// so the caller has to decide whether to surface the file to
+// users (typically: re-read it directly if the frontmatter id
+// matters). For the bulk-read case where mismatched files must
+// still appear in listings, use List instead (List tolerates
+// id-mismatch files so lint can flag them).
 func (r *Reader) Get(ctx context.Context, id string) (*model.AssumptionFile, error) {
 	_ = ctx
 	if err := parser.ValidateSlug(id); err != nil {
@@ -75,26 +80,36 @@ func (r *Reader) Get(ctx context.Context, id string) (*model.AssumptionFile, err
 		return nil, fmt.Errorf("assumption: parse %s: %w", path, err)
 	}
 
-	af := &model.AssumptionFile{
+	// B-3 (RFC 2026-10-08-assumptions-standalone): an id mismatch
+	// is a data-quality issue but not a load failure. We return
+	// the sentinel error WITHOUT the file so callers that want
+	// to fail fast on mismatch (a future MCP "load by id" tool)
+	// can do so. Callers that need to enumerate mismatched
+	// files (lint) use List, which reads the file directly and
+	// surfaces the frontmatter's id alongside the file name.
+	if fm.ID != "" && fm.ID != id {
+		return nil, fmt.Errorf("%w: frontmatter id %q != file name %q", ErrAssumptionFileIdMismatch, fm.ID, id)
+	}
+
+	return &model.AssumptionFile{
 		Slug:        id,
 		Frontmatter: fm,
 		Body:        body,
 		SourcePath:  path,
-	}
-	// B-3 (RFC 2026-10-08-assumptions-standalone): the id-mismatch
-	// check is no longer a hard error. The reader returns the file
-	// plus a wrapped ErrAssumptionFileIdMismatch so the caller
-	// (lint) can report it via RuleAssumptionFileIdMismatch while
-	// still using the parsed data. List() depends on this
-	// behaviour: a mismatched file MUST appear in the listing so
-	// lint can see it.
-	if fm.ID != "" && fm.ID != id {
-		return af, fmt.Errorf("%w: frontmatter id %q != file name %q", ErrAssumptionFileIdMismatch, fm.ID, id)
-	}
-	return af, nil
+	}, nil
 }
 
 // List returns all assumption files in the registry, sorted by id.
+//
+// List tolerates id-mismatch files (a file whose frontmatter id
+// does not match its file name) so lint's RuleAssumptionFileIdMismatch
+// can see them. Files that fail to parse are skipped silently;
+// their I/O / parse failure is surfaced separately by the
+// lint pass that walks the file directly. This is a deliberate
+// trade-off: List is a "best-effort enumeration" for callers
+// that need to iterate (lint, future MCP list tools), and the
+// stricter Get-by-id path surfaces a real error for the
+// caller that needs the canonical id lookup.
 func (r *Reader) List(ctx context.Context) ([]*model.AssumptionFile, error) {
 	_ = ctx
 	entries, err := os.ReadDir(r.root)
@@ -108,22 +123,46 @@ func (r *Reader) List(ctx context.Context) ([]*model.AssumptionFile, error) {
 			continue
 		}
 		id := e.Name()[:len(e.Name())-len(".md")]
-		// Get now returns the file even when its frontmatter id
-		// doesn't match the file name (with a wrapped
-		// ErrAssumptionFileIdMismatch on the side). Surface the
-		// file so lint's RuleAssumptionFileIdMismatch can see
-		// it; lint calls Get directly when it needs the error.
-		af, _ := r.Get(ctx, id)
-		if af == nil {
-			// Genuine I/O or parse failure — skip; lint's
-			// A-class / frontmatter-invalid surfaces these.
+		af, err := r.readFile(id)
+		if err != nil {
+			// Genuine I/O or parse failure — skip. Lint's
+			// A-class / frontmatter-invalid surfaces these
+			// when it walks the file directly.
 			continue
 		}
+		_ = err // id-mismatch is a warning, not a skip; keep the file
 		out = append(out, af)
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Slug < out[j].Slug })
 	return out, nil
+}
+
+// readFile parses the file at <id>.md WITHOUT applying the
+// id-mismatch check that Get applies. It is the shared helper
+// backing List (which must enumerate mismatched files so lint
+// can flag them) and any future "load by path" internal
+// helper. Public Get goes through this with the mismatch check
+// added on top.
+func (r *Reader) readFile(id string) (*model.AssumptionFile, error) {
+	if err := parser.ValidateSlug(id); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(r.root, id+".md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	fm, body, err := parser.ParseAssumptionFrontmatter(data)
+	if err != nil {
+		return nil, err
+	}
+	return &model.AssumptionFile{
+		Slug:        id,
+		Frontmatter: fm,
+		Body:        body,
+		SourcePath:  path,
+	}, nil
 }
 
 // Exists reports whether an assumption with the given id exists.

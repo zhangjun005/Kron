@@ -220,6 +220,65 @@ type Intent struct {
 	SourcePath string
 }
 
+// AnchorKind classifies the source surface an anchor was parsed from.
+//
+// It is a v1.2+ addition (RFC 2026-10-08-md-anchors.md §2.5) so
+// callers that need a per-anchor kind (kron_impact, kron_intent_density,
+// future lint rules) can read it off model.Anchor instead of
+// hand-coding the source surface at every call site.
+//
+// Two values, one binary: every anchor is either in source code
+// (".go", ".ts", ".py", ...) or in a markdown file OUTSIDE the
+// intent directory (any .md). There is no third category in v1.
+//
+// The zero value is the empty string, NOT AnchorKindCode, because
+// AnchorKind is a string-typed alias and string zero is "". The
+// parser layer always sets the field explicitly
+// (ScanAnchors → AnchorKindCode; ScanMarkdownAnchors →
+// AnchorKindMarkdown); hand-constructed literals that omit Kind
+// get "" which downstream consumers treat as "unknown / default to
+// code". The empty string is NOT a sentinel error value — it is
+// the legitimate pre-v1.2 value for code anchors that the parser
+// has just upgraded.
+//
+// Use Kind.IsSet / IsCode / IsMarkdown to dispatch safely.
+type AnchorKind string
+
+const (
+	// AnchorKindCode: the anchor was parsed from a source-code file
+	// (any non-.md file walked by parser.ScanAnchors). The historical
+	// default.
+	AnchorKindCode AnchorKind = "code"
+
+	// AnchorKindMarkdown: the anchor was parsed from a .md file
+	// walked by parser.ScanMarkdownAnchors (RFC
+	// 2026-10-08-md-anchors.md §1.1 — repo-wide .md, excluding
+	// .kron/intents/ and .kron/.trash/).
+	AnchorKindMarkdown AnchorKind = "markdown"
+)
+
+// IsSet reports whether k carries a parser-assigned value.
+// Hand-constructed literals (zero value "") return false; parser
+// output always returns true. Use this to gate "do I need to guess?"
+// logic in long-lived data structures.
+func (k AnchorKind) IsSet() bool {
+	return k == AnchorKindCode || k == AnchorKindMarkdown
+}
+
+// IsCode reports whether k identifies a code-surface anchor. The
+// empty string is treated as Code (backward-compatible default
+// for pre-v1.2 callers that didn't set the field).
+func (k AnchorKind) IsCode() bool {
+	return k == "" || k == AnchorKindCode
+}
+
+// IsMarkdown reports whether k identifies a markdown-surface anchor.
+// Only the explicit AnchorKindMarkdown value returns true; empty
+// returns false (use IsCode for the "default" branch).
+func (k AnchorKind) IsMarkdown() bool {
+	return k == AnchorKindMarkdown
+}
+
 // Anchor is a parsed // @kron:intent <slug> annotation found in a source file.
 type Anchor struct {
 	// Slug is the intent path, without the .md extension.
@@ -241,4 +300,16 @@ type Anchor struct {
 
 	// LineNumber is the 1-indexed line where the anchor appears.
 	LineNumber int
+
+	// Kind classifies the source surface. Set by the parser
+	// (ScanAnchors emits Code; ScanMarkdownAnchors emits Markdown);
+	// left at its zero value (Code) by hand-constructed literals.
+	// Callers that need a per-anchor kind (kron_impact,
+	// kron_intent_density, lint) should read this field instead of
+	// dispatching on the path or the call site. The dispatch
+	// pattern (call ScanAnchors / ScanMarkdownAnchors separately and
+	// hardcode the kind) was the v1.1 implementation; v1.2 collapses
+	// both code paths onto the Kind field so a single sorted scan
+	// produces a kind-tagged result.
+	Kind AnchorKind
 }

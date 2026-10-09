@@ -11,6 +11,14 @@
 | 文件 | 原始状态 | 当前归属 | 关联 commit |
 |---|---|---|---|
 | [`2026-10-03-frontmatter-references.md`](./2026-10-03-frontmatter-references.md) | 草案 (Proposed) | **已落地 + 已归档** | `a373828` + `ea186a8` |
+| [`2026-10-04-mcp-sdk-selection.md`](./2026-10-04-mcp-sdk-selection.md) | 已采纳 (决策记录) | **已落地 + 已归档** (2026-10-09) | `55820ed` |
+| [`2026-10-04-mcp-sdk-adoption.md`](./2026-10-04-mcp-sdk-adoption.md) | 已落地 (实施计划) | **已落地 + 已归档** (2026-10-09) | `55820ed` + `36070e1` + `cafb75a/aa560ec/aeb5fc6` |
+| [`2026-10-07-gui-stack.md`](./2026-10-07-gui-stack.md) | SUPERSEDED (2026-10-08) | **已被 `2026-10-08-gui-layer` 思路取代 + 已归档** (2026-10-09) | — |
+| [`2026-10-08-intent-tree-api.md`](./2026-10-08-intent-tree-api.md) | ACCEPTED (2026-10-08) | **PR-A + PR-B 全部实施 + 已归档** (2026-10-09) | `internal/view/` + `internal/store/paths.go` |
+| [`2026-10-08-md-anchors.md`](./2026-10-08-md-anchors.md) | 已拍板 (2026-10-08) | **已落地 + 已归档** (2026-10-09) | `model.AnchorKind` + `parser.ScanMarkdownAnchors` |
+| [`2026-10-08-assumptions-standalone.md`](./2026-10-08-assumptions-standalone.md) | 草案 (v1.3 目标) | **6 lint 规则全实 + `internal/assumption/` 包实开 + 已归档** (2026-10-09) | `internal/assumption/` + `internal/lint/assumption_rules.go` |
+| [`2026-10-08-writer-readme-symmetry.md`](./2026-10-08-writer-readme-symmetry.md) | DRAFT (2026-10-08) | **PR-A/B/C/D 全实 + 已归档** (2026-10-09) | `model.IntentKind` + `store.paths.resolveWritePath` + `kron add --kind` + MCP `kron_add.kind` |
+| [`2026-10-09-markdown-anchors.md`](./2026-10-09-markdown-anchors.md) | 草案 (2026-10-09) | **T1-T5 全实 + 已归档** (2026-10-09) | `model.Anchor.Kind` + `ScanAnchors`/`ScanMarkdownAnchors` 回填 + `tools_schema.AnchorRef.Kind` |
 | ~~`2026-10-04-mcp-protocol-redesign.md`~~ | ~~规划中~~ | ~~SUPERSEDED + 二次归档~~ | (2026-10-08 软删入 [`.deprecated/`](../../.deprecated/2026-10-08-doc-cleanup/2026-10-04-mcp-protocol-redesign.md)) |
 
 ---
@@ -35,11 +43,10 @@
 
 | 文件 | 状态 | 留根理由 |
 |---|---|---|
-| [`../2026-10-04-mcp-sdk-selection.md`](../2026-10-04-mcp-sdk-selection.md) | 已采纳（决策记录保留） | 7 维度选型表是未来质疑"为什么用 SDK"的答卷 |
-| [`../2026-10-04-mcp-sdk-adoption.md`](../2026-10-04-mcp-sdk-adoption.md) | 已落地（实施计划） | 与 `frontmatter-references` 不同，它**不是业务层提案**而是**工具链层实施计划**——phase 3 决定 LSP/IDE/GUI 时仍可能"问当初怎么接 SDK" |
-| [`../2026-10-07-lsp-sdk.md`](../2026-10-07-lsp-sdk.md) | SUPERSEDED（[2026-10-08-lsp-client.md](../2026-10-08-lsp-client.md) 待写, 跨语言 client 端 SDK 选型变更） | §3 / §4 SDK 选型有效; §1.3 + §6 跨语言客户端接入形式**作废** (改走 serve-mcp JSON-RPC + spawn serve-lsp) |
-| [`../2026-10-07-gui-stack.md`](../2026-10-07-gui-stack.md) | 草案 (Wails + VSCode 双轨拍板) | v1.3 入口文件, phase 3 启动时按本 RFC 实施 |
-| [`../2026-10-08-mcp-lifecycle.md`](../2026-10-08-mcp-lifecycle.md) | 草案 (MCP 进程寿命 + 并发安全拍板) | v1.0 拍板文件, v1.1 实施入口 |
+| [`../2026-10-07-lsp-sdk.md`](../2026-10-07-lsp-sdk.md) | SUPERSEDED（[2026-10-08-lsp-client.md](../2026-10-08-lsp-client.md) 取代, 跨语言 client 端 SDK 选型变更） | §3 / §4 SDK 选型有效; §1.3 + §6 跨语言客户端接入形式**作废** (改走 serve-mcp JSON-RPC + spawn serve-lsp) |
+| [`../2026-10-08-lsp-client.md`](../2026-10-08-lsp-client.md) | 草案 (v1.3+ 实施) | v1.3+ 入口 RFC, phase 3 启动时按本 RFC 实施 |
+| [`../2026-10-08-mcp-lifecycle.md`](../2026-10-08-mcp-lifecycle.md) | 草案 (v1.0 §2.1 拍板已落 architecture.md, v1.1 §2.2 flock 待实施) | v1.0 拍板 + v1.1 实施入口 |
+| [`../2026-10-08-path-conventions.md`](../2026-10-08-path-conventions.md) | DRAFT (2026-10-08, **未实施**) | **RFC §2.1 / §5 引用了不存在的 `view.IntentTreeNode.Path` 字段**（实施时 view 包未加 Path 字段）—— 留根待重开 RFC 重拍, 期间**不**做 §2.1 改动 |
 
 ---
 

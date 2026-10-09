@@ -9,6 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/xxx/kron/internal/assumption"
+	"github.com/xxx/kron/internal/model"
 	"github.com/xxx/kron/internal/parser"
 	"github.com/xxx/kron/internal/relations"
 	"github.com/xxx/kron/internal/store"
@@ -85,8 +86,13 @@ func HandleImpact(ctx context.Context, _ *mcp.CallToolRequest, in ImpactInput) (
 	}
 
 	// Walk the repo and filter to anchors pointing at our slug.
-	// B-3 / md-anchors RFC §2.5: each anchor carries a `kind` field
-	// ("code" for source files, "markdown" for any .md outside .kron/intents/).
+	// RFC 2026-10-08-md-anchors.md §2.5: each Anchor carries a Kind
+	// (AnchorKindCode / AnchorKindMarkdown) so callers don't have
+	// to dispatch on the source file's extension. The two scan
+	// streams are concatenated and tagged by parser, not by us.
+	// The IsCode / IsMarkdown predicates collapse the empty-string
+	// zero value (hand-constructed literals) onto "code" so the
+	// wire value is never the empty string.
 	var incoming []AnchorRef
 	anchors, err := parser.ScanAnchors(root)
 	if err != nil {
@@ -96,23 +102,24 @@ func HandleImpact(ctx context.Context, _ *mcp.CallToolRequest, in ImpactInput) (
 	if err != nil {
 		return nil, ImpactOutput{}, fmt.Errorf("kron_impact: scan markdown anchors: %w", err)
 	}
-	for _, a := range anchors {
-		if a.Slug == in.Slug {
-			incoming = append(incoming, AnchorRef{
-				FilePath: a.FilePath,
-				Line:     a.LineNumber,
-				Kind:     "code",
-			})
+	// `all` is already in use above as the []*model.Intent slice
+	// (from r.LoadAll); use a distinct name to avoid shadowing.
+	allAnchors := make([]model.Anchor, 0, len(anchors)+len(markdownAnchors))
+	allAnchors = append(allAnchors, anchors...)
+	allAnchors = append(allAnchors, markdownAnchors...)
+	for _, a := range allAnchors {
+		if a.Slug != in.Slug {
+			continue
 		}
-	}
-	for _, a := range markdownAnchors {
-		if a.Slug == in.Slug {
-			incoming = append(incoming, AnchorRef{
-				FilePath: a.FilePath,
-				Line:     a.LineNumber,
-				Kind:     "markdown",
-			})
+		kind := string(model.AnchorKindCode)
+		if a.Kind.IsMarkdown() {
+			kind = string(model.AnchorKindMarkdown)
 		}
+		incoming = append(incoming, AnchorRef{
+			FilePath: a.FilePath,
+			Line:     a.LineNumber,
+			Kind:     kind,
+		})
 	}
 	if incoming == nil {
 		incoming = []AnchorRef{}

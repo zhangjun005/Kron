@@ -592,6 +592,35 @@ func TestImpact_HappyPath(t *testing.T) {
 	assert.Equal(t, "auth/jwt", r.Intent.Slug)
 	require.Len(t, r.IncomingAnchors, 1)
 	assert.Equal(t, "auth.go", r.IncomingAnchors[0].FilePath)
+	// RFC 2026-10-08-md-anchors.md §2.5: kind is carried through
+	// transparently from model.Anchor.Kind to the wire. Code
+	// anchors come back as "code".
+	assert.Equal(t, "code", r.IncomingAnchors[0].Kind)
+}
+
+// TestImpact_MarkdownAnchorKind locks the v1.2 kind dispatch:
+// a markdown anchor on disk surfaces as kind="markdown" on the
+// wire (not as kind="code" and not as a separate envelope).
+func TestImpact_MarkdownAnchorKind(t *testing.T) {
+	dir := initRepo(t)
+	addIntent(t, dir, "auth/jwt", "", "")
+	// Drop a .md file with an anchor pointing at our slug.
+	md := "// @kron:intent auth/jwt\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte(md), 0o644))
+
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_impact",
+		Arguments: map[string]any{"slug": "auth/jwt"},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	var r ImpactOutput
+	require.NoError(t, structuredInto(res, &r))
+	require.Len(t, r.IncomingAnchors, 1)
+	assert.Equal(t, "README.md", r.IncomingAnchors[0].FilePath)
+	assert.Equal(t, "markdown", r.IncomingAnchors[0].Kind)
 }
 
 // --- kron_intent_density --------------------------------------------
@@ -609,6 +638,35 @@ func TestIntentDensity_EmptyRepo(t *testing.T) {
 	require.NoError(t, structuredInto(res, &r))
 	assert.Equal(t, 0, r.TotalIntents)
 	assert.Equal(t, 0, r.TotalAnchors)
+}
+
+// TestIntentDensity_CountsMarkdownAnchors locks RFC
+// 2026-10-08-md-anchors.md §2.5: the TotalAnchors and
+// IntentsWithAnchors aggregates must include markdown anchors
+// in addition to code anchors. Pre-v1.2 the handler only called
+// ScanAnchors, so a doc-only anchor would not move the
+// with-anchor count and the intent would falsely appear in
+// IntentsWithoutAnchors.
+func TestIntentDensity_CountsMarkdownAnchors(t *testing.T) {
+	dir := initRepo(t)
+	addIntent(t, dir, "auth/jwt", "", "")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"),
+		[]byte("// @kron:intent auth/jwt\n"), 0o644))
+
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_intent_density",
+		Arguments: map[string]any{},
+	})
+	require.NoError(t, err)
+	var r IntentDensityOutput
+	require.NoError(t, structuredInto(res, &r))
+	assert.Equal(t, 1, r.TotalIntents)
+	assert.Equal(t, 1, r.TotalAnchors, "markdown anchor must count")
+	assert.Equal(t, 1, r.Coverage.IntentsWithAnchors)
+	assert.Empty(t, r.Coverage.IntentsWithoutAnchors,
+		"auth/jwt must NOT be in without-anchors when the only anchor is markdown")
 }
 
 // --- kron_stale ------------------------------------------------------

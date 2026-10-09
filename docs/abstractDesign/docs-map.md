@@ -165,6 +165,7 @@ A (requirements.md)  ──►  D (business.md)  ──►  B (architecture.md)
 | **A** | `docs/requirements.md` | —（外部输入） |
 | **B** | `docs/abstractDesign/architecture.md` | A, D, E |
 | **B** | `docs/abstractDesign/view-call-tree-intent.md` | B, C (call-tree intent 视图) |
+| **B** | `docs/abstractDesign/internal-coverage-2026-10-09.md` | B, C (§三 内部包能力对账, 2026-10-09 新建) |
 | **C** | `docs/abstractDesign/intent-structure.md` | —（数据事实） |
 | **D** | `docs/business.md` | A, H |
 | **F** | `docs/implementation/api-surface.md` | B, C |
@@ -182,17 +183,19 @@ A (requirements.md)  ──►  D (business.md)  ──►  B (architecture.md)
 | **G** | `docs/process/ci-enforcement.md` | B |
 | **G** | `docs/process/new-access-layer.md` | B (v1.3+ 新增访问层流程) |
 | **G** | `docs/process/new-internal-api.md` | B (改 `internal/` 公开 API 流程) |
-| **G** | `docs/process/pending-decisions.md` | — (决策链路审计日志, 2026-10-07 封档; 2026-10-08 软删审计见末尾 C1) |
 | **G** | `docs/process/github-branch-protection.md` | — (GitHub 网页操作清单, **不**是文档真理) |
-| **G** | `docs/process/ci-enforcement.md` | B |
 | **H** | `docs/article.md` | — |
 | **H** | `docs/persuasion.md` | — |
 | **K** | `docs/how-it-works.md` | `internal/model/intent.go` (代码示例的真实类型) |
 | **I** | `AGENTS.md` | B, C, F, G |
 | **J** | `.cursor/rules/project-conventions.mdc` | B, F |
-| **Z** | `.deprecated/` | — (软删归档, 2026-10-08 起; `.gitignore` 显式排除新文件, 已 index 文件保留) |
+| **Z** | [`.deprecated/`](../../.deprecated/) | — (软删归档, 2026-10-08 起; `.gitignore` 显式排除新文件, 已 index 文件保留) |
 
 > **2026-10-08 软删**: 8 文件移入 [`.deprecated/2026-10-08-doc-cleanup/`](../../.deprecated/2026-10-08-doc-cleanup/) — `tech-stack.md` / `references-snapshot.md` / `phase-archive/*` (3) / `mcp-protocol.md` / `2026-10-04-mcp-protocol-redesign.md` / `2026-10-04-source-files-reverse-view.md`. 详见该目录 README + `pending-decisions.md` C1.
+>
+> **2026-10-09 process 收口**: 2 process 文档 (`pending-decisions.md` 决策链路审计 + `internal-pkg-status-2026-10-08.md` 时点收口报告) 移入 [`.deprecated/2026-10-09-process-cleanup/`](../../.deprecated/2026-10-09-process-cleanup/). 详见该目录 README.
+>
+> **2026-10-09 RFC 归档**: 8 RFC (`2026-10-04-mcp-sdk-{selection,adoption}` / `2026-10-07-gui-stack` / `2026-10-08-{intent-tree-api,md-anchors,writer-readme-symmetry,assumptions-standalone}` / `2026-10-09-markdown-anchors`) 移入 [`docs/rfc/archive/`](../../docs/rfc/archive/README.md). 详见 `docs/rfc/archive/README.md`.
 
 ---
 

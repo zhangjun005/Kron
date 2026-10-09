@@ -187,6 +187,33 @@ func TestAnchorStructFields(t *testing.T) {
 	assert.Equal(t, "x", a.Slug)
 	assert.Equal(t, "/p", a.FilePath)
 	assert.Equal(t, 7, a.LineNumber)
+	// Kind is a v1.2+ field. Its zero value is the empty string
+	// (AnchorKind is a string alias); IsCode treats "" as code
+	// (the historical default) so hand-constructed literals that
+	// omit Kind behave the same as parser-produced code anchors.
+	// See RFC 2026-10-08-md-anchors.md §2.5.
+	assert.Equal(t, model.AnchorKind(""), a.Kind, "zero value of AnchorKind must be the empty string")
+	assert.True(t, a.Kind.IsCode(), "zero-value Kind must behave as code (IsCode)")
+	assert.False(t, a.Kind.IsMarkdown(), "zero-value Kind must NOT be markdown")
+	assert.False(t, a.Kind.IsSet(), "zero-value Kind must not be IsSet (parser didn't run)")
+}
+
+// TestScanAnchors_KindCode locks the v1.2 contract (RFC
+// 2026-10-08-md-anchors.md §2.5): every anchor returned by
+// ScanAnchors must report Kind=code. We use IsCode() rather than
+// ==-compare so a future addition of the explicit AnchorKindCode
+// constant is not a breaking change. This is the mirror image of
+// TestScanMarkdownAnchors_KindMarkdown.
+func TestScanAnchors_KindCode(t *testing.T) {
+	dir := t.TempDir()
+	writeSourceFile(t, dir, "x.go", "// @kron:intent auth/jwt\n// @kron:intent auth/refresh\n")
+	anchors, err := ScanAnchors(dir)
+	require.NoError(t, err)
+	require.Len(t, anchors, 2)
+	for i, a := range anchors {
+		assert.True(t, a.Kind.IsCode(), "anchors[%d].Kind = %q must be code", i, a.Kind)
+		assert.False(t, a.Kind.IsMarkdown(), "anchors[%d].Kind = %q must NOT be markdown", i, a.Kind)
+	}
 }
 
 // TestScanAnchors_FilePathIsRepoRelative locks down the
