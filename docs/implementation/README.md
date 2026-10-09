@@ -1,48 +1,51 @@
-# Implementation Reference（实施参考）
+# Implementation Reference（已归档）
 
+> ⚠️ **本文档目录已归档**（2026-10-09）。8 份实施参考文件因描述与 `internal/` 当前实现
+> 严重错位（签名错、字段漏、规则名错），全部移到 `.deprecated/2026-10-09-process-cleanup/`。
+> 重新生成 `internal/` 实施参考是后续 PR 的范畴（按 `docs/process/new-internal-api.md` 流程）。
+>
 > 架构真理位于 [`docs/abstractDesign/architecture.md`](../abstractDesign/architecture.md)。  
-> 本目录下所有文件是**实施建议**，不是架构真理。如有冲突，以 `architecture.md` 为准。
+> 实施参考落地页（待重写）：
 
----
-
-## 文档地图
-
-| 文件 | 内容 |
+| 原文件 | 归档位置 |
 |---|---|
-| [`api-surface.md`](./api-surface.md) | 所有导出函数签名（`internal/` + `cmd/kron/`） |
-| [`cli.md`](./cli.md) | CLI 命令实现参考（init / add / lint / soft-delete） |
-| [`domain-model.md`](./domain-model.md) | 领域模型结构体（Intent / Frontmatter / Status / Anchor / Config） |
-| [`error-catalog.md`](./error-catalog.md) | 错误 sentinel 清单 + 包装规则 + 退出码对照 |
-| [`ide-interaction.md`](./ide-interaction.md) | IDE / LSP 三路交互（接口契约，不实现） |
-| [`mcp.md`](./mcp.md) | MCP 工具契约（v1 共 12 工具：8 个生命周期 + 4 个 AI 主动消费）+ GUI API 边界 |
-| [`testing.md`](./testing.md) | 分层测试策略 + fixture 管理 + CI 门禁 |
+| `api-surface.md` | `.deprecated/2026-10-09-process-cleanup/api-surface.md` |
+| `cli.md` | `.deprecated/2026-10-09-process-cleanup/cli.md` |
+| `domain-model.md` | `.deprecated/2026-10-09-process-cleanup/domain-model.md` |
+| `error-catalog.md` | `.deprecated/2026-10-09-process-cleanup/error-catalog.md` |
+| `ide-interaction.md` | `.deprecated/2026-10-09-process-cleanup/ide-interaction.md` |
+| `lsp.md` | `.deprecated/2026-10-09-process-cleanup/lsp.md` |
+| `mcp.md` | `.deprecated/2026-10-09-process-cleanup/mcp.md` |
+| `testing.md` | `.deprecated/2026-10-09-process-cleanup/testing.md` |
 
-> **F 层外部同类文件**：`docs/abstractDesign/view-call-tree-intent.md`（调用树 × 意图视图数据契约）——与本目录文件同角色（F），受 B 约束；本目录文件不引用它，它不引用本目录文件（F→F 反向禁止）。
+## 为什么归档
 
----
+具体错位清单（对账日期 2026-10-09）：
 
-## 关系图
+- `api-surface.md` — 列了 `WriteIntent(ctx, slug, intent)` 但实际是 `Writer.Write(ctx, *Intent)`；
+  列了 `ParseSlug(raw string) (string, error)` 但实际是 `ValidateSlug(slug string) error`；
+  列了 `ScanAnchors(filePath, src io.Reader)` 但实际是 `ScanAnchors(dir string) ([]Anchor, error)`；
+  列了 `LintResult` / `LintError` 但实际是 `Diag` / `Severity` / `Rule`。
+- `domain-model.md` — 缺 `model.AnchorKind` 类型 + 2 const + 3 方法；缺 `model.Anchor.Kind` 字段；
+  `Frontmatter.UpdatedAt` 写 `time.Time` 但 `AssumptionFrontmatter.UpdatedAt` 是 `string`（双标注不一致）；
+  缺 `model.Severity` + `model.IntentKind` 类型；`Status` 校验位置写错（实际在 parser 层）。
+- `error-catalog.md` — 缺 `ErrConcurrentWrite` / `ErrEmptyPatch` / `ErrCreatorChangeNotAllowed` /
+  `ErrSlugInvalid`（实为 `model.ErrSlugInvalid`）/
+  `ErrAssumptionNotFound` / `ErrAssumptionExists` / `ErrAssumptionAlreadyDeleted` /
+  `ErrAssumptionNotInTrash` / `ErrConfigInvalid`（实为 store 包而非 model）。
+- `cli.md` — `kron lint` 流程图说"调 `store.ResolveIntent(slug)`"但实际走
+  `lint.Run(ctx, root)` → `parser.ScanAnchors` + `store.Reader.Exists` 链；
+  `kron add` 流程图说"调 `store.WriteIntent`"但实际是 `Writer.Write`。
+- `mcp.md` — `kron_get` 出参表说 `references` 是 `v1.2+` 但 frontmatter schema 自 v1 已含；
+  工具列表里 `kron_stale` 默认 90 天的描述写在 `lint.StaleDaysDefault` 之外无引用。
+- `ide-interaction.md` — `textDocument/publishDiagnostics` 标 `⏳ v1.4+` 但 `kron_lint` A-class
+  已可发（`lint.Run` 输出 + 客户端渲染），缺位更准。
+- `lsp.md` — 全文件是 v1.3 拍板下的实施假设；`serve-lsp` 实际**未**实施（`cmd/kron/serve-lsp/`
+  目录不存在）；本文件描述的 hover/definition handler 是设计稿，不是落地代码。
+- `testing.md` — `os.Chdir(tmp)` 写法在 Go 1.27 上不阻塞但与 testify best practice 冲突；
+  CI 门禁表里漏 `go vet ./...`（architecture.md 铁律 #4）。
 
-```
-architecture.md（真理）
-  ├─ §1.1 / §1.2  → cli.md + mcp.md
-  ├─ §3           → domain-model.md
-  ├─ §4           → error-catalog.md
-  ├─ §5           → cli.md（流程）+ mcp.md（契约）+ process/ 下的流程文档
-  └─ §6           → testing.md
-```
+## 何时重写
 
----
-
-## 如何使用
-
-- **写代码前**：先查本目录，找对应函数的签名示例
-- **理解所有文档的角色与关系**：先读 [`abstractDesign/docs-map.md`](../abstractDesign/docs-map.md)
-
-## 引用规则
-
-本目录下的文件**只**做**信息检索引用**（在"如何使用"或脚注里给读者指路）和**真理引用**（引用 `architecture.md` / `intent-structure.md` 作为论据）。
-
-**不**在正文中把 `process/` 文件作为论据（即不能用"按 process/foo.md 第 X 节规定……"这种措辞）。
-
-> **执行触发**：当本目录的某个实施细节需要"什么时候做"的流程决策时（例：什么时候该加 CLI flag、什么时候该改 schema），说明这个细节应该移到 `process/` 下，而不是反过来引用。
+任何新 `internal/` API、新 MCP 工具、新 lint 规则落地时，**先**改 `internal/*` 代码 + 测，
+**然后**按需重写 `docs/implementation/<topic>.md`（不走本 README——本 README 只起"已归档"提示作用）。
