@@ -87,5 +87,6 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  add <slug>   Scaffold a new intent file at .kron/intents/<slug>.md")
 	fmt.Fprintln(w, "  lint         Scan anchors and frontmatter; exit 0 on clean, 1 on errors")
 	fmt.Fprintln(w, "  serve-mcp    Start the MCP stdio server (separate access layer; see cmd/kron/serve-mcp)")
+	fmt.Fprintln(w, "  serve-lsp    Start the LSP stdio server (v1.3+ stub; see cmd/kron/serve-lsp)")
 	fmt.Fprintln(w, "  help         Show this message")
 }

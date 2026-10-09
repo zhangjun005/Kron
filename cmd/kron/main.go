@@ -13,6 +13,7 @@ import (
 	"os"
 
 	"github.com/xxx/kron/cmd/kron/cli"
+	"github.com/xxx/kron/cmd/kron/serve-lsp"
 	"github.com/xxx/kron/cmd/kron/serve-mcp"
 )
 
@@ -33,6 +34,13 @@ func main() {
 		// to stdout. It is the only access layer that takes over stdio
 		// directly; CLI commands keep stdio untouched.
 		err = servemcp.Run(os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
+	case "serve-lsp":
+		// The LSP server (v1.3+ stub) reads Content-Length framed
+		// JSON-RPC from stdin and writes responses to stdout, same
+		// transport shape as serve-mcp. Today this is a stub that
+		// returns ErrNotImplemented; v1.3 will replace the body with
+		// the real LSP frame loop. See docs/rfc/2026-10-08-lsp-client.md.
+		err = lsp.Run(os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
 	default:
 		err = runCLI(os.Args[1:])
 	}
@@ -73,6 +81,10 @@ func exitFromErr(err error) {
 	}
 	if errors.Is(err, servemcp.ErrNotImplemented) {
 		// servemcp.Run already wrote the placeholder message.
+		os.Exit(1)
+	}
+	if errors.Is(err, lsp.ErrNotImplemented) {
+		// lsp.Run already wrote the placeholder message.
 		os.Exit(1)
 	}
 
