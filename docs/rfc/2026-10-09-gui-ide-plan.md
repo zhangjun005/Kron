@@ -6,7 +6,7 @@
 | **作者** | AI assistant, 经 zhangjun005 委托 |
 | **创建日期** | 2026-10-09 |
 | **目标版本** | v1.3+ |
-| **取代** | [`docs/rfc/archive/2026-10-07-gui-stack.md`](./archive/2026-10-07-gui-stack.md)（SUPERSEDED 2026-10-08, 旧版 Wails 主 + VSCode 副 双路径拍板**沿用**, GUI 边界**收紧**）|
+| **取代** | [`docs/rfc/archive/2026-10-07-gui-stack.md`](./archive/2026-10-07-gui-stack.md)（SUPERSEDED 2026-10-08, 旧版 Wails 主 + VSCode 副 双路径拍板**沿用**, GUI 边界**收紧**; vsix + shadcn/ui 拍板见本 RFC）|
 
 ---
 
@@ -15,7 +15,7 @@
 [`docs/rfc/archive/2026-10-07-gui-stack.md`](./archive/2026-10-07-gui-stack.md) 锁定了 Wails v2 主路径 + VSCode 扩展副路径, 但**未**拍板:
 - GUI (Wails) 实际**做什么** / **不**做什么（边界模糊）
 - VSCode 扩展的功能范围 / UI 分工 / 与 LSP/MCP 的边界
-- 图表/关系图渲染库选型（visx 候选）
+- 图表/关系图渲染库选型
 - 客户端层与协议访问层（CLI / MCP / LSP）的**实际**通讯模式
 
 [`docs/abstractDesign/architecture.md`](../abstractDesign/architecture.md) §〇 铁律 #9 + §〇·五·1 已在架构层把客户端层**枚举**为"VSCode 扩展 / Wails GUI / Cursor / 其他 IDE / Web GUI", 但**职责**和**实现路径**本 RFC 才拍.
@@ -51,9 +51,9 @@
 │  ┌─[ IDE: VSCode 扩展 .vsix ]─────────────────┐            │
 │  │  功能最全                                   │            │
 │  │  hover/def (LSP) + 侧边栏 (TreeView)        │            │
-│  │  + 详情面板 (Webview) + 弹窗 (Webview)      │            │
+│  │  + 详情面板 (Webview + shadcn) + 弹窗       │            │
 │  │  + 跳转/补全/diagnostics (LSP)              │            │
-│  │  + 关系图渲染 (visx 候选, webview 内)       │            │
+│  │  + 关系图渲染 (VSCode webview 内, shadcn 原生图表或 canvas) │
 │  │  调: kron serve-mcp (业务) + serve-lsp (UI) │            │
 │  └────────────────────────────────────────────┘            │
 └──────────────┬─────────────────────┬────────────────────────┘
@@ -103,7 +103,7 @@
 | Definition 跳转 | ❌ | IDE 职责 |
 | 弹窗 / 补全 / 诊断 | ❌ | IDE 职责 |
 | 编辑意图文件 | ⚠️ 半支持 | 调 `code <file>` 跳到 IDE 编辑, **不**自带编辑器 |
-| 关系图 (visx 等) | ❌ | IDE 职责 (见 §4.4) |
+| 关系图 / 依赖图 | ❌ | IDE 职责 (见 §4.3) |
 
 ### 3.2 调的能力 (后端)
 
@@ -176,46 +176,14 @@ VSCode 扩展的 `package.json` `contributes` 字段**同时**声明 LSP / 侧�
 | Definition 跳转 | **LSP** | LSP 协议原生 |
 | **意图详情面板** (侧边栏 webview) | **Webview + shadcn/ui** | "独立面板", 适合 shadcn Card/Tabs/Badge |
 | **假设警告弹窗** | **Webview + shadcn Dialog** | 复杂交互, shadcn 强项 |
-| **关系图 / 依赖图** (visx 候选) | **Webview + visx** | 关系图是"独立可视化", 适合 visx; 见 §4.4 |
+| **关系图 / 依赖图** | **VSCode webview** | 走 shadcn 原生图表组件 (v0.14+ 内置 `<Chart>`) 或按需扩展；**不**预设特定图表库 |
 
 **规律**:
 
 - **想"跟 VSCode 紧耦合"** → VSCode 原生 API
-- **想"独立面板 + 复杂交互"** → Webview + shadcn/ui / visx
+- **想"独立面板 + 复杂交互"** → Webview + shadcn/ui
 
-### 4.4 关系图渲染 (visx 候选)
-
-**候选**: [visx](https://airbnb.io/visx) — Airbnb 出品的 low-level React 可视化库, "d3 + React, the modular way".
-
-**适配场景**（Kron 内部已有 / 将有的关系图）:
-
-| 关系图 | 数据来源 | 渲染场景 |
-|---|---|---|
-| `kron_impact` 反向依赖图 | `internal/relations.ReverseLinks` | 改某 intent 前看"谁依赖我" |
-| `kron_density` 假设密度 | `internal/relations` (B-3) | 项目"假设膨胀"健康度 |
-| 假设 → 意图 引用图 | `internal/assumption.Reader.List + Intent.Frontmatter.Assumptions` | 假设漂移追踪 (B-3) |
-| Frontmatter 字段引用图 | `internal/store` | 数据 lineage (v1.4+ 候选) |
-
-**为什么 visx**:
-
-- ✅ **Modular** — 按需 import `@visx/network` / `@visx/tree` / `@visx/scale` / `@visx/shape`, bundle 体积可控
-- ✅ **React 友好** — 与 shadcn/ui / React 18 同生态
-- ✅ **TypeScript 原生** — 强类型
-- ✅ **低层级** — 不强制图表样式, Kron 自己设计"意图图"视觉
-- ✅ **VSCode webview 适配** — 纯 React, 在 webview iframe 内跑通 (CSP 友好, 走 Vite production build)
-
-**visx 选型论证待补**（按 `AGENTS.md` §3 "新 top-level dep 走 explicit approval"）:
-
-| 维度 | 待写 | 何时 |
-|---|---|---|
-| 竞品对比 (visx vs Recharts vs d3 + React vs ECharts vs Nivo) | TODO | 实施前补 |
-| 包大小 (按需剪枝后) | TODO | spike 验证后填 |
-| 维护活跃度 | TODO | 实施前查最新 |
-| API 稳定性 | TODO | 实施前查 |
-
-**不**在本 RFC 拍 visx 选型 — 本 RFC 只**记录**"visx 是候选" + "关系图用 webview + 任意 React 可视化库". 具体 dep 锁定走 v1.3 启动时的子 RFC.
-
-### 4.5 调的能力 (后端)
+### 4.4 调的能力 (后端)
 
 | 后端 | 用法 | 触发 |
 |---|---|---|
@@ -230,8 +198,8 @@ VSCode 扩展的 `package.json` `contributes` 字段**同时**声明 LSP / 侧�
 
 | 客户端 | 选型 | dep 走 explicit approval |
 |---|---|---|
-| Wails GUI | Wails v2 + Go ↔ TS 桥 (TS 端 React + shadcn/ui + **不**用 visx) | 旧 RFC 拍, **不**重复论证 |
-| VSCode 扩展 | `vscode-languageclient` + `@modelcontextprotocol/sdk` + React 18 + Vite 5 + shadcn/ui + **visx (关系图, 待选型论证)** | 4 段论证在 v1.3 启动时补 |
+| Wails GUI | Wails v2 + Go ↔ TS 桥 (TS 端 React + shadcn/ui) | 旧 RFC 拍, **不**重复论证 |
+| VSCode 扩展 | `vscode-languageclient` + `@modelcontextprotocol/sdk` + React 18 + Vite 5 + shadcn/ui | 旧 RFC 拍; **不**预设图表库（关系图走 VSCode webview + shadcn 原生 Chart 或按需扩展） |
 | LSP server (Kron Go 主仓) | `go.lsp.dev/protocol v3.17+` ([`docs/rfc/2026-10-07-lsp-sdk.md` §3](./2026-10-07-lsp-sdk.md) 已拍) | 旧 RFC 拍, **不**重复 |
 
 **AGENTS.md §3 红线重申**: 任何**新** top-level dep 进 Kron Go 主仓 (`go.mod`) 走 explicit approval, VSCode 扩展**不**进 Go 主仓, 其 dep 走 npm + vsce 流程, **不**走 Go explicit approval 路径.
@@ -255,7 +223,7 @@ Kron Go 主仓**不**建 `extensions/` 目录, **不**建 `kron-wails/` 目录. 
 
 1. **GUI = 整体预览 only**: Wails 端**不**做 hover / def / 补全 / 诊断 / 关系图 (那是 IDE 职责). GUI 调 serve-mcp 走 list/get 类只读工具.
 2. **IDE = 功能最全**: VSCode 扩展装 1 个 .vsix 同时承担 LSP 客户端 + 侧边栏 + 窗口 + 弹窗 + 关系图. IDE 调 serve-mcp 业务 + serve-lsp UI.
-3. **关系图渲染 (visx 候选)**: 在 VSCode 扩展 webview 内, **不**在 Wails GUI. visx dep 锁定走 v1.3 启动时的子 RFC + 4 段论证.
+3. **关系图渲染**: 在 VSCode 扩展 webview 内, **不**在 Wails GUI. 走 VSCode webview + shadcn 原生 Chart 组件 (v0.14+) 或按需扩展；**不**预设图表库, spike 验证后拍.
 4. **客户端层不进主仓**: Wails / VSCode 扩展 / Cursor / Neovim / Helix 全部走独立仓或编辑器生态, Kron Go 主仓**不**存.
 5. **shadcn/ui 范围**: Webview (Card / Tabs / Badge / Dialog) + 详情面板 + 弹窗. VSCode 原生 UI 部件 (TreeView / StatusBar / Activity Bar / Editor title menu) **不**用 shadcn.
 
@@ -265,9 +233,9 @@ Kron Go 主仓**不**建 `extensions/` 目录, **不**建 `kron-wails/` 目录. 
 
 | 反对 | 驳回理由 |
 |---|---|
-| "GUI 也应该做关系图 (visx)" | 拒绝. 关系图需要"快速定位 + 跳转", GUI 是"概览", **不**做"跳转". 跳转 = IDE 职责 (LSP definition). |
+| "GUI 也应该做关系图" | 拒绝. 关系图需要"快速定位 + 跳转", GUI 是"概览", **不**做"跳转". 跳转 = IDE 职责 (LSP definition). |
 | "VSCode 扩展和 Wails GUI 应该共享 TS 组件" | 拒绝. 客户端层**不**互相 import (architecture §0 铁律 #9). 各自包, 各自重写 (shadcn 按需 copy **可**接受, 但**不**共享包). |
-| "visx 选型应该现在就拍" | 拒绝. 本 RFC 只**记录**"visx 是候选". dep 锁定需要 4 段论证 (竞品 / 包大小 / 维护 / API), **不**在客户端层方案 RFC 里拍. 走子 RFC. |
+| "shadcn Chart 组件不够用" | 保留判断. spike 验证 shadcn 原生 `<Chart>` 够不够; 不够再按需扩展或换图表库. |
 | "GUI 应该用 LSP 提供 hover (像文档型 GUI)" | 拒绝. GUI 职责 = 整体预览, hover 是 IDE 职责. 越界 = 违反 `AGENTS.md` §7.1 拍板的"GUI 不做深度功能". |
 | "LSP 客户端应该手写 JSON-RPC, 不引依赖" | 拒绝. `vscode-languageclient` 是事实标准, 手写 = 重复造轮子 + 协议兼容风险. |
 
@@ -286,15 +254,15 @@ Kron Go 主仓**不**建 `extensions/` 目录, **不**建 `kron-wails/` 目录. 
 ### 9.2 VSCode 扩展
 
 - [ ] 独立仓 `kron-ide/`
-- [ ] v1.3 启动时开子 RFC: `vscode-languageclient` 版本 + MCP SDK 版本 + **visx 选型 4 段论证** + shadcn/ui 范围
+- [ ] v1.3 启动时开子 RFC: `vscode-languageclient` 版本 + MCP SDK 版本 + shadcn/ui 范围 + 图表库选型 (spike 验证后拍)
 - [ ] spike 验证: 最小 `.vsix` 装在 VSCode F5 host, 侧边栏能调 `kron serve-mcp` list 工具
 
 ### 9.3 不做的事
 
 - ❌ **不**把 Wails / VSCode 扩展代码进 Kron Go 主仓
-- ❌ **不**在 `frontend/` 加任何 Wails / shadcn / visx 实施代码 (本目录是 README 占位)
+- ❌ **不**在 `frontend/` 加任何 Wails / shadcn 实施代码 (本目录是 README 占位)
 - ❌ **不**写跨客户端 SDK 仓 (各客户端各自包, 各自打包)
-- ❌ **不**拍 visx 选型 (留子 RFC)
+- ❌ **不**预设图表库 (关系图走 spike 验证, shadcn Chart 优先)
 
 ---
 
