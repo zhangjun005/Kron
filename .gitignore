@@ -24,10 +24,15 @@ go.work.sum
 KRON/.kron-context/
 kron-internal/
 
-# Frontend (will be reintroduced when GUI phase starts)
+# Frontend build outputs
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/vscode/out/
+frontend/vscode/node_modules/
+frontend/wails/node_modules/
+frontend/wails/dist/
+frontend/wails/.vite/
 
 # Rust legacy (will be cleaned from archive branch if needed)
 # Uncomment if rebuilding Rust side:

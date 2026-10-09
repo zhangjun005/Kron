@@ -55,6 +55,6 @@
 | 文档 | 状态 | 触发条件 |
 |---|---|---|
 | `lsp.md` (LSP 协议实现细节) | 🔜 v1.3 待写 | `cmd/kron/serve-lsp/` 实施时（按 `docs/process/new-access-layer.md` §3 交付物 2 + 5）|
-| `vscode-extension.md` (VSCode 扩展) | 📦 外部 | 不进主仓；外部项目按 architecture §0 铁律 #9 |
-| `gui.md` / `wails.md` (Wails GUI) | 📦 外部 + 占位 | `frontend/` README 已是占位；实施时进独立仓 |
+| `vscode-extension.md` (VSCode 扩展) | 📦 内部 (`frontend/vscode/`) | 2026-10-09 修订：客户端层进主仓 `frontend/` |
+| `gui.md` / `wails.md` (Wails GUI) | 📦 内部 (`frontend/wails/`) | 2026-10-09 修订：`frontend/` 不再是纯占位，实施代码在 `frontend/wails/` |
 | `mcp.md` (MCP 协议实现细节) | 🔜 待重写 | 与 `lsp.md` 同批——MCP 工具加到 13+ 时需要重写（见 v1.3+ `kron_assumption_*` 工具候选）|

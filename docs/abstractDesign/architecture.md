@@ -17,11 +17,11 @@
 6. **数据真理源是仓库内的 `.md`**：二进制不持有项目数据；不维护状态机、不做双源同步。
 7. **CI lint 是唯一可信门禁**：运行时不维护隐式状态；强约束通过 `kron lint` 在 CI 报错实现，不靠运行时默认值兜底。
 8. **依赖方向单向**：`cmd → {cli, serve-mcp, serve-lsp} → {store, parser, lint} → model`；严禁反向；`model` 零外部依赖。
-9. **(2026-10-08 新增) 三层架构**：
+9. **(2026-10-08 新增, 2026-10-09 修订) 三层架构**：
    - **对象层** = `internal/model/`
    - **协议访问层** = `cmd/kron/cli` / `cmd/kron/serve-mcp` / `cmd/kron/serve-lsp`（CLI / MCP / LSP 三种协议适配器）
    - **客户端层** = VSCode 扩展 / Wails / Cursor / 其他 IDE / GUI 客户端
-   - **关键原则**：客户端层**不**直接调 `internal/`；客户端层只走**协议访问层之一**（拼 JSON 走 serve-mcp、调 LSP protocol 走 serve-lsp、命令行 argv 走 cli）。客户端层**之间**也不互相 import（VSCode 扩展**不** import Wails / Cursor 客户端，反之亦然）。
+   - **关键原则**：客户端层**只**通过**协议访问层之一**调用能力（拼 JSON 走 serve-mcp、调 LSP protocol 走 serve-lsp、命令行 argv 走 cli）。客户端层代码**存**在 Kron 主仓 `frontend/`（2026-10-09 修订：客户端层**进**主仓，不再独立建仓）；客户端之间**不**互相 import。
 
 ---
 
@@ -34,9 +34,9 @@
 | **对象层（Domain）** | 对象 | 表示 `.kron/intents/*.md` 的数据结构；最少行为；零外部 import | `internal/model/` | 任何东西——它只能被 import，不能 import 任何东西 |
 | **业务层（Business）** | 业务 | 文件 I/O、YAML 解析、锚点扫描、锚点校验；操作对象层；不知道谁来调用、不知道进程模型 | `internal/store/`, `internal/parser/`, `internal/lint/`, ... | 访问层**不**被业务层反向 import（`internal/` 永远不 import `cmd/kron/`） |
 | **协议访问层（Protocol Access）** | 协议 | 协议适配（cobra / JSON-RPC / LSP）、参数解析、输出序列化、组装业务层函数；3 个：**CLI / MCP / LSP** | `cmd/kron/cli/`, `cmd/kron/serve-mcp/`, `cmd/kron/serve-lsp/` | 业务层**不**被要求感知访问层；其他协议访问层**绝不**被 import；客户端层**不**直接调业务层 |
-| **客户端层（Client）** **(2026-10-08 新增)** | 客户端 | 给**人**用的 UI（Wails 桌面 / VSCode 扩展 / Cursor / 其他 IDE / Web GUI）；客户端**只**通过**协议访问层之一**（如 VSCode 扩展拼 JSON 走 serve-mcp、LSP 协议走 serve-lsp）调用能力 | 客户端各自项目（Kron 主仓**不**存 VSCode / Cursor 扩展源码；Wails 在 `frontend/` 已被 `.gitignore`） | 客户端**不**直接 import `internal/`；客户端**不**互相 import |
+| **客户端层（Client）** **(2026-10-08 新增, 2026-10-09 修订)** | 客户端 | 给**人**用的 UI（Wails 桌面 / VSCode 扩展 / Cursor / 其他 IDE / Web GUI）；客户端**只**通过**协议访问层之一**（如 VSCode 扩展拼 JSON 走 serve-mcp、LSP 协议走 serve-lsp）调用能力 | Kron 主仓 `frontend/`（2026-10-09 修订：客户端层**进**主仓，不再独立建仓；各客户端代码在 `frontend/` 下各自子目录或 monorepo 模式） | 客户端**不**直接 import `internal/`（走协议访问层）；客户端**不**互相 import |
 
-> **(2026-10-08 变更说明)** 原 §〇·五·1 把 IDE / GUI 当 access layer 看待——**新版图**把 IDE / GUI 提到**客户端层**（它们是"给**人**用的 UI"），而 access layer 收紧到**协议层**（CLI / MCP / LSP 三种 wire protocol）。理由：VSCode 扩展 / Wails / Cursor 等客户端**不是** wire protocol——它们**调用** wire protocol（拼 JSON 走 MCP、用 LSP SDK 走 LSP）；把它们当 access layer 会导致 `internal/` 倒过来被某种客户端 UI 库污染（违反 `internal/` 零外部依赖铁律）。
+> **(2026-10-08 变更, 2026-10-09 修订)** 原 §〇·五·1 把 IDE / GUI 当 access layer 看待——**新版图**把 IDE / GUI 提到**客户端层**（它们是"给**人**用的 UI"），而 access layer 收紧到**协议层**（CLI / MCP / LSP 三种 wire protocol）。2026-10-09 修订：客户端层代码**存**在 Kron 主仓 `frontend/`，不再独立建仓。理由：v1.3 开发阶段主仓放 `frontend/` 让 clone 一次搞定、PR 一个写完、开发体验更顺；协议隔离（客户端走 serve-mcp / serve-lsp，不直接 import `internal/`）仍保证铁律 #1 的 `internal/` 零外部依赖不被污染。
 
 > **不是**"业务逻辑层 vs 访问层"二层——加对象层是因为它解决"什么是数据、什么是规则、什么是协议"这个本质问题。
 > 没对象层做参照，业务层和访问层的边界会塌缩成"反正都在 internal"。
@@ -196,7 +196,7 @@ internal/                        ← 只放底层包，禁止 import 任何协�
 └── parser/                      ← 输入解析（CLI 参数、锚点扫描、相对链接识别）；仅依赖 model
 ```
 
-> **(2026-10-08 变更)** 原"CLI / MCP / LSP / IDE / GUI 五访问层"改为"CLI / MCP / LSP 三协议访问层"。**不**再保留 `cmd/kron/serve-gui/`（GUI 是**客户端层**，不是访问层——独立）**不**在 Kron 主仓存 IDE / Wails / Web 客户端源码（VSCode 扩展独立仓库；Wails 前端在 `frontend/` 已被 `.gitignore`）。
+> **(2026-10-08 变更, 2026-10-09 修订)** 原"CLI / MCP / LSP / IDE / GUI 五访问层"改为"CLI / MCP / LSP 三协议访问层"。**不**再保留 `cmd/kron/serve-gui/`（GUI 是**客户端层**，不是访问层——独立）。2026-10-09 修订：客户端层代码进 Kron 主仓 `frontend/`（`frontend/wails/` + `frontend/vscode/`），**不**再独立建仓。
 
 ### 2.1 依赖图
 
@@ -209,7 +209,7 @@ cmd/kron/main.go ─────┼─► cmd/kron/serve-mcp/   ───► int
                           (v1.3+)             ──────────────────────────► model
 ```
 
-> **客户端层（VSCode 扩展 / Wails / Cursor / 其他 IDE / Web GUI）不**在依赖图里——它们是**外部**项目，独立仓库。客户端层**只**通过协议访问层（CLI 子进程 / serve-mcp stdio JSON-RPC / serve-lsp stdio LSP 协议）调能力。
+> **客户端层（VSCode 扩展 / Wails / Cursor / 其他 IDE / Web GUI）不**在 Go 依赖图里（Go 代码不 import TS/React 客户端）；但**代码存在** Kron 主仓 `frontend/` 下（2026-10-09 修订）。客户端层**只**通过协议访问层（CLI 子进程 / serve-mcp stdio JSON-RPC / serve-lsp stdio LSP 协议）调能力。
 >
 > 一个项目 = 一个 `serve-mcp` 实例（人类用 AI 工具与 GUI 客户端**共用**）；LSP 是**编辑器侧 hover 预览**专用（VSCode 扩展 spawn serve-lsp 子进程拿 `textDocument/hover` / `textDocument/definition`）。
 
@@ -356,7 +356,7 @@ func (s *Store) WriteIntent(caller string, slug string, intent *model.Intent) er
 | `kron lint` `--path` 自定义扫描根 | 全仓 + 黑名单足够 | — |
 | **Wails GUI** (客户端层) | **(2026-10-08 变更) 移到客户端层；多项目概览 + 意图树预览 (轻)，不进 serve-gui 子进程；详细见 [`docs/rfc/2026-10-07-gui-stack.md`](../../docs/rfc/2026-10-07-gui-stack.md) §1.1 (SUPERSEDED) + 待重写 [`docs/rfc/2026-10-08-gui-layer.md`](../../docs/rfc/2026-10-08-gui-layer.md)** | — |
 | **LSP server** (`kron serve-lsp`) | **v1.3+ pending — 见 [`docs/rfc/2026-10-07-lsp-sdk.md`](../../docs/rfc/2026-10-07-lsp-sdk.md) §3 (SUPERSEDED) + 待重写 [`docs/rfc/2026-10-08-lsp-client.md`](../../docs/rfc/2026-10-08-lsp-client.md)** | — |
-| **VSCode 扩展** (客户端层) | **(2026-10-08 变更) 客户端层；拼 JSON 走 serve-mcp (与 AI 共用) + spawn serve-lsp 拿 hover/go-def；独立仓库不进主仓** | — |
+| **VSCode 扩展** (客户端层) | **客户端层；在 Kron 主仓 `frontend/vscode/`；拼 JSON 走 serve-mcp (与 AI 共用) + spawn serve-lsp 拿 hover/go-def** | — |
 | **Cursor / 其他 VSCode 兼容 IDE** | **(2026-10-08 新增) 复用 VSCode 扩展集成；客户端层独立项目** | — |
 | **hard-delete / GC** | 软删除 + `.kron/.trash/` 足够 | — |
 | 新增 CLI flag | — | [`docs/process/cli-flag.md`](../process/cli-flag.md) |

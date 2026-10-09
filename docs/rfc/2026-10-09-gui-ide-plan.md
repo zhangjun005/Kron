@@ -113,7 +113,7 @@
 
 ### 3.3 仓库位置
 
-**独立仓** `github.com/xxx/kron-wails/` (或类似), **不**进 Kron Go 主仓. 进程内 Go ↔ TS 桥 (Wails 自身) + 进程外 Go ↔ Kron 主仓 (stdio 子进程).
+`frontend/wails/` (Kron 主仓). 进程内 Go ↔ TS 桥 (Wails 自身) + 进程外 Go ↔ Kron 主仓 (stdio 子进程).
 
 ---
 
@@ -124,7 +124,7 @@
 | 项 | 选 | 备注 |
 |---|---|---|
 | 分发 | `.vsix` (单包, 多 contribution) | 见 §4.2 |
-| 主仓位置 | 独立仓 `github.com/xxx/kron-ide/` (或类似) | **不**进 Kron Go 主仓 |
+| 主仓位置 | `frontend/vscode/` (Kron 主仓) | **进**主仓 `frontend/` |
 | 跨编辑器 | Cursor 复用 (内核 = VSCode 1.85+) | Neovim / Helix 各**自**写 |
 | 宿主 API | VSCode Extension API (TS) | **不**用 wrapper (如 yo code) |
 | LSP 客户端 | `vscode-languageclient` v9+ (TS) | 事实标准, **不**手写 LSP 协议 |
@@ -206,16 +206,16 @@ VSCode 扩展的 `package.json` `contributes` 字段**同时**声明 LSP / 侧�
 
 ---
 
-## 6 实施位置 (再次强调, 客户端层**不**进主仓)
+## 6 实施位置 (客户端层**进**主仓 `frontend/`)
 
 | 客户端 | 仓库 | 与 Kron Go 主仓关系 |
 |---|---|---|
-| Wails GUI | 独立仓 (e.g. `github.com/xxx/kron-wails/`) | **不**进主仓; 进程内 Wails 桥 + 进程外 stdio `kron serve-mcp` |
-| VSCode 扩展 | 独立仓 (e.g. `github.com/xxx/kron-ide/`) | **不**进主仓; stdio `kron serve-mcp` + `kron serve-lsp` |
-| Cursor 客户端 | 复用 VSCode 扩展 | 直接装同一个 `.vsix` |
+| Wails GUI | `frontend/wails/` (Kron 主仓) | **进**主仓 `frontend/`; 进程内 Go ↔ TS 桥 + 进程外 stdio `kron serve-mcp` |
+| VSCode 扩展 | `frontend/vscode/` (Kron 主仓) | **进**主仓 `frontend/`; stdio `kron serve-mcp` + `kron serve-lsp` |
+| Cursor 客户端 | 复用 `frontend/vscode/` | 直接复用同一套代码 |
 | Neovim / Helix | 各编辑器生态**自**写 | **不**下沉 SDK |
 
-Kron Go 主仓**不**建 `extensions/` 目录, **不**建 `kron-wails/` 目录. `frontend/` 当前是 README 占位 (commit `5864c1a`).
+> Kron Go 主仓 `frontend/` 现在**直接存** Wails + VSCode 扩展源码（2026-10-09 修订：客户端层**进**主仓，不再独立建仓）。各客户端在 `frontend/` 下各自子目录（`frontend/wails/` / `frontend/vscode/`），**不**互相 import。
 
 ---
 
@@ -224,7 +224,7 @@ Kron Go 主仓**不**建 `extensions/` 目录, **不**建 `kron-wails/` 目录. 
 1. **GUI = 整体预览 only**: Wails 端**不**做 hover / def / 补全 / 诊断 / 关系图 (那是 IDE 职责). GUI 调 serve-mcp 走 list/get 类只读工具.
 2. **IDE = 功能最全**: VSCode 扩展装 1 个 .vsix 同时承担 LSP 客户端 + 侧边栏 + 窗口 + 弹窗 + 关系图. IDE 调 serve-mcp 业务 + serve-lsp UI.
 3. **关系图渲染**: 在 VSCode 扩展 webview 内, **不**在 Wails GUI. 走 VSCode webview + shadcn 原生 Chart 组件 (v0.14+) 或按需扩展；**不**预设图表库, spike 验证后拍.
-4. **客户端层不进主仓**: Wails / VSCode 扩展 / Cursor / Neovim / Helix 全部走独立仓或编辑器生态, Kron Go 主仓**不**存.
+4. **客户端层进主仓**: Wails 在 `frontend/wails/`、VSCode 扩展在 `frontend/vscode/`（Kron Go 主仓）；各客户端**不**互相 import。
 5. **shadcn/ui 范围**: Webview (Card / Tabs / Badge / Dialog) + 详情面板 + 弹窗. VSCode 原生 UI 部件 (TreeView / StatusBar / Activity Bar / Editor title menu) **不**用 shadcn.
 
 ---
@@ -243,26 +243,25 @@ Kron Go 主仓**不**建 `extensions/` 目录, **不**建 `kron-wails/` 目录. 
 
 ## 9 实施路径 (拍板后**不**立刻开工, 按 process 走)
 
-按 [`docs/process/new-access-layer.md`](../docs/process/new-access-layer.md) §3 7 个交付物. 客户端层**不**进 Go 主仓, 所以 §3 中"骨架放 `cmd/kron/serve-<layer>/`"这步**不适用**; 改为"独立仓 + 拍板 SDK 选型 + 写 RFC".
+按 [`docs/process/new-access-layer.md`](../docs/process/new-access-layer.md) §3 7 个交付物. 客户端层**进**主仓 `frontend/`, §3 中"骨架放 `cmd/kron/serve-<layer>/`"这步**不适用**; 改为"主仓 `frontend/` 骨架 + 拍板 SDK 选型 + 写 RFC".
 
 ### 9.1 Wails GUI
 
-- [ ] 独立仓 `kron-wails/`
+- [ ] `frontend/wails/` Wails 项目骨架 (`wails init` + React + Vite)
 - [ ] v1.3 启动时开子 RFC: Wails SDK 版本锁定 + shadcn/ui 范围
 - [ ] spike 验证: Wails 起窗口 + 调 `kron serve-mcp` list 工具
 
 ### 9.2 VSCode 扩展
 
-- [ ] 独立仓 `kron-ide/`
+- [ ] `frontend/vscode/` VSCode 扩展项目骨架 (`yo code` + React)
 - [ ] v1.3 启动时开子 RFC: `vscode-languageclient` 版本 + MCP SDK 版本 + shadcn/ui 范围 + 图表库选型 (spike 验证后拍)
 - [ ] spike 验证: 最小 `.vsix` 装在 VSCode F5 host, 侧边栏能调 `kron serve-mcp` list 工具
 
 ### 9.3 不做的事
 
-- ❌ **不**把 Wails / VSCode 扩展代码进 Kron Go 主仓
-- ❌ **不**在 `frontend/` 加任何 Wails / shadcn 实施代码 (本目录是 README 占位)
-- ❌ **不**写跨客户端 SDK 仓 (各客户端各自包, 各自打包)
-- ❌ **不**预设图表库 (关系图走 spike 验证, shadcn Chart 优先)
+- ❌ **不**把客户端代码放 `frontend/` 根目录（各客户端在 `frontend/wails/` / `frontend/vscode/` 子目录）
+- ❌ **不**在 `frontend/` 目录外开发客户端代码（Wails / VSCode 扩展全在 `frontend/` 下）
+- ❌ **不**让 `frontend/wails/` 和 `frontend/vscode/` 互相 import（各是独立子目录）
 
 ---
 
@@ -276,7 +275,7 @@ Kron Go 主仓**不**建 `extensions/` 目录, **不**建 `kron-wails/` 目录. 
 | §2 候选评估 — Wails | ✅ 沿用 (Wails v2 锁定) | |
 | §3 候选评估 — VSCode | ✅ 沿用 (VSCode 扩展 锁定) | |
 | §4 Wails ↔ Go 桥 vs VSCode 扩展 ↔ Go 通信 | ⚠️ 收紧 | 旧版"双路径"松散; 本 RFC §3.2 / §4.5 明确 "GUI 只调 serve-mcp / IDE 调 serve-mcp + serve-lsp" |
-| §5 路径实施先后 (v1.3 / v1.4+) | ⚠️ 重新拍 | 本 RFC 不**排**先后, 按"独立仓 + 子 RFC"走 |
+| §5 路径实施先后 (v1.3 / v1.4+) | ⚠️ 重新拍 | 本 RFC 不**排**先后, 按"主仓 `frontend/` + 子 RFC"走 |
 | §6-§9 实施细节 | ❌ **作废** | 走 v1.3 子 RFC 重写 |
 | §10 顺修表 (architecture / mcp.md 行号) | ❌ **作废** | architecture 已 2026-10-08 改完, mcp.md 已 2026-10-09 归档 |
 

@@ -1,69 +1,61 @@
-# frontend/ — Kron 客户端层占位（Wails v1.3+ 启动时启用）
+# frontend/ — Kron 客户端层（2026-10-09 修订：客户端层进主仓）
 
-> 本目录是 v1.3+ Wails GUI 客户端的**占位**。当前 v1 / v1.2 阶段**不**启用，
-> 按 [`docs/abstractDesign/architecture.md`](../docs/abstractDesign/architecture.md) §〇 铁律 #9 + §〇·五·1，
-> 客户端层**不**进 Kron Go 主仓——本目录是**最小**占位，Wails 项目**启动时**再填实。
+> 2026-10-09 修订：客户端层代码**进** Kron 主仓 `frontend/`（不再独立建仓）。
+> 各客户端在 `frontend/` 下各自子目录，不互相 import。
+>
+> 架构依据：[`docs/abstractDesign/architecture.md`](../docs/abstractDesign/architecture.md)
+> §〇 铁律 #9 + §〇·五·1（2026-10-09 修订版）。
 
-## 为什么是占位（不是 v1 必需）
-
-按 architecture §〇·五·1 表格：
-
-| 层 | 仓库位置 |
-|---|---|
-| 对象层 | `internal/model/` |
-| 业务层 | `internal/{store,parser,lint,...}` |
-| **协议访问层** | `cmd/kron/{cli,serve-mcp,serve-lsp}/` |
-| **客户端层** | **外部**（VSCode 扩展 / Wails / Cursor / Web GUI）|
-
-Kron **主仓**只 commit 3 个协议访问层 + 业务层 + 对象层。客户端层 (Wails、VSCode 扩展、Cursor 客户端) **不**进主仓——这是**架构铁律**。
-
-**所以**：
-
-- 本目录**不**是"将来要开发的 Wails 代码"——`frontend/` 的实际内容（Go Wails 后端 + TS shadcn 前端）会**单独**放在一个**独立**仓（按 `docs/process/new-access-layer.md` §3 + 客户端层定义），与 Kron Go 主仓解耦。
-- 本目录**仅**作为**视觉占位** + 提醒"v1.3 启动时启用 Wails"。
-
-## 占位内容（本目录现状）
-
-- `README.md`（本文件）—— 唯一文件
-- 未来**不**会**自动**填代码
-
-## v1.3 启动时该做什么
-
-按 architecture §〇·五·2 + `docs/process/new-access-layer.md`：
-
-1. **开 RFC** [`docs/rfc/`](../docs/rfc/)：Wails SDK 选型 / 多项目 GUI 形态 / 意图树预览组件 / 与 serve-mcp 实例复用模式。
-2. RFC 拍板后**单独建仓** `github.com/xxx/kron-wails`（或类似），不在主仓开发。
-3. **Wails 进程**通过 stdio 子进程调 `kron serve-mcp`（与 AI 客户端**共用**同一个 serve-mcp 实例——见 `docs/rfc/2026-10-08-mcp-lifecycle.md` §6.1 拍板的"一个项目一个 MCP 实例"）。
-4. Wails **不**直接 import `internal/`——只走 serve-mcp JSON-RPC，符合铁律 #9。
-5. Wails 轻量职责：多项目概览 + 意图树预览（按 architecture §七 "范围外" 描述：Wails = 轻量，不重复造 HTTP 端）。
-
-## 与 `.gitignore` 的关系
-
-`.gitignore` 第 28-30 行：
+## 目录结构
 
 ```
-# Frontend (will be reintroduced when GUI phase starts)
+frontend/
+├── README.md         (本文件)
+├── wails/            # Wails GUI (整体预览)
+│   └── ...           # wails init + React + Vite + shadcn/ui
+└── vscode/           # VSCode 扩展 (功能最全)
+    └── ...           # yo code + React + shadcn/ui + vscode-languageclient
+```
+
+## 各客户端职责
+
+按 [`docs/rfc/2026-10-09-gui-ide-plan.md`](../docs/rfc/2026-10-09-gui-ide-plan.md) §3/§4：
+
+| 客户端 | 职责 | 调用方式 |
+|---|---|---|
+| **Wails** (`frontend/wails/`) | 整体预览 (多项目概览 + 意图树预览 + 状态条)；**不**做 hover/def/补全/诊断/关系图 | 进程外 stdio `kron serve-mcp` 拼 JSON (list/get/read 类只读工具) |
+| **VSCode 扩展** (`frontend/vscode/`) | 功能最全 (hover/def/侧边栏/详情面板/弹窗/关系图)；编辑器生命周期内所有 kron 能力全聚合 | 进程外 stdio `kron serve-mcp` (业务) + `kron serve-lsp` (编辑器 UI 集成) |
+
+## 关键边界
+
+- **`frontend/wails/` 和 `frontend/vscode/` 不互相 import** — 铁律 #9 约束
+- **`frontend/wails/` 不直接 import `internal/`** — 只走 `kron serve-mcp` stdio
+- **`frontend/vscode/` 不直接 import `internal/`** — 只走 `kron serve-mcp` + `kron serve-lsp`
+- **图表**: VSCode webview 内走 shadcn 原生 `<Chart>` (v0.14+) 或 spike 验证后按需扩展
+
+## `.gitignore` 已覆盖
+
+```
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/vscode/out/
+frontend/vscode/node_modules/
+frontend/wails/node_modules/
+frontend/wails/dist/
+frontend/wails/.vite/
 ```
 
-Wails 项目**实际**的 node_modules / dist / .vite 输出**会**进 `frontend/`，**但**与本 README 的"占位"模式**不冲突**——本目录 v1.3+ 启用 Wails 后**整体迁移**到独立仓。
+构建产物（node_modules / dist / .vite / VSCode out/）已全部 .gitignore，不会污染 git。
 
-## 与 Wails SDK 选型的关系
+## v1.3 启动时做什么
 
-`docs/abstractDesign/architecture.md` 提到"v1.3+ GUI 选 Wails"，但**具体 SDK 锁定 RFC 还未开**（`docs/rfc/2026-10-07-gui-stack.md` 已归档 SUPERSEDED，状态待重写）。本目录**不**预设任何技术选型。
+按 [`docs/rfc/2026-10-09-gui-ide-plan.md`](../docs/rfc/2026-10-09-gui-ide-plan.md) §9：
 
-## 不在本占位范围
+1. `frontend/wails/` — `wails init` + React + Vite + shadcn/ui；spike 验证调 `kron serve-mcp` list 工具
+2. `frontend/vscode/` — `yo code` + React + shadcn/ui + `vscode-languageclient`；spike 验证侧边栏能调 `kron serve-mcp`
+3. shadcn 图表组件够不够用 → spike 验证后拍
 
-- ❌ **不**预设 Wails 版本
-- ❌ **不**预设前端框架（shadcn/ui 是 architecture.md 提到的候选，但**未**拍板）
-- ❌ **不**写任何 Go Wails 后端代码
-- ❌ **不**写任何 TypeScript / React / Vite 代码
-- ❌ **不**改 `.gitignore` 把 `frontend/` 整体 ignore——本目录是占位，README 应**进** git
+## 不在 `frontend/` 根目录放代码
 
-## 与 LSP 占位的关系
-
-- LSP 协议访问层 = `cmd/kron/serve-lsp/` (3-of-3 协议访问层，**在主仓**)
-- LSP 客户端 = VSCode 扩展 / Cursor / Neovim 客户端，**不在主仓**——按 §〇 铁律 #9 客户端层不存主仓
-- Wails 客户端 = 同上，**不在主仓**——本目录是占位，**不**是实施起点
+各客户端代码**不**放 `frontend/` 根目录，全在 `frontend/wails/` / `frontend/vscode/` 子目录。

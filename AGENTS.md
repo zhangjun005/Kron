@@ -119,26 +119,24 @@ PR 含: 测试 + `docs/` 同步 (真理改 → `abstractDesign/`; 流程改 → 
 - IDE **不**做项目管理 (那是 GUI 职责)
 - 同一个项目可以**同时**有 GUI 实例 (Wails) + IDE 实例 (VSCode) + AI 工具实例 (Claude MCP), **各自**调**各自**需要的协议访问层子进程, **互不**通讯, 互不锁
 
-### 7.2 实施位置 (主仓**不**存)
+### 7.2 实施位置 (客户端层**进**主仓 `frontend/`)
 
 | 客户端 | 仓库 | 与 Kron Go 主仓关系 |
 |---|---|---|
-| VSCode 扩展 | 独立仓 (`extensions/vscode-kron/` 或类似) | **不**进主仓 (architecture §0 铁律 #9); 通过 stdio 子进程调 `kron serve-mcp` + `kron serve-lsp` |
-| Wails GUI | 独立仓 (`kron-wails/` 或类似) | **不**进主仓; 进程内 Go ↔ TS 桥, 拼 JSON 调 `kron serve-mcp` |
-| Cursor 客户端 | 复用 VSCode 扩展 | Cursor **不**需要单独扩展; 复用 VSCode extension LSP / MCP 集成 |
-| Neovim / Helix | 各编辑器生态**自**写 | **不**下沉到 Kron 仓库; 各自实现 LSP client (lspconfig / 内置 LSP) |
+| VSCode 扩展 | `frontend/extensions/vscode/` 或类似 (Kron 主仓) | **进**主仓 `frontend/`；通过 stdio 子进程调 `kron serve-mcp` + `kron serve-lsp` |
+| Wails GUI | `frontend/wails/` 或类似 (Kron 主仓) | **进**主仓 `frontend/`；进程内 Go ↔ TS 桥，拼 JSON 调 `kron serve-mcp` |
+| Cursor 客户端 | 复用 VSCode 扩展 | Cursor **不**需要单独扩展；复用同一套代码 |
+| Neovim / Helix | 各编辑器生态**自**写 | **不**下沉到 Kron 仓库；各自实现 LSP client (lspconfig / 内置 LSP) |
 
 ### 7.3 客户端 SDK 选型 (拍板约束)
 
-- **VSCode 扩展**: 用 `vscode-languageclient` (TypeScript, 事实标准) 处理 LSP; MCP 客户端**用 SDK** (`@modelcontextprotocol/sdk` 或 VSCode 1.85+ 内置 MCP 客户端) **不**手写 JSON-RPC. UI 渲染走 VSCode Webview API + 任意前端框架 (React / Svelte / Vue 自由).
-- **Wails GUI**: 走 Wails 自身 React/Svelte 绑定; 拼 JSON 调 `kron serve-mcp`.
-- **LSP server SDK 锁定**: `go.lsp.dev/protocol v3.17+` (RFC `2026-10-07-lsp-sdk.md` §3). 加 dep 走 explicit approval (AGENTS.md §3 红线).
+- **VSCode 扩展**: 用 `vscode-languageclient` (TypeScript, 事实标准) 处理 LSP; MCP 客户端**用 SDK** (`@modelcontextprotocol/sdk` 或 VSCode 1.85+ 内置 MCP 客户端) **不**手写 JSON-RPC. UI 渲染走 VSCode Webview API + React + shadcn/ui.
+- **Wails GUI**: Wails v2 + Go ↔ TS 桥 (React + shadcn/ui); 拼 JSON 调 `kron serve-mcp`.
+- **图表**: VSCode webview 内走 shadcn 原生 `<Chart>` (v0.14+) 或 spike 验证后按需扩展.
+- **LSP server SDK 锁定**: `go.lsp.dev/protocol v3.17+` (RFC `2026-10-07-lsp-sdk.md` §3). 加 Go dep 走 explicit approval (AGENTS.md §3 红线).
 
-### 7.4 不在 Kron Go 仓库范围内
+### 7.4 客户端层代码约束
 
-- ❌ **不**在主仓建 `extensions/vscode-kron/`
-- ❌ **不**在主仓实装 Wails 代码 (Go 端或 TS 端)
-- ❌ **不**给 IDE 客户端写**任何** TypeScript 代码
-- ❌ **不**在 `frontend/` 加**任何** 实施代码 (本目录是 README 占位, 见 [`frontend/README.md`](../frontend/README.md))
+- ⚠️ **不**在 `frontend/` 根目录放代码（各客户端在 `frontend/` 下各自子目录，如 `frontend/vscode/` / `frontend/wails/`）
 
 v1.3 启动时按 [`docs/process/new-access-layer.md`](../docs/process/new-access-layer.md) §3 + 客户端 RFC 拍板. **不**是 Kron Go 主仓的范畴.
