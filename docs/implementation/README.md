@@ -50,11 +50,12 @@
 任何新 `internal/` API、新 MCP 工具、新 lint 规则落地时，**先**改 `internal/*` 代码 + 测，
 **然后**按需重写 `docs/implementation/<topic>.md`（不走本 README——本 README 只起"已归档"提示作用）。
 
-## 客户端层与 LSP 协议访问层（v1.3+ 待重写）
+## 客户端层与 LSP 协议访问层（待写）
 
 | 文档 | 状态 | 触发条件 |
 |---|---|---|
-| `lsp.md` (LSP 协议实现细节) | 🔜 v1.3 待写 | `cmd/kron/serve-lsp/` 实施时（按 `docs/process/new-access-layer.md` §3 交付物 2 + 5）|
+| `lsp.md` (LSP 协议实现细节) | 🔜 待写 | `cmd/kron/serve-lsp/` 实施时（按 `docs/process/new-access-layer.md` §3 交付物 2 + 5）|
 | `vscode-extension.md` (VSCode 扩展) | 📦 内部 (`frontend/vscode/`) | 2026-10-09 修订：客户端层进主仓 `frontend/` |
 | `gui.md` / `wails.md` (Wails GUI) | 📦 内部 (`frontend/wails/`) | 2026-10-09 修订：`frontend/` 不再是纯占位，实施代码在 `frontend/wails/` |
-| `mcp.md` (MCP 协议实现细节) | 🔜 待重写 | 与 `lsp.md` 同批——MCP 工具加到 13+ 时需要重写（见 v1.3+ `kron_assumption_*` 工具候选）|
+| `mcp.md` (MCP 协议实现细节) | 🔜 待重写 | 与 `lsp.md` 同批——按 `docs/process/new-internal-api.md` 流程触发 |
+| `status-2026-10-09.md` (现状快照) | ✅ 活跃 | internal + CLI/MCP/LSP 适配情况 + 协议层硬约束；user 2026-10-09 拍板 |

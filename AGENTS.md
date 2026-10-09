@@ -139,4 +139,4 @@ PR 含: 测试 + `docs/` 同步 (真理改 → `abstractDesign/`; 流程改 → 
 
 - ⚠️ **不**在 `frontend/` 根目录放代码（各客户端在 `frontend/` 下各自子目录，如 `frontend/vscode/` / `frontend/wails/`）
 
-v1.3 启动时按 [`docs/process/new-access-layer.md`](../docs/process/new-access-layer.md) §3 + 客户端 RFC 拍板. **不**是 Kron Go 主仓的范畴.
+具体实施路径走 [`docs/process/new-access-layer.md`](../process/new-access-layer.md) §3 + 客户端 RFC 拍板。

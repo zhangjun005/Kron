@@ -43,9 +43,7 @@ internal/ API 改动 PR 必填 §"调用方清单" / §"RFC 链接"
 
 - [ ] `cmd/kron/cli/`
 - [ ] `cmd/kron/serve-mcp/`
-- [ ] `cmd/kron/serve-lsp/` (v1.3+ pending)
-- [ ] `cmd/kron/serve-gui/` (v1.3+ pending)
-- [ ] `cmd/kron/serve-ide/` (不在 v1+ 必需范围)
+- [ ] `cmd/kron/serve-lsp/` (3-of-3 协议访问层, 当前 stub; 实施按 `docs/rfc/2026-10-07-lsp-sdk.md` + `docs/rfc/2026-10-08-lsp-client.md`)
 - [ ] **不适用** (本 PR 不动访问层 — 解释: ____)
 
 ## internal/ 接口面 (新加 / 改 API 时必填)
@@ -75,8 +73,7 @@ internal/ API 改动 PR 必填 §"调用方清单" / §"RFC 链接"
 |---|---|
 | `cmd/kron/cli/` | ✅ / 🚧 / 📅 / N/A |
 | `cmd/kron/serve-mcp/` | ✅ / 🚧 / 📅 / N/A |
-| `cmd/kron/serve-lsp/` (v1.3+ pending) | ✅ / 🚧 / 📅 / N/A |
-| `cmd/kron/serve-gui/` (v1.3+ pending) | ✅ / 🚧 / 📅 / N/A |
+| `cmd/kron/serve-lsp/` (stub; 实施按 LSP RFC 拍板) | ✅ / 🚧 / 📅 / N/A |
 
 ## 文档同步声明 (S6 必填)
 

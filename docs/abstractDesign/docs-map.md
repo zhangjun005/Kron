@@ -175,7 +175,7 @@ A (requirements.md)  ──►  D (business.md)  ──►  B (architecture.md)
 | **F** | `docs/implementation/ide-interaction.md` | B (→ **2026-10-09 归档**, serve-lsp 标"未实施"但能力混淆) |
 | **F** | `docs/implementation/mcp.md` | B (→ **2026-10-09 归档**, references 标 v1.2+ 但已在 v1 frontmatter) |
 | **F** | `docs/implementation/testing.md` | B (→ **2026-10-09 归档**, CI 表缺 go vet) |
-| **F** | `docs/implementation/lsp.md` | B (→ **2026-10-09 归档**; 重写待 v1.3 启动, 见 `docs/process/new-access-layer.md` §3 交付物 2 + 5) |
+| **F** | `docs/implementation/lsp.md` | B (→ **2026-10-09 归档**; 重写触发: `cmd/kron/serve-lsp/` 实施时, 按 `docs/process/new-access-layer.md` §3 交付物 2 + 5) |
 | **G** | `docs/process/cli-flag.md` | B |
 | **G** | `docs/process/internal-pkg.md` | B |
 | **G** | `docs/process/lint-rule.md` | B |
@@ -200,7 +200,7 @@ A (requirements.md)  ──►  D (business.md)  ──►  B (architecture.md)
 >
 > **2026-10-09 实施参考归档**: 8 份 `docs/implementation/*` 文档 (api-surface / cli / domain-model / error-catalog / ide-interaction / lsp / mcp / testing) 移入 [`.deprecated/2026-10-09-process-cleanup/`](../../.deprecated/2026-10-09-process-cleanup/). 原因: 内部 API 表面已大改, 旧描述严重过时. 详见 `docs/implementation/README.md` (已改为"已归档"banner). 重写待 `docs/process/new-internal-api.md` 流程触发.
 >
-> **2026-10-09 LSP/客户端层初始化**: `cmd/kron/serve-lsp/` (3-of-3 协议访问层骨架, 包 `lsp`, **不**含 go.lsp.dev/protocol — 该 dep 仍需 explicit approval) + `frontend/` (客户端层实施目录, 2026-10-09 修订: **进主仓**, 各客户端在 `frontend/wails/` / `frontend/vscode/` 子目录; 不再是 README 占位). v1.3 启动时由 `docs/process/new-access-layer.md` §3 流程接管.
+> **2026-10-09 LSP/客户端层初始化**: `cmd/kron/serve-lsp/` (3-of-3 协议访问层骨架, 包 `lsp`, **不**含 go.lsp.dev/protocol — 该 dep 仍需 explicit approval) + `frontend/` (客户端层实施目录, 2026-10-09 修订: **进主仓**, 各客户端在 `frontend/wails/` / `frontend/vscode/` 子目录; 不再是 README 占位). LSP 实施 + 客户端骨架填充由 `docs/process/new-access-layer.md` §3 流程触发, **不**预排"v1.x 阶段".
 >
 > **2026-10-09 客户端方案 RFC**: [`docs/rfc/2026-10-09-gui-ide-plan.md`](../rfc/2026-10-09-gui-ide-plan.md) 新建 (草案). 拍板 GUI = Wails 整体预览 only / IDE = VSCode 扩展功能最全 (LSP+sidebar+webview) / 关系图走 shadcn 原生 Chart (v0.14+) / **客户端层进主仓 `frontend/`** (2026-10-09 修订: 不再独立建仓, 各客户端在 `frontend/wails/` / `frontend/vscode/` 子目录). 旧 RFC `2026-10-07-gui-stack.md` 头部状态**保留** SUPERSEDED.
 

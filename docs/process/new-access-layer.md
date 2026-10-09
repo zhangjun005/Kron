@@ -168,8 +168,8 @@
 ## 8 待补 (后续 chat 写)
 
 - `docs/implementation/mcp.md` (现有 MCP 文档, **§1 工具清单 / §2 工具契约 / §3 底层实现** 已写, 12 工具 v1 已实开; 新加 tool 走 [`docs/process/mcp-tool.md`](mcp-tool.md); 协议层 (`initialize` / `tools/list` / `ping`) 已通过 MCP 官方 SDK (`mcp-go`) 自动实现, **不**需要手动维护, 见 [`docs/rfc/2026-10-04-mcp-sdk-selection.md`](../rfc/2026-10-04-mcp-sdk-selection.md))
-- `docs/implementation/lsp.md` (新文件, v1.3+ — 见 [`docs/rfc/2026-10-07-lsp-sdk.md`](../rfc/2026-10-07-lsp-sdk.md))
-- `docs/implementation/gui.md` (新文件, v1.3+ Wails 主 / v1.4+ VSCode 扩展副 — 见 [`docs/rfc/2026-10-07-gui-stack.md`](../rfc/2026-10-07-gui-stack.md))
-- `docs/implementation/vscode-extension.md` (新文件, v1.4+)
+- `docs/implementation/lsp.md` (新文件, LSP 协议层 — 见 [`docs/rfc/2026-10-07-lsp-sdk.md`](../rfc/2026-10-07-lsp-sdk.md))
+- `docs/implementation/gui.md` (新文件, Wails GUI — 见 [`docs/rfc/2026-10-09-gui-ide-plan.md`](../rfc/2026-10-09-gui-ide-plan.md))
+- `docs/implementation/vscode-extension.md` (新文件, VSCode 扩展 — 见 [`docs/rfc/2026-10-09-gui-ide-plan.md`](../rfc/2026-10-09-gui-ide-plan.md))
 - `.github/pull_request_template.md` (本文件 §5.2 引用, 仓库**已**建)
 - `CODEOWNERS` (本文件 §5.3 引用, 仓库**已**建)

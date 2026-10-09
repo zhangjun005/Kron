@@ -94,7 +94,7 @@ func parseFrontmatterInternal(...)                     // 私有
 | 调用方 | 是否本 PR 内 | 链接 |
 |---|---|---|
 | `cmd/kron/serve-mcp` | 是 / 否 | <PR 链接> |
-| `cmd/kron/serve-lsp` (v1.3+ pending) | 是 / 否 / 不适用 | — |
+| `cmd/kron/serve-lsp` (stub, 3-of-3 协议访问层骨架) | 是 / 否 / 不适用 | — |
 
 ## RFC 链接 (≥ 2 个调用方时必填)
 [docs/rfc/<YYYY-MM-DD>-internal-<api>.md](path)

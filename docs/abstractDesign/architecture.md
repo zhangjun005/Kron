@@ -355,7 +355,7 @@ func (s *Store) WriteIntent(caller string, slug string, intent *model.Intent) er
 | `kron add` stdin / 外部模板支持 | 脚手架职责，复杂输入留给编辑器或 GUI | — |
 | `kron lint` `--path` 自定义扫描根 | 全仓 + 黑名单足够 | — |
 | **Wails GUI** (客户端层) | **(2026-10-08 变更) 移到客户端层；多项目概览 + 意图树预览 (轻)，不进 serve-gui 子进程；详细见 [`docs/rfc/2026-10-07-gui-stack.md`](../../docs/rfc/2026-10-07-gui-stack.md) §1.1 (SUPERSEDED) + 待重写 [`docs/rfc/2026-10-08-gui-layer.md`](../../docs/rfc/2026-10-08-gui-layer.md)** | — |
-| **LSP server** (`kron serve-lsp`) | **v1.3+ pending — 见 [`docs/rfc/2026-10-07-lsp-sdk.md`](../../docs/rfc/2026-10-07-lsp-sdk.md) §3 (SUPERSEDED) + 待重写 [`docs/rfc/2026-10-08-lsp-client.md`](../../docs/rfc/2026-10-08-lsp-client.md)** | — |
+| **LSP server** (`kron serve-lsp`) | **stub (3-of-3 协议访问层骨架, 包 `lsp`); 实施按 [`docs/rfc/2026-10-07-lsp-sdk.md`](../../docs/rfc/2026-10-07-lsp-sdk.md) §3 + [`docs/rfc/2026-10-08-lsp-client.md`](../../docs/rfc/2026-10-08-lsp-client.md) 拍板; 加 `go.lsp.dev/protocol` 走 explicit approval** | — |
 | **VSCode 扩展** (客户端层) | **客户端层；在 Kron 主仓 `frontend/vscode/`；拼 JSON 走 serve-mcp (与 AI 共用) + spawn serve-lsp 拿 hover/go-def** | — |
 | **Cursor / 其他 VSCode 兼容 IDE** | **(2026-10-08 新增) 复用 VSCode 扩展集成；客户端层独立项目** | — |
 | **hard-delete / GC** | 软删除 + `.kron/.trash/` 足够 | — |

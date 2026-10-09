@@ -248,13 +248,13 @@ VSCode 扩展的 `package.json` `contributes` 字段**同时**声明 LSP / 侧�
 ### 9.1 Wails GUI
 
 - [ ] `frontend/wails/` Wails 项目骨架 (`wails init` + React + Vite)
-- [ ] v1.3 启动时开子 RFC: Wails SDK 版本锁定 + shadcn/ui 范围
+- [ ] 子 RFC: Wails SDK 版本锁定 + shadcn/ui 范围
 - [ ] spike 验证: Wails 起窗口 + 调 `kron serve-mcp` list 工具
 
 ### 9.2 VSCode 扩展
 
 - [ ] `frontend/vscode/` VSCode 扩展项目骨架 (`yo code` + React)
-- [ ] v1.3 启动时开子 RFC: `vscode-languageclient` 版本 + MCP SDK 版本 + shadcn/ui 范围 + 图表库选型 (spike 验证后拍)
+- [ ] 子 RFC: `vscode-languageclient` 版本 + MCP SDK 版本 + shadcn/ui 范围 + 图表库选型 (spike 验证后拍)
 - [ ] spike 验证: 最小 `.vsix` 装在 VSCode F5 host, 侧边栏能调 `kron serve-mcp` list 工具
 
 ### 9.3 不做的事

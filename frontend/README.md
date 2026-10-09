@@ -48,13 +48,9 @@ frontend/wails/.vite/
 
 构建产物（node_modules / dist / .vite / VSCode out/）已全部 .gitignore，不会污染 git。
 
-## v1.3 启动时做什么
+## 启动时做什么
 
-按 [`docs/rfc/2026-10-09-gui-ide-plan.md`](../docs/rfc/2026-10-09-gui-ide-plan.md) §9：
-
-1. `frontend/wails/` — `wails init` + React + Vite + shadcn/ui；spike 验证调 `kron serve-mcp` list 工具
-2. `frontend/vscode/` — `yo code` + React + shadcn/ui + `vscode-languageclient`；spike 验证侧边栏能调 `kron serve-mcp`
-3. shadcn 图表组件够不够用 → spike 验证后拍
+按 [`docs/rfc/2026-10-09-gui-ide-plan.md`](../rfc/2026-10-09-gui-ide-plan.md) §9.1 / §9.2。**不**预排"v1.x 阶段"——`frontend/wails/` + `frontend/vscode/` 的具体填充节奏由 user 拍板，按 `docs/process/new-access-layer.md` §3 走。
 
 ## 不在 `frontend/` 根目录放代码
 
