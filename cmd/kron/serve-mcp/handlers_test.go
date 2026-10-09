@@ -223,6 +223,49 @@ func TestAdd_InvalidSlug(t *testing.T) {
 	assert.True(t, res.IsError, "invalid slug must fail")
 }
 
+// TestAdd_NodeKind covers RFC 2026-10-08-writer-readme-symmetry §3.5:
+// the MCP kron_add tool must accept a "kind" field that selects
+// the on-disk physical form, and must return the path the file
+// actually landed at (not the canonical <slug>.md).
+func TestAdd_NodeKind(t *testing.T) {
+	dir := initRepo(t)
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_add",
+		Arguments: map[string]any{"slug": "auth", "kind": "node"},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "kron_add with kind=node must succeed")
+	var r AddOutput
+	require.NoError(t, structuredInto(res, &r))
+	assert.True(t, r.OK)
+	assert.Equal(t, ".kron/intents/auth/README.md", r.Path,
+		"kind=node must report the README path, not the canonical <slug>.md")
+
+	// File on disk is the README.
+	_, err = os.Stat(filepath.Join(dir, ".kron/intents/auth/README.md"))
+	assert.NoError(t, err)
+	// Canonical <slug>.md must NOT exist.
+	_, err = os.Stat(filepath.Join(dir, ".kron/intents/auth.md"))
+	assert.True(t, os.IsNotExist(err), "kind=node must not write <slug>.md")
+}
+
+// TestAdd_InvalidKind verifies the schema-side validation:
+// unknown kind values fail the call rather than silently falling
+// back to leaf.
+func TestAdd_InvalidKind(t *testing.T) {
+	dir := initRepo(t)
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_add",
+		Arguments: map[string]any{"slug": "auth", "kind": "tree"},
+	})
+	require.NoError(t, err)
+	assert.True(t, res.IsError, "unknown kind must fail")
+}
+
 func TestAdd_NotInitialised(t *testing.T) {
 	dir := t.TempDir()
 	ts := newTestSession(t, dir)

@@ -287,8 +287,12 @@ func TestNewReader_Errors(t *testing.T) {
 
 // README-as-intent shorthand (RFC 2026-10-08-intent-tree-api.md §3.1, A1):
 // a file like "auth/README.md" is loadable via the slug "auth", not
-// "auth/README". The walk layer collapses the slug and the load
-// layer resolves it through model.IntentPath("auth") = ".kron/intents/auth/README.md".
+// "auth/README". The walk layer collapses the slug to "auth", and
+// the load layer resolves it through Reader.resolveIntentPath →
+// resolveReadPath (in paths.go) which tries "<slug>.md" first
+// and falls back to "<slug>/README.md". Note that model.IntentPath
+// is a pure string concat that does NOT know about the shorthand;
+// the mapping is entirely in the store package.
 
 func TestReader_LoadAll_READMEShorthand_SingleLevel(t *testing.T) {
 	dir := t.TempDir()

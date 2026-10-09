@@ -136,6 +136,95 @@ func TestRunAdd_RejectsDuplicate(t *testing.T) {
 	assert.Contains(t, errOut.String(), "already exists")
 }
 
+// TestRunAdd_NodeKind verifies --kind node writes <slug>/README.md
+// (not <slug>.md). This is the user-visible face of RFC
+// 2026-10-08-writer-readme-symmetry §3.4: "kron add auth --kind node"
+// must produce a module-level node intent the reader can resolve.
+func TestRunAdd_NodeKind(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	var out, errOut bytes.Buffer
+	require.NoError(t, runInit(nil, &out, &errOut))
+
+	require.NoError(t, runAdd([]string{"-created-by", "@t", "-kind", "node", "auth"}, &out, &errOut))
+
+	// Canonical <slug>.md must NOT exist.
+	_, err := os.Stat(filepath.Join(dir, ".kron", "intents", "auth.md"))
+	assert.True(t, os.IsNotExist(err), "kron add --kind node must not write <slug>.md")
+
+	// Node form <slug>/README.md must exist.
+	body, err := os.ReadFile(filepath.Join(dir, ".kron", "intents", "auth", "README.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "auth")
+
+	// Output must mention the README path, not the .md path.
+	assert.Contains(t, out.String(), "README.md")
+}
+
+// TestRunAdd_DefaultKindIsLeaf verifies that omitting --kind
+// preserves the v1 behaviour: write <slug>.md.
+func TestRunAdd_DefaultKindIsLeaf(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	var out, errOut bytes.Buffer
+	require.NoError(t, runInit(nil, &out, &errOut))
+
+	require.NoError(t, runAdd([]string{"-created-by", "@t", "billing"}, &out, &errOut))
+
+	_, err := os.Stat(filepath.Join(dir, ".kron", "intents", "billing.md"))
+	assert.NoError(t, err, "default kind must write <slug>.md")
+}
+
+// TestRunAdd_RejectsBadKind verifies --kind accepts only leaf|node.
+func TestRunAdd_RejectsBadKind(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	var out, errOut bytes.Buffer
+	require.NoError(t, runInit(nil, &out, &errOut))
+
+	err := runAdd([]string{"-kind", "tree", "foo"}, &out, &errOut)
+	require.Error(t, err)
+	assert.Contains(t, errOut.String(), "invalid --kind")
+}
+
+// TestRunAdd_ParentMustExist verifies --parent enforces that
+// the named parent slug is already a known intent.
+func TestRunAdd_ParentMustExist(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	var out, errOut bytes.Buffer
+	require.NoError(t, runInit(nil, &out, &errOut))
+
+	// Create the parent first.
+	require.NoError(t, runAdd([]string{"-created-by", "@t", "-kind", "node", "auth"}, &out, &errOut))
+
+	// Now a child under the parent should succeed.
+	out.Reset()
+	errOut.Reset()
+	require.NoError(t, runAdd([]string{"-created-by", "@t", "-parent", "auth", "auth/jwt"}, &out, &errOut))
+
+	// And without --parent, the same child via slug form should also work
+	// (slug "auth/jwt" implicitly puts it under auth/).
+	out.Reset()
+	errOut.Reset()
+	require.NoError(t, runAdd([]string{"-created-by", "@t", "auth/password"}, &out, &errOut))
+}
+
+// TestRunAdd_ParentMissingFails verifies --parent errors when
+// the named parent slug has not been created yet.
+func TestRunAdd_ParentMissingFails(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	var out, errOut bytes.Buffer
+	require.NoError(t, runInit(nil, &out, &errOut))
+
+	err := runAdd([]string{"-parent", "ghost", "billing"}, &out, &errOut)
+	require.Error(t, err)
+	assert.Contains(t, errOut.String(), "parent intent")
+	assert.Contains(t, errOut.String(), "ghost")
+	assert.Contains(t, errOut.String(), "does not exist")
+}
+
 func TestRunLint_NoIntents(t *testing.T) {
 	dir := t.TempDir()
 	chdir(t, dir)
@@ -178,7 +267,11 @@ func TestRunLint_CleanAfterAdd(t *testing.T) {
 	chdir(t, dir)
 	var out, errOut bytes.Buffer
 	require.NoError(t, runInit(nil, &out, &errOut))
-	// Scaffold an intent AND a matching anchor in source.
+	// Scaffold a parent node intent AND a child leaf intent, plus
+	// a matching anchor in source. The parent node anchors the
+	// "auth" directory so the new intent-orphan-under-no-node
+	// rule does not fire.
+	require.NoError(t, runAdd([]string{"-created-by", "@t", "--kind", "node", "auth"}, &out, &errOut))
 	require.NoError(t, runAdd([]string{"-created-by", "@t", "auth/refresh"}, &out, &errOut))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "x.go"),

@@ -117,11 +117,17 @@ type AddInput struct {
 	Slug   string `json:"slug"             jsonschema:"kebab-case slug (must pass parser.ValidateSlug)"`
 	Symbol string `json:"symbol,omitempty" jsonschema:"optional single symbol to populate Frontmatter.Symbol[0]"`
 	Why    string `json:"why,omitempty"    jsonschema:"optional scaffold body, appended under ## Why"`
+	// Kind selects the on-disk physical form. Empty or "leaf" (default)
+	// writes <slug>.md; "node" writes <slug>/README.md (a module-level
+	// node intent that can co-exist with child leaf intents). Mirrors
+	// the kron add CLI --kind flag — see RFC
+	// 2026-10-08-writer-readme-symmetry §3.5.
+	Kind string `json:"kind,omitempty" jsonschema:"on-disk form: \"leaf\" (default) or \"node\""`
 }
 
 type AddOutput struct {
 	OK   bool   `json:"ok"   jsonschema:"true on success"`
-	Path string `json:"path" jsonschema:"relative path to the written intent file"`
+	Path string `json:"path" jsonschema:"relative path to the written intent file (.kron/intents/<slug>.md for leaf; .kron/intents/<slug>/README.md for node)"`
 }
 
 // --- kron_update ------------------------------------------------------

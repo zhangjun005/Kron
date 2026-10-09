@@ -285,6 +285,14 @@ func RunWith(ctx context.Context, root string, opts RunOptions) ([]Diag, error) 
 	}
 	diags = append(diags, runAssumptionRules(intents, arReader, opts)...)
 
+	// T-class: tree-shape rules (RFC 2026-10-08-writer-readme-symmetry
+	// §5). Runs AFTER the intents are loaded so Kind is already
+	// backfilled (store.Reader.Load now sets Intent.Kind from
+	// SourcePath). Currently a single rule; the wrapper exists
+	// so future tree-shape rules can drop in without changing
+	// RunWith's structure.
+	diags = append(diags, runTreeRules(intents)...)
+
 	return diags, nil
 }
 

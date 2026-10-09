@@ -70,6 +70,9 @@ func TestRun_AnchorValid(t *testing.T) {
 	dir := t.TempDir()
 	// The referenced intent exists — no diags expected.
 	writeFile(t, dir, "internal/auth/auth.go", "// @kron:intent auth/jwt\npackage auth\n")
+	// Both the leaf and its parent node are present so the new
+	// intent-orphan-under-no-node rule does not fire here.
+	writeFile(t, dir, ".kron/intents/auth/README.md", sampleIntent)
 	writeFile(t, dir, ".kron/intents/auth/jwt.md", sampleIntent)
 
 	diags, err := Run(context.Background(), dir)
@@ -754,6 +757,66 @@ func assertDiagRule(t *testing.T, diags []Diag, rule Rule, wantSev Severity, whe
 		seen = append(seen, fmt.Sprintf("%s/%s/%s", d.Rule, d.Severity, d.Where))
 	}
 	t.Fatalf("expected diag rule=%s severity=%s where=%q, got: %v", rule, wantSev, whereContains, seen)
+}
+
+// =====================================================================
+// T-class: tree-shape rules (RFC 2026-10-08-writer-readme-symmetry §5)
+// =====================================================================
+
+func TestRun_OrphanUnderNoNode_Fires(t *testing.T) {
+	// A leaf at "auth/jwt" with no parent node "auth/README.md" must
+	// fire RuleIntentOrphanUnderNoNode as a Warning.
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/intents/auth/jwt.md", sampleIntent)
+
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	assertDiagRule(t, diags, RuleIntentOrphanUnderNoNode, SeverityWarning, "auth/jwt")
+}
+
+func TestRun_OrphanUnderNoNode_NoFire_WhenParentNode(t *testing.T) {
+	// Both "auth/README.md" and "auth/jwt.md" exist: no orphan diag.
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/intents/auth/README.md", sampleIntent)
+	writeFile(t, dir, ".kron/intents/auth/jwt.md", sampleIntent)
+
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	for _, d := range diags {
+		assert.NotEqual(t, RuleIntentOrphanUnderNoNode, d.Rule,
+			"unexpected orphan diag when parent node exists: %+v", d)
+	}
+}
+
+func TestRun_OrphanUnderNoNode_NoFire_TopLevel(t *testing.T) {
+	// Top-level slugs (no "/" in slug) have no parent to anchor;
+	// the rule must skip them. A bare "auth.md" leaf must not fire.
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/intents/auth.md", sampleIntent)
+
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	assert.Empty(t, diags)
+}
+
+func TestRun_OrphanUnderNoNode_LeafOnlyScope(t *testing.T) {
+	// Leaf-only scope: a deep chain like "a/b/c" whose parent "a/b"
+	// is ALSO orphaned fires ONLY for "a/b/c" (the immediate orphan),
+	// not for the missing intermediate "a/b" — that would require
+	// a transitive check which is v1.2+ scope.
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/intents/a/b/c.md", sampleIntent)
+
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	var orphanCount int
+	for _, d := range diags {
+		if d.Rule == RuleIntentOrphanUnderNoNode {
+			orphanCount++
+			assert.Equal(t, "a/b/c", d.Where, "only the immediate orphan should fire")
+		}
+	}
+	assert.Equal(t, 1, orphanCount)
 }
 
 // DO NOT REMOVE the closing blank line below; it keeps the file

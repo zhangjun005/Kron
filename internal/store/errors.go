@@ -24,4 +24,20 @@ var (
 	//
 	// Mirrors assumption.ErrCreatorChangeNotAllowed.
 	ErrCreatorChangeNotAllowed = errors.New("changing created_by requires WithAllowCreatorChange opt-in")
+
+	// ErrSlugCollision is returned when a Write / MoveToTrash /
+	// RestoreFromTrash target slug is already occupied by the
+	// OTHER physical form than the caller requested.
+	//
+	// Examples:
+	//   - kind=leaf, "<slug>.md" absent, "<slug>/README.md" present
+	//   - kind=node, "<slug>/README.md" absent, "<slug>.md" present
+	//
+	// Per RFC 2026-10-08-writer-readme-symmetry §3.3 the two
+	// forms cannot share a slug. The caller must either pick the
+	// other kind (and accept the on-disk shape) or move/delete
+	// the existing file first. Lint surfaces the duplicate as
+	// `intent-slug-collision` (v1.2+); this is the hard error at
+	// write time.
+	ErrSlugCollision = errors.New("slug already occupied by the other intent kind")
 )

@@ -24,6 +24,49 @@ const (
 	SeveritySoft Severity = "soft"
 )
 
+// IntentKind is the on-disk physical form of an intent.
+//
+// It is a write-time routing decision, NOT a frontmatter field. The
+// frontmatter schema is unchanged by this type — only Go callers
+// see Kind. The on-disk truth is the file path (resolveWritePath
+// in internal/store/paths.go maps Kind → file layout).
+//
+// Why not in frontmatter:
+//  1. The README/leaf distinction is implicit from the file path
+//     ("<slug>/README.md" vs "<slug>.md") and exposing it as
+//     frontmatter would require every author to remember to set
+//     it consistently. Storing the kind on the file path is
+//     self-describing.
+//  2. Re-rooting a node (moving auth/README.md to a different
+//     directory) would not require editing frontmatter — the kind
+//     travels with the slug.
+//
+// Values:
+//   - IntentKindLeaf: <root>/.kron/intents/<slug>.md           (default)
+//   - IntentKindNode: <root>/.kron/intents/<slug>/README.md   (module-level node intent)
+type IntentKind string
+
+const (
+	// IntentKindLeaf is the default. File on disk: <slug>.md.
+	IntentKindLeaf IntentKind = "leaf"
+
+	// IntentKindNode is a directory-level intent. File on disk:
+	// <slug>/README.md. A node intent can coexist with child
+	// intents at "<slug>/<child>" — see internal/view.
+	IntentKindNode IntentKind = "node"
+)
+
+// Valid reports whether k is a recognised IntentKind value.
+// Empty string is treated as Leaf (the default) so callers that
+// leave Kind unset continue to work without migration.
+func (k IntentKind) Valid() bool {
+	switch k {
+	case "", IntentKindLeaf, IntentKindNode:
+		return true
+	}
+	return false
+}
+
 // Assumption is a verifiable precondition that governs the intent's validity.
 // Written in frontmatter's assumptions[] field, not duplicated in body.
 //
@@ -156,6 +199,15 @@ type Intent struct {
 	// Slug is the relative path under .kron/intents/, without the .md extension.
 	// Example: "auth/jwt-sliding-window".
 	Slug string
+
+	// Kind is the on-disk physical form (leaf vs node). It is a
+	// write-time routing decision and is NOT serialized to
+	// frontmatter (yaml:"-") — see IntentKind for why. On read,
+	// Kind is left at its zero value (Leaf) because the loader
+	// uses the file path to determine shape; callers that need
+	// the distinction should look at SourcePath or use
+	// store.Reader's tree helpers.
+	Kind IntentKind `yaml:"-"`
 
 	// Frontmatter is the YAML metadata block at the top of the file.
 	Frontmatter Frontmatter

@@ -62,21 +62,13 @@ func (r *Reader) IntentPath(slug string) string {
 // Returns model.ErrIntentNotFound (wrapped with the slug) if neither
 // file exists. The shorthand applies to any depth — "a/b/c" resolves
 // to ".kron/intents/a/b/c/README.md" when that path is the only one.
+//
+// Implementation: this is a thin wrapper around resolveReadPath
+// (in paths.go) which is the single source of truth for the
+// reader-side slug→path mapping. The writer's resolveWritePath
+// is the symmetric counterpart.
 func (r *Reader) resolveIntentPath(slug string) (string, error) {
-	canonical := r.IntentPath(slug)
-	if _, err := os.Stat(canonical); err == nil {
-		return canonical, nil
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return "", fmt.Errorf("store: stat %s: %w", canonical, err)
-	}
-	// Canonical missing — try the README shorthand.
-	readme := filepath.Join(r.Root, model.KronDir, model.IntentDir, slug, "README.md")
-	if _, err := os.Stat(readme); err == nil {
-		return readme, nil
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return "", fmt.Errorf("store: stat %s: %w", readme, err)
-	}
-	return "", fmt.Errorf("%w: %s", model.ErrIntentNotFound, slug)
+	return resolveReadPath(r.Root, slug)
 }
 
 // TrashPath returns the absolute path of a trashed intent's .md file.
@@ -142,7 +134,16 @@ func (r *Reader) Load(ctx context.Context, slug string) (*model.Intent, error) {
 	// caller does know the slug). This is the RFC 2026-10-03 design.
 
 	return &model.Intent{
-		Slug:        slug,
+		Slug: slug,
+		// Kind is backfilled from the on-disk path (the
+		// authoritative source at read time — RFC
+		// 2026-10-08-writer-readme-symmetry §3.3 / §6). Frontmatter
+		// does NOT carry Kind (yaml:"-"), so without this backfill
+		// the field would be the zero value (Leaf) for ALL reads,
+		// breaking downstream consumers (MCP kron_tree, view
+		// shape reporting) that need to distinguish a node intent
+		// at "auth/README.md" from a leaf intent at "auth.md".
+		Kind:        KindFromPath(path),
 		Frontmatter: fm,
 		Body:        body,
 		SourcePath:  path,

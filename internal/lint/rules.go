@@ -106,6 +106,22 @@ const (
 	// default_severity. Purely informational; an override is
 	// legitimate when the rationale explains why.
 	RuleAssumptionSeverityMismatch Rule = "assumption-severity-mismatch"
+
+	// T-class (RFC 2026-10-08-writer-readme-symmetry): tree-shape
+	// rules. These read the on-disk intent layout to flag intents
+	// that violate the directory-tree contract.
+
+	// RuleIntentOrphanUnderNoNode (Warning): a leaf intent at
+	// "<parent>/<slug>" exists but no node intent at
+	// "<parent>/README.md" anchors the parent directory. The
+	// intent is still valid on its own — the rule is a prompt
+	// for the author to either (a) create a parent node intent
+	// or (b) move the leaf to a top-level slug. Leaf-only scope
+	// (RFC §5): we do NOT chase deeper chains (an orphan whose
+	// parent directory is itself orphaned). Severity: warning
+	// because the intent is functional; the warning is a
+	// documentation-quality nudge.
+	RuleIntentOrphanUnderNoNode Rule = "intent-orphan-under-no-node"
 )
 
 // Severity ranks a Diag's importance. Empty is treated as error by
