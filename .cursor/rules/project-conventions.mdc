@@ -16,31 +16,35 @@ Cursor-native companion to [AGENTS.md](../../AGENTS.md) and [architecture.md](..
 - YAML for frontmatter (`gopkg.in/yaml.v3`)
 - testify for test assertions
 - MCP SDK: `github.com/modelcontextprotocol/go-sdk` (locked v1.2+)
-- **v1.3 main**: GUI backend (Go Wails v2), GUI frontend (TypeScript + shadcn/ui in `frontend/`)
+- **v1.3+ pending — skeleton only (2026-10-09)**: `cmd/kron/serve-lsp/` stub created; LSP SDK (`go.lsp.dev/protocol v3.17+`) NOT yet added (still requires explicit approval per 铁律 #5); `frontend/` README placeholder created (real Wails code goes to a separate repo per 铁律 #9)
+- **v1.3 main (RFC pending)**: GUI backend (Go Wails v2), GUI frontend (TypeScript + shadcn/ui in `frontend/`)
 - **v1.4+ pending**: LSP SDK (`go.lsp.dev/protocol`), VSCode extension (副 GUI 路径, 复用 `kron serve-mcp` stdio)
-- `ts-style` skill 已就位但 **v1 / v1.2 不启用** (没 .ts 代码)
+- `ts-style` skill 已就位但 **v1 / v1.2 / v1.3 不启用** (没 .ts 代码)
 
 ## Repo layout
 
 ```
 cmd/kron/                  ← thin CLI entry; dispatches to subcommands
-├── main.go                ← wiring only
-├── cli/                   ← cobra command implementations (kron init / add / lint)
+├── main.go                ← wiring only; routes argv to cli / serve-mcp / serve-lsp
+├── cli/                   ← stdlib flag command implementations (kron init / add / lint) — NO cobra
 ├── serve-mcp/             ← MCP stdio server (v1.2+ shipped)
-├── serve-lsp/             ← (planned v1.3+) LSP socket server
-└── serve-gui/             ← (planned v1.3+) Wails GUI server (Go + TS frontend)
+├── serve-lsp/             ← LSP stdio server (v1.3+ stub 2026-10-09; package lsp, not implemented)
+└── serve-gui/             ← (NEVER; GUI 是客户端层, 不进主仓 — architecture §0 铁律 #9)
 
 internal/                  ← bottom-layer packages only, no access-layer code
-├── model/                 ← domain types (Intent, Frontmatter, Config, Anchor)
+├── model/                 ← domain types (Intent, Frontmatter, Config, Anchor, AnchorKind, IntentKind)
 ├── store/                 ← file I/O + MoveToTrash / RestoreFromTrash
 ├── parser/                ← markdown / anchor scan / slug / template
 ├── relations/             ← reverse-link graph (used by kron_impact / kron_delete)
 ├── lint/                  ← anchor-dangling + frontmatter + cycle + staleness
+├── view/                  ← intent directory tree (v1.2+ BuildIntentTree / Flatten / Sort)
+├── assumption/            ← .kron/assumptions/<id>.md B-3 independent file (v1.3)
 └── identity/              ← created_by resolution
 
-frontend/                  ← (planned v1.3+) Wails GUI frontend (TS + shadcn) — gitignored in v1 / v1.2
+frontend/                  ← 客户端层占位 (Wails GUI) — README ONLY; 真实 Wails 项目在独立仓 (architecture §0 铁律 #9)
 
 docs/                      ← design notes + RFC + process docs
+  └── implementation/      ← 8 份 F 角色文档 2026-10-09 全部归档; 目录保留 README banner
 .cursor/skills/            ← detailed style rules (auto-loaded)
 .cursor/rules/             ← Cursor rule format (this file)
 ```
