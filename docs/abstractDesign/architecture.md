@@ -144,8 +144,8 @@ Kron 的核心是**数据格式 + 协议**，不是一个二进制。同一份�
 | **客户端层** | GUI 客户端 | **Cursor / 其他 IDE 扩展** | 人类（在 Cursor / 其他 IDE 中） | 复用 VSCode 扩展 LSP / MCP 集成（VSCode 扩展协议兼容 Cursor） | 同上 |
 
 > **关键原则**：
-> 1. **协议访问层 = 3 个**（CLI / MCP / LSP）。Kron 主仓只 commit 这 3 个。
-> 2. **客户端层 ≠ Kron 主仓**。VSCode 扩展源码 / Wails 前端代码**不**入主仓。VSCode 扩展**独立**仓库；Wails 前端在 `frontend/` 已被 `.gitignore`。
+> 1. **协议访问层 = 3 个**（CLI / MCP / LSP）。Kron 主仓 `cmd/kron/` 下 commit 这 3 个。
+> 2. **客户端层在 Kron 主仓 `frontend/`**（2026-10-09 拍板）。VSCode 扩展 / Wails / Cursor 客户端**源码**进主仓 `frontend/vscode/` / `frontend/wails/`；**不**直接 import `internal/`、**不** import 协议访问层。`.gitignore` 已覆盖 build 产物（`frontend/*/node_modules/` / `frontend/*/dist/` 等），不污染 git。
 > 3. **(2026-10-08 拍板)** **MCP 进程寿命 = stdio 父进程寿命**。每个 client (VSCode 扩展 / Wails GUI / AI 工具) 各自 spawn 一个 `kron serve-mcp`, 各自复用, 各自 kill。**一个项目可能同时存在 N 个 MCP 实例** (N = client 数), 并发安全靠 `internal/store` 文件锁 (`flock` per-file), **不**靠 MCP 协议层 / OS 进程隔离 / 单例 daemon。**不**开独立 GUI 接口层——GUI 是**用户**用的, 不是**协议**。详见 [`docs/rfc/2026-10-08-mcp-lifecycle.md`](../rfc/2026-10-08-mcp-lifecycle.md)。
 > 4. **LSP 是编辑器侧 hover 预览专用**（`textDocument/hover` + `textDocument/definition`）。VSCode 扩展既走 serve-mcp（业务能力）也起 serve-lsp 子进程（编辑器 UI 集成）。
 > 5. **客户端层互相不依赖**。Wails **不** import VSCode 扩展；VSCode 扩展**不** import Wails。它们**独立**通过协议访问层拿能力。
