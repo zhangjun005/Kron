@@ -29,7 +29,7 @@
 | 旧 RFC 拍板 | 状态 |
 |---|---|
 | Wails v2 (主) + VSCode 扩展 (副) | ✅ 沿用 |
-| 客户端层**不**进 Kron Go 主仓 | ✅ 沿用 (architecture §〇 铁律 #9) |
+| 客户端层**进** Kron Go 主仓 `frontend/`（2026-10-09 拍板修订） | ✅ 沿用 (architecture §〇·五·1) |
 | GUI 边界"模糊" / VSCode 范围"待定" | ❌ **本 RFC §3 + §4 拍** |
 
 ---
@@ -38,7 +38,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ 客户端层 (client layer) — 不进 Kron Go 主仓                │
+│ 客户端层 (client layer) — 代码在 Kron 主仓 `frontend/`         │
 │                                                              │
 │  ┌─[ GUI: Wails v2 ]──────────────────────────┐            │
 │  │  整体预览 (类 PM 软件)                      │            │
@@ -202,7 +202,7 @@ VSCode 扩展的 `package.json` `contributes` 字段**同时**声明 LSP / 侧�
 | VSCode 扩展 | `vscode-languageclient` + `@modelcontextprotocol/sdk` + React 18 + Vite 5 + shadcn/ui | 旧 RFC 拍; **不**预设图表库（关系图走 VSCode webview + shadcn 原生 Chart 或按需扩展） |
 | LSP server (Kron Go 主仓) | `go.lsp.dev/protocol v3.17+` ([`docs/rfc/2026-10-07-lsp-sdk.md` §3](./2026-10-07-lsp-sdk.md) 已拍) | 旧 RFC 拍, **不**重复 |
 
-**AGENTS.md §3 红线重申**: 任何**新** top-level dep 进 Kron Go 主仓 (`go.mod`) 走 explicit approval, VSCode 扩展**不**进 Go 主仓, 其 dep 走 npm + vsce 流程, **不**走 Go explicit approval 路径.
+**AGENTS.md §3 红线重申**: 任何**新** top-level dep 进 Kron Go 主仓 (`go.mod`) 走 explicit approval；客户端层代码**在**主仓 `frontend/`（TS/React/Vite/shadcn/ui），其 dep 走 npm + vsce 流程，**不**走 Go explicit approval 路径。客户端层**不** import `cmd/kron/` Go 代码（只通过 stdio JSON-RPC 通信）。
 
 ---
 
