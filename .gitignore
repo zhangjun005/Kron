@@ -46,3 +46,7 @@ frontend/wails/.vite/
 # restore with `git mv .deprecated/<date>-<reason>/<file> <original-path>`).
 # DO NOT git add files inside .deprecated/ — they're archived, not live.
 .deprecated/
+
+# Accidental redirect output (e.g. `cmd > dev/null` mistake on PowerShell
+# creates a literal dev/null file; not the Unix /dev/null device).
+dev/null
