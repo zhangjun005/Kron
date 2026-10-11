@@ -1,0 +1,24 @@
+# Kron CODEOWNERS
+# 单维护者模型: 所有路径的 reviewer = @zhangjun005
+# 详细流程: docs/process/new-access-layer.md §5.3
+
+# 默认: 所有路径
+*                                       @zhangjun005
+
+# 架构真理源 (高敏感 — 改之前需 RFC)
+# /docs/abstractDesign/architecture.md    @zhangjun005
+# /AGENTS.md                             @zhangjun005
+# /.cursor/rules/                        @zhangjun005
+
+# 流程文档 (S5/S6 纪律承载)
+# /docs/process/                        @zhangjun005
+# /docs/rfc/                            @zhangjun005
+
+# 核心代码 (cmd + internal)
+# /cmd/                                @zhangjun005
+# /internal/                           @zhangjun005
+
+# v1.3+ 计划路径 (现在无文件, 但占位)
+# /cmd/kron/serve-lsp/                 @zhangjun005
+# /cmd/kron/serve-gui/                 @zhangjun005
+# /frontend/                           @zhangjun005

@@ -1,0 +1,57 @@
+---
+description: Go coding rules for Kron — no any/interface{}, errors.Is/As, error wrapping, gofmt, project layout, godoc comments. Loads when editing .go files.
+globs: **/*.go
+alwaysApply: false
+---
+
+# go-style (Kron)
+
+Mirror of `.cursor/skills/go-style/SKILL.md`. Auto-loads when a `.go` file is open.
+
+## Hard rules (non-negotiable)
+
+- No `any` / `interface{}` in function signatures — use generics or concrete types. Allowed only for `encoding/json` interop with a `// why` comment.
+- No bare type assertion `x.(T)` — must use `v, ok := x.(T)`.
+- No `reflect` without a `// why: <specific reason>` comment.
+- No `time.Sleep` in production code — use channels or `sync.WaitGroup`.
+- No `==` / `!=` for errors — use `errors.Is` / `errors.As`.
+- No `_ = err` unless the function is documented safely ignorable.
+
+## Error handling
+
+Always wrap at the point of origin:
+
+```go
+data, err := os.ReadFile(path)
+if err != nil {
+    return nil, fmt.Errorf("reading task file %s: %w", path, err)
+}
+```
+
+Use `errors.Is` / `errors.As` — never `==`.
+
+## Project layout
+
+- `cmd/kron/main.go` = thin wiring only.
+- Business logic in `internal/model/`, `internal/store/`, `internal/parser/`, and access-layer subcommands (`cmd/kron/<sub>/` like `cmd/kron/cli`, `cmd/kron/serve-mcp`).
+- `internal/` MUST NOT import any package under `cmd/kron/`.
+- Access-layer subcommands under `cmd/kron/<sub>/` MUST NOT import each other.
+- No circular imports between `internal/*` packages.
+
+## Naming
+
+- Package: lowercase, one word (`store`, `model`).
+- Acronyms: all caps (`HTTPClient`, `ParseJSON`).
+- No `I` prefix on interfaces.
+
+## Formatting
+
+Run `gofmt -w .` and `go vet ./...` before every commit.
+
+## Commit format
+
+`<scope>: <imperative summary>` — body explains *why*.
+
+## Things needing a `// why` comment
+
+reflect, `//go:generate`, `// nolint:`, `time.Sleep`, global mutable state, `init()` that sets env vars.

@@ -1,0 +1,52 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+*.out
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Project-specific
+.kron/
+KRON/.kron-context/
+kron-internal/
+
+# Frontend build outputs
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/vscode/out/
+frontend/vscode/node_modules/
+frontend/wails/node_modules/
+frontend/wails/dist/
+frontend/wails/.vite/
+
+# Rust legacy (will be cleaned from archive branch if needed)
+# Uncomment if rebuilding Rust side:
+# src-tauri/target/
+# target/
+
+# Temporary commit messages written by automated agent sessions
+.cursor/commit-msg-*.txt
+
+# Soft-deleted documents (moved to .deprecated/<date>-<reason>/ for audit;
+# restore with `git mv .deprecated/<date>-<reason>/<file> <original-path>`).
+# DO NOT git add files inside .deprecated/ — they're archived, not live.
+.deprecated/
+
+# Accidental redirect output (e.g. `cmd > dev/null` mistake on PowerShell
+# creates a literal dev/null file; not the Unix /dev/null device).
+dev/null

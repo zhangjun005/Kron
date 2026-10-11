@@ -1,0 +1,159 @@
+package servemcp
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/xxx/kron/internal/parser"
+	"github.com/xxx/kron/internal/store"
+)
+
+// HandleIntentDensity returns the mcp.ToolHandlerFor binding for
+// kron_intent_density.
+//
+// Wire contract: see docs/implementation/mcp.md §2 (kron_intent_density).
+//
+//	in:  {}
+//	out: {
+//	  total_intents: int,
+//	  total_anchors: int,
+//	  coverage: { intents_with_anchors: int, intents_without_anchors: [slug] },
+//	  files_without_intent: [path]   // files >50 lines with 0 anchors
+//	}
+//
+// "files without intent" is a rough heuristic: walk the source tree,
+// skip the standard skip-list, count lines per file, keep those > 50
+// with no anchor. The 50-line threshold matches the CLI intent-coverage
+// gate; see docs/process/lint-rule.md for the rationale.
+func HandleIntentDensity(ctx context.Context, _ *mcp.CallToolRequest, _ IntentDensityInput) (
+	*mcp.CallToolResult, IntentDensityOutput, error,
+) {
+	if err := assertCallerMCP(ctx); err != nil {
+		return nil, IntentDensityOutput{}, err
+	}
+	root := repoRootFrom(ctx)
+
+	r, err := store.NewReader(root)
+	if err != nil {
+		return nil, IntentDensityOutput{}, fmt.Errorf("kron_intent_density: open store: %w", err)
+	}
+	all, err := r.LoadAll(ctx)
+	if err != nil {
+		return nil, IntentDensityOutput{}, fmt.Errorf("kron_intent_density: load: %w", err)
+	}
+
+	// RFC 2026-10-08-md-anchors.md §2.5: density counts BOTH code
+	// anchors and markdown anchors. The two streams are kept
+	// separate at the parser boundary (different skip-list
+	// semantics, different file extensions) and merged here for
+	// the withAnchor / total_anchors / anchoredFiles aggregates.
+	codeAnchors, err := parser.ScanAnchors(root)
+	if err != nil {
+		return nil, IntentDensityOutput{}, fmt.Errorf("kron_intent_density: scan code anchors: %w", err)
+	}
+	markdownAnchors, err := parser.ScanMarkdownAnchors(root)
+	if err != nil {
+		return nil, IntentDensityOutput{}, fmt.Errorf("kron_intent_density: scan markdown anchors: %w", err)
+	}
+
+	withAnchor := make(map[string]struct{}, len(codeAnchors)+len(markdownAnchors))
+	anchoredFiles := make(map[string]struct{}, len(codeAnchors)+len(markdownAnchors))
+	for _, a := range codeAnchors {
+		withAnchor[a.Slug] = struct{}{}
+		anchoredFiles[a.FilePath] = struct{}{}
+	}
+	for _, a := range markdownAnchors {
+		withAnchor[a.Slug] = struct{}{}
+		anchoredFiles[a.FilePath] = struct{}{}
+	}
+
+	var withoutAnchor []string
+	for _, intent := range all {
+		if _, ok := withAnchor[intent.Slug]; !ok {
+			withoutAnchor = append(withoutAnchor, intent.Slug)
+		}
+	}
+	sort.Strings(withoutAnchor)
+	if withoutAnchor == nil {
+		withoutAnchor = []string{}
+	}
+
+	orphans, err := scanOrphanFiles(root, anchoredFiles)
+	if err != nil {
+		return nil, IntentDensityOutput{}, fmt.Errorf("kron_intent_density: scan orphans: %w", err)
+	}
+	// Normalise nil → empty array so JSON marshal produces [] not null.
+	// SDK schema validation requires arrays, not null.
+	if orphans == nil {
+		orphans = []string{}
+	}
+
+	return nil, IntentDensityOutput{
+		TotalIntents: len(all),
+		TotalAnchors: len(codeAnchors) + len(markdownAnchors),
+		Coverage: Coverage{
+			IntentsWithAnchors:    len(withAnchor),
+			IntentsWithoutAnchors: withoutAnchor,
+		},
+		FilesWithoutIntent: orphans,
+	}, nil
+}
+
+// scanOrphanFiles walks root and returns the repo-relative paths of
+// source files that are > 50 lines long and have zero anchors. The
+// 50-line threshold matches the CLI intent-coverage gate; see
+// docs/process/lint-rule.md for the rationale.
+//
+// The walk uses parser.WalkSourceFiles so the skip-list (default
+// ignored directories) and the binary-file heuristic are shared with
+// lint.Run → parser.ScanAnchors. Previously this function carried
+// its own copy of both, which drifted twice (the lint-side list
+// added "dist" but density's local list did not, etc.).
+func scanOrphanFiles(root string, anchored map[string]struct{}) ([]string, error) {
+	const lineThreshold = 50
+	var orphans []string
+	err := parser.WalkSourceFiles(root, func(path string) error {
+		if _, ok := anchored[path]; ok {
+			return nil
+		}
+		n, err := countLines(path, lineThreshold+1)
+		if err != nil {
+			return err
+		}
+		if n > lineThreshold {
+			if rel, err := filepath.Rel(root, path); err == nil {
+				orphans = append(orphans, rel)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(orphans)
+	return orphans, nil
+}
+
+func countLines(path string, capLines int) (int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	count := 0
+	for sc.Scan() {
+		count++
+		if count > capLines {
+			break
+		}
+	}
+	return count, sc.Err()
+}
