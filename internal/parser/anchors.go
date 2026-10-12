@@ -144,6 +144,37 @@ func SlugsForFile(filePath string) ([]string, error) {
 	return out, nil
 }
 
+// AnchorsForFile returns all line-level "@kron:intent <slug>" anchors
+// found in filePath, including their line numbers. Unlike SlugsForFile
+// which deduplicates by slug and discards line numbers, this function
+// preserves every anchor entry so callers (e.g. LSP hover/definition)
+// can match a cursor position to a specific anchor line.
+//
+// filePath may be absolute or repo-relative. The file is opened and
+// parsed directly (no walk), so this is the right entry point when
+// the caller already knows the file (e.g. a single hover/definition
+// request) and only needs the anchors from that one file.
+//
+// Empty filePath or a path that cannot be opened returns an error.
+// A file with no anchors returns an empty (non-nil) slice.
+func AnchorsForFile(filePath string) ([]model.Anchor, error) {
+	if filePath == "" {
+		return nil, fmt.Errorf("parser: AnchorsForFile: filePath is empty")
+	}
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("parser: open %s: %w", filePath, err)
+	}
+	defer f.Close()
+
+	anchors, err := scanFile(f, filePath)
+	if err != nil {
+		return nil, err
+	}
+	sortAnchors(anchors)
+	return anchors, nil
+}
+
 // scanFile scans a single open file for "@kron:intent <slug>" lines.
 // Lines are limited to a generous max line length so a pathological
 // minified file cannot blow memory.
