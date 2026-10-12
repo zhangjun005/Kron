@@ -152,19 +152,25 @@ func intentFromModel(in *model.Intent, ar *assumption.Reader) IntentBody {
 }
 
 // assumesToWire projects a []model.Assumption to the wire shape,
-// reading the assumption registry (when ar is non-nil) for the
-// canonical text and default_severity.
+// reading the assumption registry for the canonical text and
+// default_severity.
 //
 // B-3 (RFC 2026-10-08-assumptions-standalone) wire shape:
 //
 //	id                string  (from inline)
-//	text              string  (registry preferred, falls back to inline)
+//	text              string  (registry only; empty if registry absent)
 //	severity          string  (per-intent; ground truth)
 //	default_severity  string  (registry, informational)
 //	rationale         string  (per-intent, B-3)
 //	expires_at        string  (inline)
 //	verified_at       string  (inline)
 //	verified_by       string  (inline)
+//
+// RFC 2026-10-12-close-b3-softening §2.2: there is no per-intent
+// Text field any more. If ar is nil (pre-migration repo) or the
+// registry has no entry for a.ID, entry.Text is left empty — callers
+// are expected to surface this as a missing-registry-entry error
+// (lint RuleAssumptionRegistryIdMismatch handles that path).
 func assumesToWire(ctx context.Context, as []model.Assumption, ar *assumption.Reader) []AssumeEntry {
 	if len(as) == 0 {
 		return nil
@@ -173,7 +179,6 @@ func assumesToWire(ctx context.Context, as []model.Assumption, ar *assumption.Re
 	for _, a := range as {
 		entry := AssumeEntry{
 			ID:         a.ID,
-			Text:       a.Text,
 			Severity:   string(a.Severity),
 			Rationale:  a.Rationale,
 			ExpiresAt:  a.ExpiresAt,
@@ -182,9 +187,7 @@ func assumesToWire(ctx context.Context, as []model.Assumption, ar *assumption.Re
 		}
 		if ar != nil && a.ID != "" {
 			if af, err := ar.Get(ctx, a.ID); err == nil && af != nil {
-				if af.Frontmatter.Text != "" {
-					entry.Text = af.Frontmatter.Text
-				}
+				entry.Text = af.Frontmatter.Text
 				entry.DefaultSeverity = string(af.Frontmatter.DefaultSeverity)
 			}
 		}

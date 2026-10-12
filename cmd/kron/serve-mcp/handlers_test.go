@@ -431,7 +431,6 @@ updated_at: 2026-09-01T10:00:00Z
 status: active
 assumptions:
   - id: single-region
-    text: "single region"
     severity: hard
     expires_at: "` + expired + `"
 <!-- /kron:frontmatter -->
@@ -485,7 +484,6 @@ created_by: "@a"
 updated_at: 2026-10-01T10:00:00Z
 assumptions:
   - id: single-region
-    text: INLINE TEXT (overridden by registry)
     severity: hard
     rationale: "跨 region 时 token 失效爆炸, 必须保证单 region 部署"
 <!-- /kron:frontmatter -->
@@ -531,7 +529,6 @@ created_by: "@a"
 updated_at: 2026-10-01T10:00:00Z
 assumptions:
   - id: redis
-    text: INLINE TEXT
     severity: hard
     rationale: "token revocation must remain fast under load"
 <!-- /kron:frontmatter -->

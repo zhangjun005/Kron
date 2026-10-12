@@ -1,9 +1,10 @@
 // Package lint: assumption rule engine for v1.3+ (B-3 standalone registry).
 //
-// runAssumptionRules applies the B-3 + Option-B1 assumption rules:
+// runAssumptionRules applies the B-3 + RFC-2026-10-12 assumption rules:
 //
 //  1. Per-intent rules (frontmatter.assumptions[] walk):
-//     - RuleAssumptionRationaleRequired (v1.3 Warning / v1.5+ Error)
+//     - RuleAssumptionRationaleRequired (Error, permanent; the v1.3
+//     migration Warning window closed per RFC 2026-10-12 §2.1)
 //     - RuleAssumptionRegistryIdMismatch (Error): id not in registry
 //     - RuleAssumptionMixedForm (Warning): legacy A-path leftover fields
 //     (expires_at on the per-intent side) — kept for v1.3 migration
@@ -20,12 +21,14 @@
 //     no @kron:assumes <id> marker in any intent body)
 //
 //  3. Raw-byte rules (no Go model survives the trip):
-//     - RuleAssumptionInline (Warning): a "text:" key inside the
-//     top-level "assumptions:" block of an intent's frontmatter.
-//     Detected by parser.HasInlineAssumptionText because
-//     model.Assumption no longer has a Text field — the strict
-//     YAML decode silently drops the key, so we re-scan the
-//     raw bytes to surface the migration leftover.
+//     - RuleAssumptionInline (Error, permanent; was Warning under
+//     Option B1, upgraded to Error per RFC 2026-10-12 §2.2): a
+//     "text:" key inside the top-level "assumptions:" block of an
+//     intent's frontmatter. The parser is the primary line of
+//     defence (frontmatterKnownFields no longer accepts "text",
+//     so the frontmatter fails to parse); the raw-bytes pre-scan
+//     is a redundant safety net for callers that bypass the
+//     parser. Both layers report Error.
 //
 // Behaviour:
 //   - If the assumption registry directory does not exist
@@ -112,14 +115,22 @@ func runAssumptionRules(root string, intents []*model.Intent, ar *assumption.Rea
 		// RuleAssumptionInline: any "text:" key inside the
 		// top-level "assumptions:" block. We test the raw
 		// frontmatter bytes (not the decoded model) because
-		// model.Assumption no longer has a Text field.
+		// the strict YAML decode now REJECTS unknown fields
+		// (parser.frontmatterKnownFields dropped "text" per
+		// RFC 2026-10-12-close-b3-softening §2.2), so a
+		// frontmatter with inline `text:` would already fail
+		// at parse time with RuleFrontmatterInvalid. The
+		// raw-bytes pre-scan is a redundant safety net that
+		// surfaces a more targeted diagnostic name when the
+		// parser's "unknown field" error gets swallowed by
+		// upstream code paths.
 		if raw, ok := intentRawFM[in.Slug]; ok {
 			if count, has := parser.HasInlineAssumptionText(raw); has {
 				diags = append(diags, Diag{
 					Rule:     RuleAssumptionInline,
 					Where:    in.Slug,
-					Detail:   fmt.Sprintf("assumptions[] block carries %d inline text: key(s); per B-3 the assumption text lives in .kron/assumptions/<id>.md and the inline copy should be removed", count),
-					Severity: SeverityWarning,
+					Detail:   fmt.Sprintf("assumptions[] block carries %d inline text: key(s); per B-3 the assumption text lives in .kron/assumptions/<id>.md and the inline copy must be removed", count),
+					Severity: SeverityError,
 				})
 			}
 		}
@@ -128,16 +139,16 @@ func runAssumptionRules(root string, intents []*model.Intent, ar *assumption.Rea
 			// rationale-required (id is required at parse time, so
 			// an empty ID here is a parser-level error and won't
 			// reach lint).
+			//
+			// RFC 2026-10-12-close-b3-softening §2.1: rationale
+			// is permanent Error (the v1.3 → v1.5 soft window
+			// closed). No MigrationMode branch.
 			if a.Rationale == "" {
-				severity := SeverityWarning
-				if !opts.MigrationMode {
-					severity = SeverityError
-				}
 				diags = append(diags, Diag{
 					Rule:     RuleAssumptionRationaleRequired,
 					Where:    in.Slug,
 					Detail:   fmt.Sprintf("assumptions[%q] has no rationale (required ≥ 10 chars; B-3)", a.ID),
-					Severity: severity,
+					Severity: SeverityError,
 				})
 			}
 

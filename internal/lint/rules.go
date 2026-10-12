@@ -105,11 +105,10 @@ const (
 	// Always severity: error.
 	RuleAssumptionFileIdMismatch Rule = "assumption-file-id-mismatch"
 
-	// RuleAssumptionRationaleRequired (Error, v1.3+ Warning during
-	// migration window): an intent's assumptions[] entry has no
-	// rationale field. v1.3 emits Warning to ease the A→B
-	// migration; v1.5+ emits Error (hard gate). Severity is
-	// applied by the linter based on a MigrationMode flag.
+	// RuleAssumptionRationaleRequired (Error): an intent's
+	// assumptions[] entry has no rationale field. Hard Error
+	// since v1.3 (the A→B migration Warning window closed per
+	// RFC 2026-10-12-close-b3-softening §2.1).
 	RuleAssumptionRationaleRequired Rule = "assumption-rationale-required"
 
 	// RuleAssumptionRationaleStale (Warning): the rationale of an

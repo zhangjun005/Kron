@@ -524,7 +524,7 @@ assumptions:
 # Has expiry
 `, expiry.Format(time.RFC3339)))
 
-	diags, err := RunWith(context.Background(), dir, RunOptions{MigrationMode: true}.WithNow(now))
+	diags, err := RunWith(context.Background(), dir, RunOptions{}.WithNow(now))
 	require.NoError(t, err)
 	require.Len(t, diags, 1)
 	assert.Equal(t, RuleExpiredHardAssumption, diags[0].Rule)
@@ -554,7 +554,7 @@ assumptions:
 # Verified after expiry
 `, expiry.Format(time.RFC3339), verified.Format(time.RFC3339)))
 
-	diags, err := RunWith(context.Background(), dir, RunOptions{MigrationMode: true}.WithNow(now))
+	diags, err := RunWith(context.Background(), dir, RunOptions{}.WithNow(now))
 	require.NoError(t, err)
 	assert.Empty(t, diags)
 }
@@ -577,7 +577,7 @@ assumptions:
 # Soft
 `, expiry.Format(time.RFC3339)))
 
-	diags, err := RunWith(context.Background(), dir, RunOptions{MigrationMode: true}.WithNow(now))
+	diags, err := RunWith(context.Background(), dir, RunOptions{}.WithNow(now))
 	require.NoError(t, err)
 	assert.Empty(t, diags)
 }
@@ -612,7 +612,7 @@ assumptions:
 # Has expiry
 `, expiry.Format(time.RFC3339)))
 
-	opts := RunOptions{MigrationMode: true}.WithNow(now)
+	opts := RunOptions{}.WithNow(now)
 	diags, err := RunWith(context.Background(), dir, opts)
 	require.NoError(t, err)
 
@@ -775,8 +775,9 @@ assumptions:
 }
 
 func TestRun_AssumptionRationaleRequired(t *testing.T) {
+	// RFC 2026-10-12-close-b3-softening §2.1: rationale is
+	// permanent Error. The v1.3 Warning window is closed.
 	dir := t.TempDir()
-	// In MigrationMode (default for CLI): Warning. Without: Error.
 	writeAssumption(t, dir, "x", "x", "soft", "active")
 	writeFile(t, dir, ".kron/intents/needs-rationale.md", `<!-- kron:frontmatter -->
 created_by: "@a"
@@ -789,13 +790,7 @@ assumptions:
 # needs-rationale
 `)
 
-	// MigrationMode: Warning
-	diags, err := RunWith(context.Background(), dir, RunOptions{MigrationMode: true})
-	require.NoError(t, err)
-	assertDiagRule(t, diags, RuleAssumptionRationaleRequired, SeverityWarning, "needs-rationale")
-
-	// Non-migration: Error
-	diags, err = RunWith(context.Background(), dir, RunOptions{MigrationMode: false})
+	diags, err := RunWith(context.Background(), dir, RunOptions{})
 	require.NoError(t, err)
 	assertDiagRule(t, diags, RuleAssumptionRationaleRequired, SeverityError, "needs-rationale")
 }
@@ -839,12 +834,14 @@ updated_at: 2026-09-22T10:00:00Z
 }
 
 func TestRun_AssumptionInlineText_Fires(t *testing.T) {
-	// B-3 (Option B1): an intent frontmatter with an
-	// assumptions[].text key is the A-path leftover. The strict
-	// parser still accepts "text:" (model.Assumption has the
-	// field for round-trip), but lint detects it via
-	// parser.HasInlineAssumptionText and fires
-	// RuleAssumptionInline as a Warning.
+	// RFC 2026-10-12-close-b3-softening §2.2: the parser REJECTS
+	// unknown fields, so a frontmatter with `text:` inside
+	// `assumptions:` fails at parse time with RuleFrontmatterInvalid
+	// — the strict parser is the first line of defence. The lint
+	// raw-bytes pre-scan (parser.HasInlineAssumptionText) is a
+	// redundant safety net for callers that bypass the parser,
+	// and it now fires Error (not Warning) so the diagnostic is
+	// unmissable when both layers report.
 	dir := t.TempDir()
 	writeAssumption(t, dir, "region", "服务仅部署在单 region", "hard", "active")
 	writeFile(t, dir, ".kron/intents/uses-mixed.md", `<!-- kron:frontmatter -->
@@ -852,7 +849,6 @@ created_by: "@a"
 updated_at: 2026-10-01T10:00:00Z
 assumptions:
   - id: region
-    text: 服务仅部署在单 region
     severity: hard
     rationale: "this is a long enough rationale string"
     expires_at: "2026-12-31T00:00:00Z"
@@ -860,9 +856,33 @@ assumptions:
 
 # uses-mixed
 `)
+	// Sanity: a clean intent (no inline text) fires nothing.
 	diags, err := Run(context.Background(), dir)
 	require.NoError(t, err)
-	assertDiagRule(t, diags, RuleAssumptionInline, SeverityWarning, "uses-mixed")
+	assertDiagRuleAbsent(t, diags, RuleAssumptionInline, "uses-mixed")
+}
+
+func TestRun_AssumptionInlineText_RejectsAtParseTime(t *testing.T) {
+	// The parser is the primary line of defence: an intent with
+	// inline `text:` inside the assumptions block fails to parse,
+	// surfacing as RuleFrontmatterInvalid (Error). This test pins
+	// that contract.
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/intents/inline-text.md", `<!-- kron:frontmatter -->
+created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+assumptions:
+  - id: region
+    text: 服务仅部署在单 region
+    severity: hard
+    rationale: "this is a long enough rationale string"
+<!-- /kron:frontmatter -->
+
+# inline-text
+`)
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	assertDiagRule(t, diags, RuleFrontmatterInvalid, SeverityError, "<root>")
 }
 
 func TestRun_AssumptionRationaleStale(t *testing.T) {
@@ -879,7 +899,6 @@ created_by: "@a"
 updated_at: 2026-10-01T10:00:00Z
 assumptions:
   - id: region
-    text: 服务仅部署在单 region, 旧版描述
     severity: hard
     rationale: "this rationale echoes part of the old region description 旧版描述"
 <!-- /kron:frontmatter -->
@@ -904,6 +923,21 @@ func assertDiagRule(t *testing.T, diags []Diag, rule Rule, wantSev Severity, whe
 		seen = append(seen, fmt.Sprintf("%s/%s/%s", d.Rule, d.Severity, d.Where))
 	}
 	t.Fatalf("expected diag rule=%s severity=%s where=%q, got: %v", rule, wantSev, whereContains, seen)
+}
+
+// assertDiagRuleAbsent is the negative of assertDiagRule: it FAILS the
+// test if any diag matches rule + whereContains (severity-agnostic).
+// Used to pin "this rule should NOT fire on a clean fixture" cases
+// so a future regression that re-enables the rule gets caught here
+// instead of silently passing.
+func assertDiagRuleAbsent(t *testing.T, diags []Diag, rule Rule, whereContains string) {
+	t.Helper()
+	for _, d := range diags {
+		if d.Rule == rule && (whereContains == "" || d.Where == whereContains) {
+			t.Fatalf("expected NO diag rule=%s where=%q, but got: %s/%s/%s",
+				rule, whereContains, d.Rule, d.Severity, d.Where)
+		}
+	}
 }
 
 // =====================================================================

@@ -176,7 +176,6 @@ var knownFrontmatterFields = map[string]struct{}{
 	"references":       {},
 	"depends_on":       {},
 	"id":               {}, // shared: intent + assumption frontmatter
-	"text":             {}, // shared: intent assumption + assumption file
 	"severity":         {}, // intent inline assumption (per-intent severity)
 	"default_severity": {}, // assumption file (B-3: renamed from severity)
 	"rationale":        {}, // B-3: per-intent explanation (required ≥10 chars)
