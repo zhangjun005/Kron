@@ -1,3 +1,5 @@
+// Kron Wails GUI entry point. See app.go for the bridge surface and
+// docs/rfc/2026-10-09-gui-ide-plan.md §6 for placement.
 package main
 
 import (
@@ -12,18 +14,22 @@ import (
 var assets embed.FS
 
 func main() {
-	// Create an instance of the app structure
 	app := NewApp()
 
-	// Create application with options
 	err := wails.Run(&options.App{
-		Title:  "kron-wails",
-		Width:  1024,
-		Height: 768,
+		// Title shown in the OS window chrome.
+		Title:     "Kron",
+		Width:     1280,
+		Height:    800,
+		MinWidth:  900,
+		MinHeight: 600,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
+		// Kron brand background — neutral dark surface used while the
+		// React app boots. Final theming lives in CSS variables; this is
+		// just the pre-paint colour.
+		BackgroundColour: &options.RGBA{R: 24, G: 24, B: 27, A: 1},
 		OnStartup:        app.startup,
 		Bind: []interface{}{
 			app,
@@ -31,6 +37,6 @@ func main() {
 	})
 
 	if err != nil {
-		println("Error:", err.Error())
+		println("Kron failed to start:", err.Error())
 	}
 }
