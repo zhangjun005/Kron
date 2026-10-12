@@ -145,7 +145,6 @@ func TestParseFrontmatter_AcceptsAssumptions(t *testing.T) {
 updated_at: 2026-10-01T10:00:00Z
 assumptions:
   - id: single-region
-    text: single region deployment
     severity: hard
 `)
 	fm, err := ParseFrontmatter(raw)
@@ -160,7 +159,6 @@ func TestParseFrontmatter_RejectsAssumptionMissingSeverity(t *testing.T) {
 updated_at: 2026-10-01T10:00:00Z
 assumptions:
   - id: x
-    text: y
 `)
 	_, err := ParseFrontmatter(raw)
 	require.Error(t, err)
@@ -199,10 +197,13 @@ assumptions:
 	assert.Equal(t, "跨 region 时 token 失效爆炸, 必须保证单 region 部署", fm.Assumptions[0].Rationale)
 }
 
-func TestParseFrontmatter_AcceptsLegacyStructForMigration(t *testing.T) {
-	// A-path (v1.1) form: full struct with text/severity/expires_at,
-	// no rationale. v1.3 accepts this (parse-level), lint surfaces
-	// RuleAssumptionRationaleRequired as a Warning.
+func TestParseFrontmatter_RejectsInlineAssumptionText(t *testing.T) {
+	// RFC 2026-10-12-close-b3-softening §2.2: per-intent frontmatter
+	// must NOT carry `text:` inside the `assumptions:` block. The
+	// text lives in the registry at .kron/assumptions/<id>.md.
+	// The parser REJECTS the unknown field rather than silently
+	// dropping it (the soft "accept for round-trip" window from
+	// Option B1 closed).
 	raw := []byte(`created_by: "@a"
 updated_at: 2026-10-01T10:00:00Z
 assumptions:
@@ -211,12 +212,9 @@ assumptions:
     severity: hard
     expires_at: "2026-12-31T00:00:00Z"
 `)
-	fm, err := ParseFrontmatter(raw)
-	require.NoError(t, err)
-	require.Len(t, fm.Assumptions, 1)
-	assert.Empty(t, fm.Assumptions[0].Rationale, "empty rationale permitted at parse time (lint surfaces as Warning)")
-	assert.Equal(t, "服务仅部署在单 region", fm.Assumptions[0].Text)
-	assert.Equal(t, "2026-12-31T00:00:00Z", fm.Assumptions[0].ExpiresAt)
+	_, err := ParseFrontmatter(raw)
+	require.Error(t, err, "inline `text:` in assumptions[] must be rejected (RFC 2026-10-12-close-b3-softening §2.2)")
+	assert.Contains(t, err.Error(), "text", "error should name the rejected field")
 }
 
 func TestParseFrontmatter_RejectsRationaleTooShort(t *testing.T) {

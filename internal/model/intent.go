@@ -71,15 +71,13 @@ func (k IntentKind) Valid() bool {
 // Written in frontmatter's assumptions[] field, not duplicated in body.
 //
 // B-3 fields (v1.3): ID (required) + Severity (required, per-intent) + Rationale
-// (required, ≥ 10 chars) + Text (optional, read from assumption registry) + expires/verified.
+// (required, ≥ 10 chars) + expires/verified. Text is NOT a per-intent field;
+// the human-readable description lives in the assumption registry at
+// .kron/assumptions/<id>.md and is fetched by ID.
 type Assumption struct {
 	// ID is a machine-friendly identifier in kebab-case.
 	// Used by lint and MCP tools to reference this assumption.
 	ID string `yaml:"id"`
-
-	// Text is a human-readable description of the precondition.
-	// Optional; if empty, callers should read from the assumption registry via ID.
-	Text string `yaml:"text,omitempty"`
 
 	// Severity determines what happens when this assumption is violated.
 	// - hard: code logic MUST be changed (e.g., "Redis available ≥ 99.9%" → token revocation fails)
