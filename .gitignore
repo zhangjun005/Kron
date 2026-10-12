@@ -39,6 +39,8 @@ frontend/vscode/node_modules/
 frontend/wails/node_modules/
 frontend/wails/dist/
 frontend/wails/.vite/
+frontend/wails/build/
+frontend/wails/frontend/*.md5
 
 # Rust legacy (will be cleaned from archive branch if needed)
 # Uncomment if rebuilding Rust side:
