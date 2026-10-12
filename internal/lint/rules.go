@@ -126,6 +126,17 @@ const (
 	// legitimate when the rationale explains why.
 	RuleAssumptionSeverityMismatch Rule = "assumption-severity-mismatch"
 
+	// RuleAssumptionInline (Warning): an intent's assumptions[]
+	// block in frontmatter carries a "text:" key. Per B-3 the
+	// text lives in the registry (.kron/assumptions/<id>.md) and
+	// is the sole source of truth; an inline `text:` is the
+	// A-path leftover from the migration window. The parser
+	// silently drops the key (the registry is canonical) so the
+	// file still loads; this rule nudges the author to clean up
+	// the inline copy. Severity: warning (advisory; the file
+	// is correct, just stylistically outdated).
+	RuleAssumptionInline Rule = "assumption-inline-text"
+
 	// T-class (RFC 2026-10-08-writer-readme-symmetry): tree-shape
 	// rules. These read the on-disk intent layout to flag intents
 	// that violate the directory-tree contract.

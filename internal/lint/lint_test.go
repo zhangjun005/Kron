@@ -214,6 +214,7 @@ func TestRuleConstantsAreStable(t *testing.T) {
 	assert.Equal(t, Rule("self-reference"), RuleSelfReference)
 	assert.Equal(t, Rule("stale-superseded-candidate"), RuleStaleSupersededCandidate)
 	assert.Equal(t, Rule("expired-hard-assumption"), RuleExpiredHardAssumption)
+	assert.Equal(t, Rule("assumption-inline-text"), RuleAssumptionInline)
 }
 
 // --- A-class: markdown anchor (RFC 2026-10-08-md-anchors.md §3.2) ---
@@ -515,7 +516,6 @@ created_by: "@alice"
 updated_at: 2026-01-01T00:00:00Z
 assumptions:
   - id: region-stays-single
-    text: single region
     severity: hard
     rationale: "service must remain in single region for token consistency"
     expires_at: %s
@@ -544,7 +544,6 @@ created_by: "@alice"
 updated_at: 2026-01-01T00:00:00Z
 assumptions:
   - id: region-stays-single
-    text: single region
     severity: hard
     rationale: "service must remain in single region for token consistency"
     expires_at: %s
@@ -570,7 +569,6 @@ created_by: "@alice"
 updated_at: 2026-01-01T00:00:00Z
 assumptions:
   - id: dau-under-10k
-    text: DAU under 10k
     severity: soft
     rationale: "soft DAU budget for the system's scale, can degrade"
     expires_at: %s
@@ -606,7 +604,6 @@ created_by: "@alice"
 updated_at: 2026-01-01T00:00:00Z
 assumptions:
   - id: x
-    text: x
     severity: hard
     rationale: "x assumption rationale is at least 10 chars"
     expires_at: %s
@@ -701,6 +698,57 @@ func TestRun_AssumptionOrphan(t *testing.T) {
 	assertDiagRule(t, diags, RuleAssumptionOrphan, SeverityWarning, "lonely")
 }
 
+func TestRun_AssumptionOrphan_NotOrphanIfBodyMarker(t *testing.T) {
+	// B-3 (Option B1): an assumption is "referenced" if EITHER
+	//   (a) some intent's frontmatter.assumptions[].id matches, OR
+	//   (b) some intent body has a @kron:assumes <id> marker.
+	// This test covers case (b): no frontmatter reference, but
+	// the body has the marker → not orphan.
+	dir := t.TempDir()
+	writeAssumption(t, dir, "single-region", "single region", "hard", "active")
+	writeFile(t, dir, ".kron/intents/auth.md", `<!-- kron:frontmatter -->
+created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+<!-- /kron:frontmatter -->
+
+# Auth
+
+This intent depends on the <!-- @kron:assumes single-region --> assumption.
+`)
+
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	for _, d := range diags {
+		if d.Rule == RuleAssumptionOrphan && d.Where == "single-region" {
+			t.Fatalf("expected NO orphan diag for single-region (body marker should satisfy the rule), got: %+v", d)
+		}
+	}
+}
+
+func TestRun_AssumptionOrphan_NoMarkerNoFM(t *testing.T) {
+	// B-3 (Option B1): an assumption with NEITHER a frontmatter
+	// reference NOR a body marker is orphan. This is the
+	// strictest reading — covers the "registered but unused"
+	// signal the orphan rule exists to surface.
+	dir := t.TempDir()
+	writeAssumption(t, dir, "lonely-marker", "lonely via body only", "soft", "active")
+	// Intent body mentions a DIFFERENT marker (different id),
+	// not the one we registered.
+	writeFile(t, dir, ".kron/intents/auth.md", `<!-- kron:frontmatter -->
+created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+<!-- /kron:frontmatter -->
+
+# Auth
+
+This intent depends on the <!-- @kron:assumes csrf-protected --> assumption.
+`)
+
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	assertDiagRule(t, diags, RuleAssumptionOrphan, SeverityWarning, "lonely-marker")
+}
+
 func TestRun_AssumptionSupersededSkipped(t *testing.T) {
 	dir := t.TempDir()
 	// Superseded assumption is referenced; should not surface as orphan.
@@ -790,10 +838,13 @@ updated_at: 2026-09-22T10:00:00Z
 	assertDiagRule(t, diags, RuleAssumptionFileIdMismatch, SeverityError, "z")
 }
 
-func TestRun_AssumptionMixedForm(t *testing.T) {
-	// A intent frontmatter has assumptions[].text (A-path inline
-	// leftover) alongside B-3 id+severity+rationale — fires
-	// RuleAssumptionMixedForm as a Warning so authors clean up.
+func TestRun_AssumptionInlineText_Fires(t *testing.T) {
+	// B-3 (Option B1): an intent frontmatter with an
+	// assumptions[].text key is the A-path leftover. The strict
+	// parser still accepts "text:" (model.Assumption has the
+	// field for round-trip), but lint detects it via
+	// parser.HasInlineAssumptionText and fires
+	// RuleAssumptionInline as a Warning.
 	dir := t.TempDir()
 	writeAssumption(t, dir, "region", "服务仅部署在单 region", "hard", "active")
 	writeFile(t, dir, ".kron/intents/uses-mixed.md", `<!-- kron:frontmatter -->
@@ -811,13 +862,16 @@ assumptions:
 `)
 	diags, err := Run(context.Background(), dir)
 	require.NoError(t, err)
-	assertDiagRule(t, diags, RuleAssumptionMixedForm, SeverityWarning, "uses-mixed")
+	assertDiagRule(t, diags, RuleAssumptionInline, SeverityWarning, "uses-mixed")
 }
 
 func TestRun_AssumptionRationaleStale(t *testing.T) {
 	// Inline text on intent frontmatter diverges from registry text;
 	// fires RuleAssumptionRationaleStale as a Warning to nudge the
-	// author to drop the inline copy.
+	// author to drop the inline copy. The detection now uses a
+	// substring check (B-3 Option B1: per-intent side no longer
+	// has a Text field, so we compare the rationale wording
+	// against the registry text).
 	dir := t.TempDir()
 	writeAssumption(t, dir, "region", "服务仅部署在单 region, 新版描述", "hard", "active")
 	writeFile(t, dir, ".kron/intents/stale-rationale.md", `<!-- kron:frontmatter -->
@@ -827,7 +881,7 @@ assumptions:
   - id: region
     text: 服务仅部署在单 region, 旧版描述
     severity: hard
-    rationale: "this is a long enough rationale string"
+    rationale: "this rationale echoes part of the old region description 旧版描述"
 <!-- /kron:frontmatter -->
 
 # stale-rationale

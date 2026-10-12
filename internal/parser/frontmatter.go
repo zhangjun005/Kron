@@ -214,6 +214,70 @@ func ParseFrontmatter(raw []byte) (model.Frontmatter, error) {
 	return fm, nil
 }
 
+// HasInlineAssumptionText reports whether the raw YAML frontmatter
+// contains a "text:" key inside the top-level "assumptions:" block.
+// Returns (count, true) when at least one inline text is present.
+//
+// B-3 (Option B1, RFC kill-inline-assumptions.md §2.1): per B-3 the
+// text lives in the registry, not the intent frontmatter. The parser
+// still ACCEPTS inline `text:` (for round-trip), but lint uses this
+// function to detect the A-path leftover and emit
+// RuleAssumptionInline as a Warning.
+//
+// This is a cheap text-level pre-scan — it does NOT need to
+// understand YAML's full grammar. We look for the pattern of
+// "assumptions:" at column 0 followed (within nested lines) by a
+// "text:" key. False positives (a "text:" key in a nested list with
+// no preceding "- id:") are possible but acceptable — the worst case
+// is one extra lint warning, and the rule is already advisory.
+func HasInlineAssumptionText(raw []byte) (int, bool) {
+	lines := bytes.Split(raw, []byte("\n"))
+	inAssumptions := false
+	inEntry := false
+	entryHasID := false
+	count := 0
+	for _, line := range lines {
+		// atColumnZero: the line has no leading whitespace.
+		atColumnZero := len(line) == 0 || (line[0] != ' ' && line[0] != '\t')
+		trimmed := bytes.TrimLeft(line, " \t")
+		if len(trimmed) == 0 || trimmed[0] == '#' {
+			continue
+		}
+		if atColumnZero {
+			if bytes.HasPrefix(trimmed, []byte("assumptions:")) {
+				inAssumptions = true
+				inEntry = false
+				entryHasID = false
+				continue
+			}
+			// Any other top-level key ends the assumptions block.
+			inAssumptions = false
+			inEntry = false
+			entryHasID = false
+			continue
+		}
+		if !inAssumptions {
+			continue
+		}
+		// Inside assumptions: detect list items.
+		if bytes.HasPrefix(trimmed, []byte("- ")) {
+			inEntry = true
+			entryHasID = bytes.HasPrefix(trimmed, []byte("- id:"))
+			continue
+		}
+		if !inEntry {
+			continue
+		}
+		// Inside an assumption entry, look for "text:" (any indent).
+		if bytes.HasPrefix(trimmed, []byte("text:")) {
+			if entryHasID {
+				count++
+			}
+		}
+	}
+	return count, count > 0
+}
+
 // ParseAssumptionFrontmatter parses the YAML frontmatter of an assumption file
 // (.kron/assumptions/<id>.md). It is separate from ParseFrontmatter because
 // assumption files have a different required-field set (no created_by/updated_at

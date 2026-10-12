@@ -310,7 +310,7 @@ func RunWith(ctx context.Context, root string, opts RunOptions) ([]Diag, error) 
 			Severity: SeverityError,
 		})
 	}
-	diags = append(diags, runAssumptionRules(intents, arReader, opts)...)
+	diags = append(diags, runAssumptionRules(root, intents, arReader, opts)...)
 
 	// T-class: tree-shape rules (RFC 2026-10-08-writer-readme-symmetry
 	// §5). Runs AFTER the intents are loaded so Kind is already
