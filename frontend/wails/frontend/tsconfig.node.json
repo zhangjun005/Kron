@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json.schemastore.org/tsconfig",
   "compilerOptions": {
     "composite": true,
     "skipLibCheck": true,
@@ -8,7 +9,10 @@
     "strict": true,
     "noEmit": false,
     "emitDeclarationOnly": true,
-    "declaration": true
+    "declaration": true,
+    "types": [
+      "node"
+    ]
   },
   "include": [
     "vite.config.ts"
