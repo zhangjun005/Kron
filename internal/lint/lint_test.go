@@ -223,6 +223,86 @@ func TestRuleConstantsAreStable(t *testing.T) {
 // .kron/intents/ and .kron/.trash/ must be reported as
 // RuleMarkdownAnchorDangling when the slug doesn't resolve.
 
+// TestSuggestionForCatalogExhaustiveness (C-5): every rule in the
+// public Rule const block has a non-empty SuggestionFor entry. This
+// is a compile-time contract that prevents "added a new Rule, forgot
+// the hint" regressions. New Rule constants must be added to
+// SuggestionFor in rules.go or this test fails.
+func TestSuggestionForCatalogExhaustiveness(t *testing.T) {
+	rules := []Rule{
+		RuleAnchorDangling,
+		RuleMarkdownAnchorDangling,
+		RuleFrontmatterInvalid,
+		RuleLoadAllFailed,
+		RuleDanglingReference,
+		RuleDanglingDependsOn,
+		RuleDependsOnCycle,
+		RuleSelfReference,
+		RuleStaleSupersededCandidate,
+		RuleExpiredHardAssumption,
+		RuleAssumptionRegistryIdMismatch,
+		RuleAssumptionOrphan,
+		RuleAssumptionMixedForm,
+		RuleAssumptionFileIdMismatch,
+		RuleAssumptionRationaleRequired,
+		RuleAssumptionRationaleStale,
+		RuleAssumptionSeverityMismatch,
+		RuleAssumptionInline,
+		RuleIntentOrphanUnderNoNode,
+	}
+	for _, r := range rules {
+		s := SuggestionFor(r)
+		assert.NotEmptyf(t, s, "SuggestionFor(%q) is empty; add an entry in rules.go", r)
+	}
+}
+
+// TestRun_BackfillsSuggestion (C-5): Run() at its return boundary
+// populates Diag.Suggestion for every diag, including the ones
+// emitted by sub-rule functions (assumption_rules / tree_rules) AND
+// the early-return path (LoadAll failure). Three rules from three
+// different sub-paths are checked so a refactor that drops the
+// backfill defer is caught.
+//
+// We use valid sampleIntent content for the per-intent fixtures so
+// LoadAll succeeds; the A-class fixture (a dangling anchor in
+// main.go) is independent of the intent load.
+func TestRun_BackfillsSuggestion(t *testing.T) {
+	dir := t.TempDir()
+	// (1) A-class: anchor-dangling fires from lint.go top-level loop.
+	writeFile(t, dir, "main.go", "// @kron:intent auth/never-existed\n")
+	// (2) T-class: orphan-under-no-node fires from runTreeRules.
+	writeFile(t, dir, ".kron/intents/auth/orphan-leaf.md", sampleIntent)
+	// (3) C-class: dangling-depends-on fires from lint.go per-intent loop.
+	writeFile(t, dir, ".kron/intents/has-bad-dep.md",
+		"<!-- kron:frontmatter -->\ncreated_by: \"@a\"\nupdated_at: 2026-10-01T10:00:00Z\nstatus: active\ndepends_on:\n  - never-existed\n<!-- /kron:frontmatter -->\n# x\n\n")
+
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	require.NotEmpty(t, diags)
+
+	wantByRule := map[Rule]string{
+		// Suggestion text is a static catalog entry that does NOT
+		// interpolate the slug — the lint engine does not have a
+		// per-Diag template substitution step (it just looks up
+		// the rule). The match below asserts the catalog entry is
+		// present; a future enhancement could template-substitute
+		// {where} / {slug} but that's out of scope for C-5 v1.
+		RuleAnchorDangling:          "Create .kron/intents/<slug>.md",
+		RuleIntentOrphanUnderNoNode: "Create a parent README.md node intent",
+		RuleDanglingDependsOn:       "Remove the depends_on entry",
+	}
+	got := map[Rule]string{}
+	for _, d := range diags {
+		if want, ok := wantByRule[d.Rule]; ok && d.Suggestion != "" {
+			got[d.Rule] = d.Suggestion
+			assert.Contains(t, d.Suggestion, want, "SuggestionFor(%q) should contain %q", d.Rule, want)
+		}
+	}
+	for r := range wantByRule {
+		assert.Containsf(t, got, r, "expected to find a diag for rule %q with non-empty Suggestion; got diags=%+v", r, diags)
+	}
+}
+
 func TestRun_MarkdownAnchorDangling(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "docs/notes.md", `# Notes

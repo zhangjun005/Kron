@@ -21,6 +21,20 @@ type Diag struct {
 
 	// Severity is "error" or "warning". Empty is treated as error.
 	Severity Severity
+
+	// Suggestion is a human-readable hint describing how to fix the
+	// issue. Empty string means "no specific suggestion" (the engine
+	// did not have a confident fix to recommend). Always advisory
+	// text — the engine never auto-applies changes; the user runs
+	// the suggested command or edits the file themselves.
+	//
+	// Format convention (C-5): start with an imperative verb, end
+	// without trailing punctuation. Examples:
+	//   "Run: kron update --slug=<slug> --status=draft"
+	//   "Move <child> under a README.md node at <parent>"
+	//
+	// See SuggestionFor in rules.go for the per-Rule catalog.
+	Suggestion string
 }
 
 // severity returns d.Severity, defaulting to SeverityError when empty.

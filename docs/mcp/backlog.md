@@ -284,11 +284,11 @@ server := mcp.NewServer(&mcp.Implementation{...}, nil)
 
 | 编号 | 描述 | 来源 |
 |---|---|---|
-| C-1 | 加 `Resources`(URI 资源)支持:`kron://intents/<slug>` 可读 | 协议层 §一.0 |
+| C-1 | ~~加 `Resources`(URI 资源)支持:`kron://intents/<slug>` 可读~~ — **✅ 已完成 (2026-10-13)** (`cmd/kron/serve-mcp/resources.go` + `testkit.go` 注册;URI 模板 `kron://intents/{+slug}` 用 RFC 6570 reserved-expansion 允许 `slug` 含 `/`;handler 经 `store.NewReader` 读 + `parser.SerializeMarkdown` 重组) | 协议层 §一.0 |
 | C-2 | 加 `Prompts` 模板:`kron-review` / `kron-audit` 给 LLM 直接调 | 协议层 §一.0 |
 | C-3 | ~~加 `Logging` capability + `logging/setLevel` handler(替代 stderr hack)~~ — **✅ 已完成 (2026-10-13)** | 协议层 |
 | C-4 | ~~加 per-Run cache~~ — 见 G-7（✅ 已完成） | 性能 |
-| C-5 | 在 `kron_lint` 错误输出里加"fix suggestion" hint | DX |
+| C-5 | ~~在 `kron_lint` 错误输出里加"fix suggestion" hint~~ — **✅ 已完成 (2026-10-13)** (`internal/lint/diag.go` 加 `Suggestion` 字段;`internal/lint/rules.go` `SuggestionFor` 目录 19 条 rule;`RunWith` defer 回填;wire 透传到 `LintDiag.suggestion`;`kron lint` text/JSON 都带;`internal/lint/lint_test.go` 测 `TestSuggestionForCatalogExhaustiveness` + `TestRun_BackfillsSuggestion`) | DX |
 | C-6 | ~~加 `kron_impact` 的 `incoming_anchors` 维度拆分:code / markdown 分开列~~ — **✅ 已完成 (2026-10-13)** | DX |
 | C-7 | ~~在 `kron_get` 返回的 `relations` 里加 `dependents`~~ — **✅ 已完成 (2026-10-13)** | 一致性 |
 
@@ -323,8 +323,8 @@ server := mcp.NewServer(&mcp.Implementation{...}, nil)
 7. ~~**G-1**~~ — **✅ 已实装**(`runWithSignalCtx` 在 `serve_mcp.go:188`,2026-10-13 补登)
 8. ~~**G-2**~~ — **✅ 已实装**(`cmd/kron/serve-mcp/e2e/e2e_stdio_test.go`,2026-10-13 补登)
 9. **G-3** 与 SDK 升级一起做(单独 PR)
-10. **C-1** Resources（先验证 client 支持情况）
+10. ~~**C-1** Resources~~ — **✅ 已完成 (2026-10-13)**
 11. **Roots** （新发现；先开 RFC 拍板范围）
-12. **C-5** kron_lint fix suggestion hint
+12. ~~**C-5** kron_lint fix suggestion hint~~ — **✅ 已完成 (2026-10-13)**
 
 不催——按需做,本目录**只**是记录。

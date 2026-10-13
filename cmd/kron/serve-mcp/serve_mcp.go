@@ -145,6 +145,12 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 	// handlers see the injected caller on their ctx.
 	registerTools(server)
 
+	// C-1: register the kron://intents/{slug} resource template.
+	// One template covers every intent (no per-intent static
+	// AddResource calls); the per-read handler does the lookup.
+	// docs/mcp/missing-capabilities.md §C-1.
+	registerResources(server)
+
 	// Run blocks until the client closes stdin or the transport
 	// errors out. Returning a non-nil error here means
 	// unrecoverable transport failure (rare).

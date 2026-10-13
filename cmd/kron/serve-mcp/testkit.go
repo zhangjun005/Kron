@@ -48,6 +48,10 @@ func newTestSession(t *testing.T, root string) *testSession {
 	server.AddReceivingMiddleware(callerInjectMiddleware(root))
 
 	registerTools(server)
+	// C-1: register the kron://intents/{slug} resource template
+	// so test clients can exercise resources/list + resources/read
+	// against the same handler the production server uses.
+	registerResources(server)
 
 	st, ct := mcp.NewInMemoryTransports()
 

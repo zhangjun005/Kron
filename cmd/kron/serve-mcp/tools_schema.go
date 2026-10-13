@@ -43,10 +43,11 @@ type LintInput struct {
 }
 
 type LintDiag struct {
-	Rule     string `json:"rule"     jsonschema:"rule code, e.g. anchor-dangling / frontmatter-invalid"`
-	Where    string `json:"where"    jsonschema:"file:line or slug where the issue is"`
-	Severity string `json:"severity" jsonschema:"error or warning"`
-	Detail   string `json:"detail"   jsonschema:"human-readable description"`
+	Rule       string `json:"rule"       jsonschema:"rule code, e.g. anchor-dangling / frontmatter-invalid"`
+	Where      string `json:"where"      jsonschema:"file:line or slug where the issue is"`
+	Severity   string `json:"severity"   jsonschema:"error or warning"`
+	Detail     string `json:"detail"     jsonschema:"human-readable description"`
+	Suggestion string `json:"suggestion,omitempty" jsonschema:"optional human-readable fix hint; empty when the engine has no confident recommendation (C-5)"`
 }
 
 type LintSummary struct {

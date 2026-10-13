@@ -65,6 +65,12 @@ func runLint(args []string, out, errOut io.Writer) error {
 func writeLintText(out io.Writer, diags []lint.Diag) {
 	for _, d := range diags {
 		fmt.Fprintf(out, "[%s] %s: %s -> %s\n", d.Severity, d.Rule, d.Where, d.Detail)
+		// C-5: when the engine has a confident fix hint, print it
+		// on the next line indented under the diag. Empty string
+		// (no hint) is silently omitted.
+		if d.Suggestion != "" {
+			fmt.Fprintf(out, "       hint: %s\n", d.Suggestion)
+		}
 	}
 	if len(diags) == 0 {
 		fmt.Fprintf(out, "[ok] 0 errors, 0 warnings\n")
@@ -92,8 +98,8 @@ func writeLintJSON(out io.Writer, diags []lint.Diag) {
 			fmt.Fprint(out, ",")
 		}
 		fmt.Fprintln(out)
-		fmt.Fprintf(out, `    {"rule": %q, "where": %q, "severity": %q, "detail": %q}`,
-			string(d.Rule), d.Where, string(d.Severity), d.Detail)
+		fmt.Fprintf(out, `    {"rule": %q, "where": %q, "severity": %q, "detail": %q, "suggestion": %q}`,
+			string(d.Rule), d.Where, string(d.Severity), d.Detail, d.Suggestion)
 	}
 	if len(diags) > 0 {
 		fmt.Fprintln(out)

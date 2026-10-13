@@ -50,6 +50,13 @@ server := mcp.NewServer(impl, &mcp.ServerOptions{
 
 ## C-1 — Resources（kron://intents/\<slug\> URI）（中优先级）
 
+**状态** — ✅ **已实装 (2026-10-13)**
+
+实现位置:`cmd/kron/serve-mcp/resources.go`,`testkit.go` + `serve_mcp.go`
+中 `registerResources(server)` 调用链。Wire-level 测试
+(`resources_lint_suggestion_test.go`) 覆盖 `resources/list`、
+`resources/read` 正常路径、not-found、malformed URI 四种 case。
+
 ### 背景
 
 MCP Resources 是 server → client 的只读数据暴露。跟 Tools 的区别：
@@ -167,6 +174,58 @@ func HandleResourcesRead(ctx context.Context, root, uri string) (*mcp.ReadResour
 
 ---
 
+### 实装记录 (2026-10-13)
+
+实现位置：`cmd/kron/serve-mcp/resources.go`，在 `serve_mcp.go`
+的 `registerTools(server)` 之后调 `registerResources(server)`。
+testkit 同步注册了 resources，所以 wire-level 测试可以走 in-memory
+client。
+
+URI 模板改成 `kron://intents/{+slug}`（**不是** `{slug}`）：
+最初按 RFC 6570 普通 expansion 写 `{slug}`，但**不**工作。
+go-sdk v1.1.0 的 `lookupResourceHandler` 把模板编译成 regex
+（`tmpl.Regexp().MatchString`），普通 `{slug}` 不跨 `/`，所以
+`kron://intents/auth/jwt` 永远匹配不到。SDK 自己的
+`TestTemplateMatch` 表明 `{+path}`（reserved expansion）才是允许
+保留 `/` 的形式。Slug 自身的语法（`parser.ValidateSlug`）**不变**；
+这纯粹是 wire 模板的语法选择。
+
+最终 handler 形态（resources.go）：
+
+```go
+const kronIntentsResourceTemplate = "kron://intents/{+slug}"
+
+func registerResources(server *mcp.Server) {
+    template := &mcp.ResourceTemplate{
+        Name:        "kron-intent",
+        Title:       "Kron intent",
+        Description: "...",
+        MIMEType:    "text/markdown",
+        URITemplate: kronIntentsResourceTemplate,
+    }
+    server.AddResourceTemplate(template, handleIntentResourceRead)
+}
+```
+
+handler 行为：
+
+- 正常路径：`store.NewReader(root).Load(slug)` + `parser.SerializeMarkdown(intent)` → markdown 文本返回
+- Not-found：`model.ErrIntentNotFound` → `mcp.ResourceNotFoundError(uri)`（SDK 推荐做法，避免泄露 server 内部）
+- malformed URI（非 `kron://intents/` 前缀）：→ not-found
+- 解析错（frontmatter invalid 等）：→ wrapped error，`isError` 设为 true
+
+**风险评估（实装后）**：
+
+- ✅ go-sdk v1.1.0 已支持
+- ⚠️ Client 端是否主动用 Resources 仍**待验证**。Claude Desktop
+  / Cursor MCP runtime 默认**不**主动调 `resources/list`；AI 工具
+  通常直接调 `kron_get` tool。如果 client 不主动用，Resources 是
+  "协议层齐了但消费侧空闲"的状态
+- ✅ Resources 不与 Tools 互斥：client 可以**同时**用
+  `kron_get`（结构化 JSON）和 `resources/read`（原始 markdown）
+
+---
+
 ## C-2 — Prompts（kron-review / kron-audit 模板）（低优先级）
 
 ### 背景
@@ -276,6 +335,8 @@ func (l *kronLogger) Info(msg string) {
 
 ## C-5 — kron_lint 加 fix suggestion hint（DX 改善）
 
+**状态** — ✅ **已实装 (2026-10-13)**
+
 见 `docs/mcp/backlog.md` C-5。
 
 **修法**：在 `LintDiag` 输出里加 `suggestion?: string` 字段，对应 rule 的自动修复建议（如果有）。
@@ -284,13 +345,42 @@ func (l *kronLogger) Info(msg string) {
 
 ```json
 {
-  "rule": "frontmatter-missing-symbol",
-  "where": "auth.md",
-  "severity": "warning",
-  "detail": "intent has no frontmatter.symbol field",
-  "suggestion": "Run: kron update --slug=auth --symbol=<your-symbol>"
+  "rule": "anchor-dangling",
+  "where": "main.go:1",
+  "severity": "error",
+  "detail": "anchor points to non-existent intent \"auth/never-existed\"",
+  "suggestion": "Create .kron/intents/<slug>.md or fix the slug in the anchor"
 }
 ```
+
+### 实装记录 (2026-10-13)
+
+实现位置：
+
+- `internal/lint/diag.go` — `Diag` 加 `Suggestion string` 字段
+- `internal/lint/rules.go` — 新增 `SuggestionFor(Rule) string` 目录，覆盖全部 19 条 Rule
+- `internal/lint/lint.go` — `RunWith` 入口用 `defer` 回填
+  `Suggestion`（defer 的关键作用：覆盖 `LoadAll` 失败的早返路径，
+  普通的"末尾回填循环"会被那条 `return` 绕过）
+- `cmd/kron/serve-mcp/tools_schema.go` — `LintDiag` 加
+  `Suggestion string`（`json:"suggestion,omitempty"`）
+- `cmd/kron/serve-mcp/tools_lint.go` — 透传 `d.Suggestion`
+- `cmd/kron/cli/lint.go` — `kron lint` text 输出额外印一行
+  `       hint: <suggestion>`；JSON 输出加 `"suggestion"` 字段
+
+测试：
+
+- `TestSuggestionForCatalogExhaustiveness`：每条 Rule 常量都
+  必须有非空 SuggestionFor 条目（防止"加新 Rule 忘记填"）
+- `TestRun_BackfillsSuggestion`：三个 sub-path（A-class / T-class /
+  C-class）触发不同 rule 的 diag 都被回填
+- `TestLint_SuggestionPropagates`：wire-level 通过 `kron_lint` tool
+  拿到 `LintOutput.Errors[].Suggestion` 非空
+
+注意：当前 `Suggestion` 是**静态目录**，**不**做模板插值
+（不把 `<slug>` 替换成实际 slug）。模板插值需要"在 Diag 上
+记录 slug / 路径再渲染"两步，v1 暂不做；提了具体 value 时
+AI client 也能从 `Where` 字段自己拿到。
 
 ---
 
