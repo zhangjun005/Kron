@@ -151,26 +151,37 @@
 - **第三方脚本**：CI / build 工具想知道"哪些路径是 Kron 项目"
 - **CLI 子命令**：`kron list-projects`（RFC §2.6 已拍）
 
-### 5.3 当前 RFC 缺什么
+### 5.3 当前 RFC 状态（2026-10-13 合并到 multi-project-registry）
 
-[`2026-10-10-multi-project-registry.md`](../../rfc/2026-10-13-multi-project-registry.md) **没**拍：
+`current_project` 已合并到 [`docs/rfc/2026-10-13-multi-project-registry.md`](../../rfc/2026-10-13-multi-project-registry.md) §2.7 / §2.8：
 
-1. **第三方工具怎么读**（缺 `internal/store/ProjectRegistry` 的公共 API）
-2. **AI 工具怎么读**（MCP 不管，那走什么？）
-3. **格式演进**（v1.2 字段够吗？未来要不要加 `last_lint` / `last_intent_count` 等）
+- `projects.json` 顶级加 `current_project?: string`（绝对路径，可空）
+- `kron register` 注册成功后自动 `current_project = <path>`
+- `kron serve-mcp` 的 `resolveMCPRoot` 3 级 fallback：
+  1. `-CWD <path>` flag（最高）
+  2. `projects.json` 的 `current_project`
+  3. `os.Getwd()`（最低）
+- GUI 用户切换项目时同时写 `current_project` + `last_opened`（一次写回）
 
-### 5.4 拍板建议
+§5.4 之前的"开新 RFC 拍板"建议**作废**——已并入现有 RFC。
 
-**开新 RFC** `docs/rfc/2026-10-13-projects-json-consumer.md`，拍板：
+### 5.4 真正缺什么（2026-10-13 复审）
+
+**没**拍的部分：
+
+1. **第三方工具公共读取 API**（`internal/store/ReadProjects()` / `WriteProject()` 函数）
+2. **AI 工具的接入路径**——MCP 不管，那 AI 工具**直接** stdlib `os.ReadFile(filepath.Dir(os.Executable()) + "/projects.json")` 读？还是经由 CLI `kron list-projects --json` 转一手？
+3. **格式演进**——v1.3 字段够吗？未来要不要加 `last_lint` / `last_intent_count` / `version`（破坏性变更时 bump）
+
+**拍板建议**（用户拍板前**不**动手）：
 
 | 项 | 建议 |
 |---|---|
-| 公共读取 API | `internal/store.ReadProjects() ([]ProjectEntry, error)` + `WriteProject(path)` |
-| 路径解析 | 沿用 RFC 拍板的 `filepath.Dir(os.Executable())` |
-| AI 工具接入 | **不**走 MCP（stateless 假设）；**走** stdlib `os.ReadFile` + `encoding/json` 读 |
-| 第三方脚本 | 提供 `kron list-projects --json` 输出（RFC §2.6 已拍但**没**说 JSON 格式） |
-| 格式版本 | JSON 加 `version: 1` 字段，未来不兼容变更 bump version |
-| 写权限 | **只** `kron register` / `kron init` 写；GUI 写 `last_opened`；第三方**只**读 |
+| 公共读取 API | `internal/store/ReadProjects() ([]ProjectEntry, error)` + `WriteProject(entry)`；CLI 复用同一 API，不重复实现 |
+| AI 工具接入 | 走 CLI：`kron list-projects --json` 输出 JSON（不**不**走 MCP，因为 stateless 假设） |
+| 第三方脚本 | 走同一 CLI：`kron list-projects --json` / `kron register <path>` |
+| 格式版本 | JSON 加 `version: 1` 字段；不兼容变更 bump `version` |
+| 写权限 | **只** `kron register` / `kron init` / GUI 写；第三方**只**读 |
 
 **实施时机**：与 multi-project-registry RFC **同周期**（v1.3+ release pipeline 阶段）。
 
@@ -184,7 +195,7 @@
 | `missing-capabilities.md` | §3 Prompts / Roots 的论证**同源**，但本文件给"mcp 全了吗"问题一个**直接答案** |
 | `kron-implementation.md` | **不**重复——本文件不切片 17 个 tool，只评估覆盖度 |
 | `protocol.md` | **不**重复——本文件不重述协议 |
-| `../../rfc/2026-10-13-multi-project-registry.md` | §5 是**补充**——"projects.json 共享"是该 RFC 没拍的部分 |
+| `../../rfc/2026-10-13-multi-project-registry.md` | §5 是**补充**——RFC 已拍 `current_project` + 3 级 fallback；本文件记录"还没拍的剩余部分" |
 
 ---
 
@@ -197,13 +208,66 @@
 
 ---
 
+## 9 CLI 边界确认（2026-10-13 复审）
+
+**问题**：CLI 子命令范围该多大？`init` / `add` / `lint` 之外还要不要加？
+
+**原则**（[架构 §〇 铁律 #6](../abstractDesign/architecture.md)）：CLI 只暴露"CI gate / 批处理 / 简单操作"；查询类（list / get / update / delete / restore）**走 MCP**。
+
+### 9.1 当前 CLI 现状
+
+| 命令 | 状态 | 用途 |
+|---|---|---|
+| `kron init` | ✅ 已有 | 创建 `.kron/` 骨架（idempotent） |
+| `kron add <slug>` | ✅ 已有 | scaffold 新 intent（写 frontmatter） |
+| `kron lint` | ✅ 已有 | 跑 lint，退出码 = CI gate（0 clean / 1 error / 2 internal） |
+| `kron help` | ✅ 已有 | 内置帮助 |
+| `kron register` | 📋 RFC 拍板未实装 | 注册当前目录到 `projects.json` |
+| `kron list-projects` | 📋 RFC §2.6 拍板未实装 | 读 `projects.json` 显示项目列表 |
+
+**5 个命令 = CLI 全部**。
+
+### 9.2 不在 CLI 的命令（架构铁律 #6）
+
+| 命令 | 走哪 | 理由 |
+|---|---|---|
+| `kron list` | MCP-only | 查询类，AI 工具主用 |
+| `kron get` | MCP-only | 查询类，AI 工具主用 |
+| `kron update` | MCP-only | 写类，但**PATCH** 语义交互性弱，AI 主用 |
+| `kron delete` | MCP-only | 危险操作，**不**给 shell 走；走 MCP 有 `dependents` 软警告 |
+| `kron restore` | MCP-only | 同上 |
+
+### 9.3 评估过的候选（用户拍板**不**做）
+
+| 候选 | 想法 | 不做的理由 |
+|---|---|---|
+| `kron lint --fix` | 自动修某些 lint error（frontmatter 格式类） | lint 的价值是**诊断**，不是自动修；auto-fix 风险高 |
+| `kron add` 交互模式 | 无参数跑交互 prompt（slug / kind / symbol） | 跑 CLI 说明**不想**交互；MCP `kron_add` 已覆盖 |
+| `kron tree` 纯文本 | 把 MCP `kron_tree` 逻辑放到 CLI | 价值低——`kron lint` + 文本输出已够；GUI 树视图走 MCP |
+| `kron list --format tree` | `kron lint` 树输出移出来 | 同上 |
+
+### 9.4 结论
+
+**CLI 范围到此为止**——`init` / `add` / `lint` / `register` / `list-projects` 5 个够用。
+
+**理由**：
+- `init` / `add` = **基本写操作**（批处理 + 脚本友好）
+- `lint` = **CI gate**（退出码语义）
+- `register` / `list-projects` = **多项目 GUI 支撑**（projects.json 共享）
+- 查询 / PATCH / 危险操作 = **MCP 专属**（AI 工具主用 + 安全 + 软警告）
+
+**不催**——`register` / `list-projects` 等多项目 RFC 实施时一起做。
+
+---
+
 ## 8 触发 PR 的建议顺序
 
 如果决定**动手**（按"价值 / 成本比"）：
 
 1. **§4 `kron_assume_get`**（~0.5 天，单 PR，走 `mcp-tool.md`）
 2. **§3.1 Prompts**（~1 天，单 PR，走 `mcp-tool.md`，含 `kron-review` 模板）
-3. **§5 `projects.json` 共享 RFC**（开新 RFC 拍板，~0.5 天文档 + 后续 ~1 天 `internal/store` API）
+3. **§5.4 projects.json 剩余部分**（~1 天，**在** multi-project-registry RFC 实施时一起做：公共读取 API + `kron list-projects --json`）
 4. **§3.2 Roots**（**不**做，`projects.json` 覆盖）
+5. **§9 CLI 边界**（**不**做——5 个命令够）
 
 不催——本文件**只**是记录。
