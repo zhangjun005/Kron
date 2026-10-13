@@ -481,3 +481,184 @@ func TestWriter_Update_RejectsShortRationale(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, got.Frontmatter.Assumptions)
 }
+
+// =====================================================================
+// T3: 边界场景（①-A 补测项）
+// =====================================================================
+
+// T3-1: 损坏 frontmatter — 磁盘上文件被手动改坏，Update 应返回可辨识错误，磁盘不变
+func TestWriter_Update_CorruptedFrontmatter(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	require.NoError(t, err)
+
+	intent := newTestIntent("auth-jwt", "@alice")
+	require.NoError(t, w.Write(context.Background(), intent))
+
+	// Simulate disk corruption: overwrite frontmatter with garbage.
+	badContent := []byte("---\ninvalid: [yaml\n  broken\n---")
+	err = os.WriteFile(w.IntentPath("auth-jwt"), badContent, 0o644)
+	require.NoError(t, err)
+
+	newStatus := model.StatusSuperseded
+	patch := UpdatePatch{Status: &newStatus, Actor: "@alice"}
+	err = w.Update(context.Background(), "auth-jwt", patch)
+	require.Error(t, err)
+	// Must not panic; error must mention the parse failure.
+	assert.Contains(t, err.Error(), "parse", "expected frontmatter parse error, got %v", err)
+
+	// Disk must be unchanged (garbage still there, not silently "fixed").
+	raw, err := os.ReadFile(w.IntentPath("auth-jwt"))
+	require.NoError(t, err)
+	assert.Equal(t, badContent, raw, "corrupted file must not be silently overwritten")
+}
+
+// T3-2: 跨 kind 更新 — node 实体 (slug/README.md) 读进来，只改字段，写回仍为 node 形式
+func TestWriter_Update_KindPreserved_NodeToNode(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	require.NoError(t, err)
+
+	// Write as node form (Kind=Node).
+	intent := &model.Intent{
+		Slug: "auth",
+		Kind: model.IntentKindNode,
+		Frontmatter: model.Frontmatter{
+			CreatedBy: "@alice",
+			UpdatedAt: time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC),
+			Status:    model.StatusDraft,
+		},
+		Body: "# Auth\n",
+	}
+	require.NoError(t, w.Write(context.Background(), intent))
+
+	// Verify node form on disk.
+	assert.FileExists(t, filepath.Join(dir, ".kron", "intents", "auth", "README.md"),
+		"node intent must write as auth/README.md")
+
+	// Update a field (does not change Kind).
+	newStatus := model.StatusActive
+	patch := UpdatePatch{Status: &newStatus, Actor: "@alice"}
+	require.NoError(t, w.Update(context.Background(), "auth", patch))
+
+	// File shape must still be node form.
+	assert.NoFileExists(t, w.IntentPath("auth"),
+		"leaf form must not appear after node Update")
+	assert.FileExists(t, filepath.Join(dir, ".kron", "intents", "auth", "README.md"),
+		"node form must be preserved after Update")
+
+	// Content correct.
+	r, err := NewReader(dir)
+	require.NoError(t, err)
+	got, err := r.Load(context.Background(), "auth")
+	require.NoError(t, err)
+	assert.Equal(t, model.IntentKindNode, got.Kind)
+	assert.Equal(t, model.StatusActive, got.Frontmatter.Status)
+}
+
+// T3-3: 跨 kind 更新 — leaf 实体更新后仍为 leaf（Update 不改变 kind）
+func TestWriter_Update_KindPreserved_LeafToLeaf(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	require.NoError(t, err)
+
+	intent := newTestIntent("auth-jwt", "@alice")
+	intent.Kind = model.IntentKindLeaf
+	require.NoError(t, w.Write(context.Background(), intent))
+
+	// Verify leaf form on disk.
+	assert.FileExists(t, w.IntentPath("auth-jwt"))
+	_, err = os.Stat(filepath.Join(dir, ".kron", "intents", "auth-jwt", "README.md"))
+	assert.True(t, os.IsNotExist(err), "leaf intent must not create subdir")
+
+	// Update.
+	newStatus := model.StatusSuperseded
+	patch := UpdatePatch{Status: &newStatus, Actor: "@alice"}
+	require.NoError(t, w.Update(context.Background(), "auth-jwt", patch))
+
+	// Still leaf.
+	_, err = os.Stat(filepath.Join(dir, ".kron", "intents", "auth-jwt", "README.md"))
+	assert.True(t, os.IsNotExist(err), "leaf form must be preserved after Update")
+}
+
+// T3-4: 连续 trash→restore→trash→restore — 四步幂等链路
+func TestWriter_TrashRestore_IdempotentChain(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	require.NoError(t, err)
+
+	intent := newTestIntent("auth-jwt", "@alice")
+	require.NoError(t, w.Write(context.Background(), intent))
+	originalPath := w.IntentPath("auth-jwt")
+
+	// Step 1: trash
+	require.NoError(t, w.MoveToTrash(context.Background(), "auth-jwt"))
+	assert.NoFileExists(t, originalPath)
+	assert.FileExists(t, w.TrashPath("auth-jwt"))
+
+	// Step 2: restore
+	require.NoError(t, w.RestoreFromTrash(context.Background(), "auth-jwt"))
+	assert.FileExists(t, originalPath)
+	assert.NoFileExists(t, w.TrashPath("auth-jwt"))
+
+	// Step 3: trash again (idempotent re-trash)
+	require.NoError(t, w.MoveToTrash(context.Background(), "auth-jwt"))
+	assert.NoFileExists(t, originalPath)
+	assert.FileExists(t, w.TrashPath("auth-jwt"))
+
+	// Step 4: restore again
+	require.NoError(t, w.RestoreFromTrash(context.Background(), "auth-jwt"))
+	assert.FileExists(t, originalPath)
+	assert.NoFileExists(t, w.TrashPath("auth-jwt"))
+
+	// Content intact after full cycle.
+	r, err := NewReader(dir)
+	require.NoError(t, err)
+	got, err := r.Load(context.Background(), "auth-jwt")
+	require.NoError(t, err)
+	assert.Equal(t, "@alice", got.Frontmatter.CreatedBy)
+	assert.Equal(t, "# Title\n\nBody paragraph.\n", got.Body)
+}
+
+// T3-5: 并发写入 — 两 goroutine 同时写同一 intent，只有一个人成功，另一个返回原文件状态
+// Note: last-write-wins 是 v1.x 的已知限制（writer.go TODO 标注）。
+// 本测试验证：两个 Update 同时执行，不会 panic，且最终状态是某个正确值。
+func TestWriter_Update_Concurrent_NoPanic(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	require.NoError(t, err)
+
+	intent := newTestIntent("auth-jwt", "@alice")
+	require.NoError(t, w.Write(context.Background(), intent))
+
+	errCh := make(chan error, 2)
+
+	go func() {
+		s := model.StatusActive
+		errCh <- w.Update(context.Background(), "auth-jwt",
+			UpdatePatch{Status: &s, Actor: "@alice"})
+	}()
+	go func() {
+		s := model.StatusSuperseded
+		errCh <- w.Update(context.Background(), "auth-jwt",
+			UpdatePatch{Status: &s, Actor: "@bob"})
+	}()
+
+	// Both must return without panic.
+	err1 := <-errCh
+	err2 := <-errCh
+
+	// At least one write succeeded.
+	hasSuccess := err1 == nil || err2 == nil
+	assert.True(t, hasSuccess, "at least one concurrent write must succeed; got %v, %v", err1, err2)
+
+	// Final state is a valid Status (not corrupted).
+	r, err := NewReader(dir)
+	require.NoError(t, err)
+	got, err := r.Load(context.Background(), "auth-jwt")
+	require.NoError(t, err)
+	assert.True(t, got.Frontmatter.Status == model.StatusActive ||
+		got.Frontmatter.Status == model.StatusSuperseded ||
+		got.Frontmatter.Status == model.StatusDraft,
+		"final status must be a valid enum value, got %v", got.Frontmatter.Status)
+}
