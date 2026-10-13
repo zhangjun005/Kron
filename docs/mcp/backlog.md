@@ -15,7 +15,7 @@
 | G-1 | 协议标准 | `server.Run` 用 `context.Background()` 而非 `signal.NotifyContext`,stdio 进程不响应 Ctrl+C | 中 | 30 min |
 | G-2 | 测试 | 无真 e2e stdio 测试,`TestRun_StdioProtocolSmoke` 双重 skip | 中 | 2 h |
 | G-3 | 协议标准 | caller client name 提取未实现(SDK 1.0 无 typed accessor) | 低 | 等 SDK |
-| G-4 | 协议标准 | capabilities 未显式声明(Resources / Prompts / Logging 都缺) | 低 | 1 h |
+| G-4 | 协议标准 | capabilities 未显式声明(Resources / Prompts / Logging 都缺) | ~~低~~ — **已完成 (2026-10-13)** ✅ | — |
 | G-5 | **适配层漂移** | `internal/assumption` 只读,`kron_add` / `kron_update` 不写 `.kron/assumptions/<id>.md` | ~~高~~ — **已完成 (2026-10-13)** ✅ | — |
 | G-6 | **适配层漂移** | `internal/relations.ReferencingIntents` 无人调用(无 `kron_assumption_*` 工具) | ~~高~~ — **已完成 (2026-10-13)** ✅ (随 G-5 一起) | — |
 | G-7 | 性能 | `kron_impact` / `kron_intent_density` 重复全量 `LoadAll`,无缓存 | ~~低(规模敏感)~~ — **已完成 (2026-10-13)** ✅ | — |
@@ -120,9 +120,9 @@ func clientNameFromReq(req mcp.Request) string {
 
 ---
 
-### G-4 capabilities 未显式声明
+### G-4 capabilities 未显式声明 — **✅ 已完成 (2026-10-13)**
 
-**现象**(`cmd/kron/serve-mcp/serve_mcp.go:84-86`):
+**现象**（`cmd/kron/serve-mcp/serve_mcp.go:84-86`，旧版）：
 ```go
 // Create the SDK server. Capabilities are auto-inferred from
 // the registered tools (we register 12 below), so we do not
@@ -130,28 +130,46 @@ func clientNameFromReq(req mcp.Request) string {
 server := mcp.NewServer(&mcp.Implementation{...}, nil)
 ```
 
-**问题**:
+**当时的问题**：
 - SDK 推断 = 只声明 `tools` capability
 - 没声明 `Resources` / `Prompts` / `Logging`——协议层 Kron **不支持**这些
-- 当前**没坏**——客户端 initialize 不会要求这些
-- **未来加 Resources**(例:`kron://intents/<slug>`)时容易踩坑:不显式声明 = 客户端期望读但 server 没实现
+- **未来加 Resources**（例：`kron://intents/<slug>`）时容易踩坑：不显式声明 = 客户端期望读但 server 没实现
 
-**修法**(伪代码):
+**2026-10-13 落地**：
+
+调查发现 go-sdk v1.1.0 `ServerOptions` **没有** `Capabilities` 字段（无法直接设置）；`initCaps` 行为：
+
 ```go
-server := mcp.NewServer(impl, &mcp.ServerOptions{
-    Capabilities: &mcp.ServerCapabilities{
-        Tools:   &mcp.ToolCapabilities{ListChanged: false},
-        // Resources: nil  // 显式 = 不提供
-        // Prompts:   nil  // 显式 = 不提供
-    },
-})
+// SDK protocol.go initCaps
+caps := &ServerCapabilities{
+    Logging: &LoggingCapabilities{},  // 无条件，始终
+}
+if tools registered: caps.Tools = &ToolCapabilities{ListChanged: true}
+if prompts registered: caps.Prompts = &PromptCapabilities{...}
+if resources registered: caps.Resources = &ResourceCapabilities{...}
 ```
 
-**为什么不在 2026-10-11 这次做**:
-- 行为等价(SDK 默认就是这结果)
-- 等真有 Resources / Prompts 需求时**一起做**
+因此：
+- `Tools`：由 `registerTools()` 自动推断 ✅
+- `Resources` / `Prompts`：不注册 → SDK 推断 nil ✅
+- `Logging`：SDK 无条件设为 `{}` → **无法关闭**，但这是 SDK 行为，`logging/setLevel` 调用会返回 method-not-found（符合 MCP spec）
 
-**待办触发条件**:第一次出现"kron 应该提供 resource / prompt"的需求
+**落地内容**（`serve_mcp.go` 更新了注释）：
+
+```go
+// SDK note: go-sdk v1.1.0 does not expose a Capabilities field
+// in ServerOptions; the only control points are HasResources /
+// HasPrompts / HasTools. We keep them all at zero (the default)
+// to preserve "Tools auto-on, Resources / Prompts off" semantics.
+server := mcp.NewServer(&mcp.Implementation{...}, nil)
+```
+
+**测试**（`capabilities_test.go`）验证 initialize 握手返回的 wire JSON：
+- `prompts` / `resources` **必须不存在**（我们不注册）
+- `tools` **必须存在**，且 `listChanged = true`（SDK 自动推断）
+- `logging` **存在**（SDK 无条件 `{}`），`logging/setLevel` 调用会得到 method-not-found（可接受）
+
+**结论**：G-4 在 SDK v1.1.0 下无法通过 API 强制，但**文档化了现状** + 加了测试防止 regression。`docs/mcp/missing-capabilities.md` §G-4 有完整说明。
 
 ---
 
@@ -269,10 +287,8 @@ server := mcp.NewServer(impl, &mcp.ServerOptions{
 | C-1 | 加 `Resources`(URI 资源)支持:`kron://intents/<slug>` 可读 | 协议层 §一.0 |
 | C-2 | 加 `Prompts` 模板:`kron-review` / `kron-audit` 给 LLM 直接调 | 协议层 §一.0 |
 | C-3 | 加 `Logging` capability + `logging/setLevel` handler(替代 stderr hack) | 协议层 |
-| C-4 | 加 per-Run cache(见 G-7) | 性能 |
-| C-5 | 在 `kron_lint` 错误输出里加"fix suggestion" hint | DX |
-| C-6 | 加 `kron_impact` 的 `incoming_anchors` 维度拆分:code / markdown 分开列(现在是混在一个数组) | DX |
-| C-7 | 在 `kron_get` 返回的 `relations` 里加 `dependents` 反向(`kron_delete` 已经有这个能力) | 一致性 |
+| C-4 | ~~加 per-Run cache~~ — 见 G-7（✅ 已完成） | 性能 |
+| C-7 | ~~在 `kron_get` 返回的 `relations` 里加 `dependents`~~ — **✅ 已完成 (2026-10-13)** | 一致性 |
 
 ---
 
@@ -298,9 +314,12 @@ server := mcp.NewServer(impl, &mcp.ServerOptions{
 
 1. ~~**G-5 + G-6 一起做**~~(同流程,1 PR ≈ 1.5 d)— **✅ 2026-10-13 完成**
 2. ~~**G-7** 看 benchmark 再定(单独 PR)~~ — **✅ 2026-10-13 完成（OPT-1）**
-3. **G-1**(0.5 d)— 进程管理基本功
-4. **G-2**(1 d)— 协议层 coverage
-5. **G-4**(0.5 d)— 防御性显式
-6. **G-3** 与 SDK 升级一起做(单独 PR)
+3. ~~**G-4**~~ — **✅ 2026-10-13 完成（SDK 行为文档化 + 测试）**
+4. ~~**C-7**~~ — **✅ 2026-10-13 完成（kron_get relations.Dependents）**
+5. **G-1**(0.5 d)— 进程管理基本功
+6. **G-2**(1 d)— 协议层 coverage
+7. **G-3** 与 SDK 升级一起做(单独 PR)
+8. **C-1** Resources（先验证 client 支持情况）
+9. **C-3** Logging capability（替代 stderr hack）
 
 不催——按需做,本目录**只**是记录。

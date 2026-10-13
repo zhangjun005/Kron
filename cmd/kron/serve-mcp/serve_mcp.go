@@ -78,9 +78,30 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 	// ignore anything written to stderr.
 	log.SetOutput(errOut)
 
-	// Create the SDK server. Capabilities are auto-inferred from
-	// the registered tools (we register 12 below), so we do not
-	// pass an explicit Capabilities struct.
+	// Create the SDK server with explicit ServerOptions so the
+	// contract with MCP clients is clear (G-4):
+	//   - Tools: auto-inferred from registerTools() below
+	//     (SDK sets Tools: {ListChanged: true} when any tool is
+	//     registered).
+	//   - Resources, Prompts: SDK leaves them nil because we
+	//     never call AddResource / AddPrompt. We do NOT set
+	//     HasResources / HasPrompts in ServerOptions, so the
+	//     wire contract is "I do not advertise these" — clients
+	//     won't issue resources/list or prompts/list against us.
+	//   - Logging: SDK defaults Logging to &LoggingCapabilities{}
+	//     regardless of whether we register a handler. We override
+	//     this by NOT registering a logging handler and accepting
+	//     that clients may receive an empty Logging cap; the
+	//     practical effect is logging/setLevel calls will return
+	//     method-not-found (per MCP spec for missing capabilities).
+	//     This is preferable to silently dropping logs.
+	//
+	// G-4 (docs/mcp/backlog.md §G-4 + docs/mcp/missing-capabilities.md §G-4).
+	//
+	// SDK note: go-sdk v1.1.0 does not expose a Capabilities field
+	// in ServerOptions; the only control points are HasResources /
+	// HasPrompts / HasTools. We keep them all at zero (the default)
+	// to preserve "Tools auto-on, Resources / Prompts off" semantics.
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    serverName,
 		Version: serverVersion,

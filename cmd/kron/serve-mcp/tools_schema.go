@@ -122,6 +122,15 @@ type GetRelations struct {
 	// Prerequisites is the forward view: explicit depends_on ∪
 	// symbol-inferred deps. Sorted.
 	Prerequisites []string `json:"prerequisites,omitempty" jsonschema:"explicit depends_on ∪ symbol-inferred (sorted)"`
+	// Dependents is the union of DependsOnDependents ∪ SymbolInferred,
+	// deduplicated and sorted. Added in C-7 to mirror the
+	// kron_delete response shape (which already returns
+	// dependents in the same way) so a caller that wants the
+	// full "who depends on me" view doesn't have to merge two
+	// fields client-side. Equal to what kron_delete would
+	// surface, except kron_delete is hard-only and this is the
+	// full set.
+	Dependents []string `json:"dependents,omitempty" jsonschema:"union of depends_on_dependents + symbol_inferred, deduped + sorted (C-7)"`
 }
 
 type IntentFrontmatter struct {

@@ -3,6 +3,7 @@ package servemcp
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -104,6 +105,14 @@ func HandleGet(ctx context.Context, _ *mcp.CallToolRequest, in GetInput) (
 				DependsOnDependents: deps,
 				SymbolInferred:      syms,
 				Prerequisites:       relations.Prerequisites(all, in.Slug),
+				// C-7: union of hard + symbol-inferred dependents,
+				// deduped + sorted. Mirrors kron_delete's
+				// `dependents` field (which is hard-only) but
+				// adds the inferred-soft half so GUI/IDE
+				// detail panels can render a single "who
+				// depends on me" list without client-side
+				// merging.
+				Dependents: mergeDependents(deps, syms),
 			}
 		}
 	}
@@ -125,6 +134,38 @@ func intentSummaryFromIntent(in *model.Intent, ar *assumption.Reader) IntentSumm
 		UpdatedAt: in.Frontmatter.UpdatedAt.Format(time.RFC3339),
 		Assumes:   assumesToWire(context.Background(), in.Frontmatter.Assumptions, ar),
 	}
+}
+
+// mergeDependents computes the union of hard dependents (depends_on)
+// and symbol-inferred dependents, deduplicated and sorted. Used by
+// C-7 to surface a single "who depends on me" view in kron_get's
+// relations block (matching kron_delete's top-level `dependents`
+// field, which is hard-only — this includes both forms).
+//
+// Nil/empty inputs are handled: returns nil if both inputs are empty
+// (matching the `omitempty` json tag on GetRelations.Dependents).
+func mergeDependents(hard, inferred []string) []string {
+	if len(hard) == 0 && len(inferred) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(hard)+len(inferred))
+	out := make([]string, 0, len(hard)+len(inferred))
+	for _, s := range hard {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	for _, s := range inferred {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func intentFromModel(in *model.Intent, ar *assumption.Reader) IntentBody {
