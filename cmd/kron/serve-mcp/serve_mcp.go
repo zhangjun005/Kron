@@ -22,6 +22,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -115,7 +116,53 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err := server.Run(context.Background(), transport); err != nil {
+	return runWithSignalCtx(server, transport)
+}
+
+// runWithSignalCtx is Run's stdio-entry implementation with a
+// context that cancels on os.Interrupt. The split from Run() lets
+// tests drive the cancellation path via runWithCtx (no real
+// signal required) while production keeps the clean
+// signal.NotifyContext integration.
+//
+// We register ONLY os.Interrupt:
+//   - Windows doesn't deliver SIGTERM to console processes, so
+//     adding it would be dead code on the platform Kron
+//     development happens on.
+//   - The stdio MCP server's primary exit path is "client closes
+//     stdin" (EOF on os.Stdin) — the SDK's transport.Run goroutine
+//     returns from ss.Wait() when the stdin reader hits EOF.
+//     Signal-based termination is a fallback for the case where
+//     the user (or a parent process) wants to kill the server
+//     while the client is still attached (or hung).
+//   - stop() unregisters the signal handler when the function
+//     returns, so multiple Run() invocations from tests don't
+//     leak handlers.
+func runWithSignalCtx(server *mcp.Server, transport mcp.Transport) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	return runWithCtx(ctx, server, transport)
+}
+
+// runWithCtx is the innermost Run implementation: it owns no
+// process-level state and can be driven with any context.Context
+// the caller supplies. Tests pass a context they control (and
+// cancel); the production path supplies a signal.NotifyContext.
+// The two layers (signal vs. plain context) are intentionally
+// separate so the "production vs. test" choice happens at the
+// boundary, not deep inside Run.
+//
+// context.Canceled is the expected outcome of a signal-triggered
+// shutdown. We swallow it so main.go's exitFromErr maps the run
+// to exit 0 (clean shutdown) rather than 1 (transport failure).
+// Other ctx-derived errors (DeadlineExceeded) are surfaced the
+// same way: a server that times out is shutting down on the
+// operator's behalf, not failing.
+func runWithCtx(ctx context.Context, server *mcp.Server, transport mcp.Transport) error {
+	if err := server.Run(ctx, transport); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil
+		}
 		return fmt.Errorf("kron serve-mcp: %w", err)
 	}
 	return nil

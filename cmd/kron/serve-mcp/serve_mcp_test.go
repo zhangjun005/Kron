@@ -2,12 +2,15 @@ package servemcp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -126,6 +129,100 @@ func TestServer_Notification_NoResponse(t *testing.T) {
 	}
 	_ = errOut
 	_ = time.Now
+}
+
+// TestRunWithCtx_CancelExitsCleanly is the in-process unit test for
+// the G-1 signal-cancellation path. Rather than spawning a real
+// process and sending os.Interrupt (which would race the test
+// framework's own signal handling), we drive runWithCtx directly
+// with a context we control. Cancelling it must make runWithCtx
+// return nil — the production "Ctrl+C → clean exit" contract.
+//
+// We use a fresh server (not the production one) so this test
+// exercises the "cancellable ctx drives server.Run" path
+// independently of Run's other setup steps. We don't send any
+// initialize frames: server.Run's select{} between ctx.Done and
+// ss.Wait() will pick the ctx branch as soon as cancel() fires,
+// even without an active session.
+func TestRunWithCtx_CancelExitsCleanly(t *testing.T) {
+	server := mcp.NewServer(&mcp.Implementation{Name: "kron-cancel-test", Version: "v1.2.0"}, nil)
+
+	// Pipe so the SDK's IOTransport reader blocks on a real
+	// io.Reader (not nil). The writer side is io.Discard wrapped
+	// to satisfy the WriteCloser contract; the package's
+	// nopWriteCloser (defined in serve_mcp.go) is exactly that.
+	pr, pw := io.Pipe()
+	defer pr.Close()
+	defer pw.Close()
+
+	transport := &mcp.IOTransport{Reader: pr, Writer: nopWriteCloser{io.Discard}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- runWithCtx(ctx, server, transport)
+	}()
+
+	// Give the SDK a tick to reach its select{}, then cancel.
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err, "ctx cancellation must surface as nil (clean exit)")
+	case <-time.After(2 * time.Second):
+		t.Fatal("runWithCtx did not return within 2s of ctx cancel")
+	}
+}
+
+// TestRunWithCtx_DeadlineExceededExitsCleanly is the sibling case
+// for context.DeadlineExceeded: a server that times out (e.g. an
+// operator-set shutdown deadline) is also a clean shutdown, not a
+// transport failure.
+func TestRunWithCtx_DeadlineExceededExitsCleanly(t *testing.T) {
+	server := mcp.NewServer(&mcp.Implementation{Name: "kron-deadline-test", Version: "v1.2.0"}, nil)
+
+	pr, pw := io.Pipe()
+	defer pr.Close()
+	defer pw.Close()
+
+	transport := &mcp.IOTransport{Reader: pr, Writer: nopWriteCloser{io.Discard}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- runWithCtx(ctx, server, transport)
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err, "ctx deadline must surface as nil (clean exit)")
+	case <-time.After(2 * time.Second):
+		t.Fatal("runWithCtx did not return within 2s of ctx deadline")
+	}
+}
+
+// TestRun_NoSignalLeakBetweenInvocations guards the runWithSignalCtx
+// contract: each Run() call must register a signal handler only for
+// its own lifetime, so consecutive invocations (in particular, the
+// many test invocations during `go test`) don't accumulate handlers
+// or interfere with each other. We invoke the full Run() entry point
+// three times with empty stdin (the SDK exits immediately on EOF
+// without entering the long-lived select), and assert every call
+// returns nil — which is only true if the second / third
+// invocations can register their own signal.NotifyContext without
+// conflicting with the first.
+func TestRun_NoSignalLeakBetweenInvocations(t *testing.T) {
+	for i := 0; i < 3; i++ {
+		var out, errOut bytes.Buffer
+		err := Run([]string{"-CWD", t.TempDir()}, strings.NewReader(""), &out, &errOut)
+		require.NoErrorf(t, err, "iteration %d must succeed", i)
+		assert.Empty(t, out, "iteration %d: empty stdin must produce no protocol output", i)
+	}
 }
 
 // os_getenv is a small wrapper so this test file does not have to
