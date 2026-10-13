@@ -923,18 +923,24 @@ func TestServer_AllToolsRegistered(t *testing.T) {
 		"kron_stale":          nil,
 		"kron_tree":           nil,
 		// Required-param tools: provide minimal valid values.
-		"kron_get":          {"slug": "does-not-exist"},
-		"kron_add":          {"slug": "smoke-test-add"},
-		"kron_update":       {"slug": "smoke-test-ux", "body": "x"},
-		"kron_delete":       {"slug": "smoke-test-delete"},
-		"kron_restore":      {"slug": "smoke-test-delete"},
-		"kron_assume_check": {"file_path": ""}, // empty is valid; SDK schema allows ""
-		"kron_impact":       {"slug": "does-not-exist"},
+		"kron_get":           {"slug": "does-not-exist"},
+		"kron_add":           {"slug": "smoke-test-add"},
+		"kron_update":        {"slug": "smoke-test-ux", "body": "x"},
+		"kron_delete":        {"slug": "smoke-test-delete"},
+		"kron_restore":       {"slug": "smoke-test-delete"},
+		"kron_assume_check":  {"file_path": ""}, // empty is valid; SDK schema allows ""
+		"kron_impact":        {"slug": "does-not-exist"},
+		"kron_assume_create": {"id": "smoke-assumption", "text": "smoke test text", "default_severity": "soft"},
+		"kron_assume_update": {"id": "smoke-assumption-ux"},
+		"kron_assume_delete": {"id": "smoke-assumption-delete"},
+		"kron_assume_list":   {},
 	}
 	for _, name := range []string{
 		"kron_lint", "kron_list", "kron_get",
 		"kron_init", "kron_add", "kron_update", "kron_delete", "kron_restore",
-		"kron_assume_check", "kron_impact", "kron_intent_density", "kron_stale",
+		"kron_assume_check", "kron_assume_create", "kron_assume_update",
+		"kron_assume_delete", "kron_assume_list",
+		"kron_impact", "kron_intent_density", "kron_stale",
 		"kron_tree",
 	} {
 		t.Run(name, func(t *testing.T) {
