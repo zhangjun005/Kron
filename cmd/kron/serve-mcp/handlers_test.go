@@ -157,6 +157,13 @@ func TestInit_HappyPath(t *testing.T) {
 	assert.True(t, r.OK)
 	assert.Equal(t, ".kron/intents", r.IntentsDir)
 	assert.False(t, r.AlreadyInitialised)
+	// repo_root must echo back the absolute path the server is
+	// operating on (the test's temp dir, cleaned to handle
+	// short-path / casing normalisation on Windows). This is the
+	// "AI knows which directory the server thinks it's in" hook
+	// — see HandleInit for the rationale.
+	assert.Equal(t, filepath.Clean(dir), filepath.Clean(r.RepoRoot),
+		"repo_root must be the absolute path the server is operating on")
 
 	info, err := os.Stat(filepath.Join(dir, ".kron"))
 	require.NoError(t, err)

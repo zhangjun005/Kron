@@ -30,6 +30,13 @@ type InitOutput struct {
 	OK                 bool   `json:"ok"                       jsonschema:"true if .kron/ exists or was created"`
 	IntentsDir         string `json:"intents_dir"               jsonschema:"path to the intents directory (e.g. .kron/intents)"`
 	AlreadyInitialised bool   `json:"already_initialised"       jsonschema:"true if .kron/ was already present (idempotent re-init)"`
+	// RepoRoot is the absolute on-disk path the server is operating
+	// on. Surfaced so the AI caller can include it in user-facing
+	// diagnostics when a misconfigured client passes the wrong cwd
+	// (the server fails fast in resolveMCPRoot, but the AI sees a
+	// JSON-RPC error and may not know which path was rejected).
+	// See handlers_init.go for the rationale.
+	RepoRoot string `json:"repo_root" jsonschema:"absolute on-disk path of the project root the server is operating on (for AI-side diagnostics)"`
 }
 
 // --- kron_lint --------------------------------------------------------
