@@ -6,7 +6,7 @@ import (
 	"github.com/xxx/kron/internal/lint"
 )
 
-// This file holds the typed input / output schemas for the 12 MCP
+// This file holds the typed input / output schemas for the MCP
 // tools exposed by kron serve-mcp, plus a single registerTools()
 // call site that wires them into the mcp.Server.
 //
@@ -135,6 +135,9 @@ type IntentFrontmatter struct {
 	DependsOn   []string      `json:"depends_on,omitempty"    jsonschema:"hard dependencies on other intents"`
 }
 
+// AssumeEntry is the wire projection of model.Assumption joined with
+// the assumption registry. Used in kron_list / kron_get / kron_impact
+// responses.
 type AssumeEntry struct {
 	ID              string `json:"id"                          jsonschema:"stable assumption identifier"`
 	Text            string `json:"text"                        jsonschema:"human-readable claim (preferred from registry; empty if neither present)"`
@@ -144,6 +147,20 @@ type AssumeEntry struct {
 	ExpiresAt       string `json:"expires_at,omitempty"        jsonschema:"optional RFC3339 expiry"`
 	VerifiedAt      string `json:"verified_at,omitempty"       jsonschema:"last verification time (empty if never verified)"`
 	VerifiedBy      string `json:"verified_by,omitempty"       jsonschema:"handle that last verified"`
+}
+
+// AssumptionRef is the minimal shape for referencing an assumption
+// in kron_add / kron_update. The caller supplies id + severity +
+// rationale; the registry file (text / default_severity) is managed
+// by the assumption CRUD tools. G-5: auto-create stub registry
+// files for IDs not yet in the registry.
+type AssumptionRef struct {
+	ID         string `json:"id"         jsonschema:"assumption id (must pass parser.ValidateSlug)"`
+	Severity   string `json:"severity"   jsonschema:"hard or soft (per-intent severity; required)"`
+	Rationale  string `json:"rationale,omitempty"  jsonschema:"required, ≥10 chars (B-3 rationale-required rule)"`
+	ExpiresAt  string `json:"expires_at,omitempty" jsonschema:"optional RFC3339 expiry"`
+	VerifiedAt string `json:"verified_at,omitempty" jsonschema:"optional RFC3339 verification time"`
+	VerifiedBy string `json:"verified_by,omitempty" jsonschema:"optional @handle of verifier"`
 }
 
 type GetOutput struct {
@@ -162,6 +179,12 @@ type AddInput struct {
 	// the kron add CLI --kind flag — see RFC
 	// 2026-10-08-writer-readme-symmetry §3.5.
 	Kind string `json:"kind,omitempty" jsonschema:"on-disk form: \"leaf\" (default) or \"node\""`
+	// Assumptions populates Frontmatter.Assumptions on the new intent.
+	// G-5: for each entry, the corresponding .kron/assumptions/<id>.md
+	// file is auto-created (or verified to already exist) so that
+	// kron_assume_check / kron_list / kron_get always find a registry
+	// entry rather than silently falling back to empty text.
+	Assumptions []AssumptionRef `json:"assumptions,omitempty" jsonschema:"optional assumption references to attach (auto-creates registry files for new IDs)"`
 }
 
 type AddOutput struct {
@@ -179,11 +202,86 @@ type UpdateInput struct {
 	Body       *string  `json:"body,omitempty"          jsonschema:"replace body (null/absent = no change)"`
 	References []string `json:"references,omitempty"    jsonschema:"replace references (null/absent = no change; [] = clear)"`
 	DependsOn  []string `json:"depends_on,omitempty"    jsonschema:"replace depends_on (null/absent = no change; [] = clear)"`
+	// Assumptions replaces the entire Assumptions[] on the intent.
+	// G-5: for each new ID in the list, the corresponding
+	// .kron/assumptions/<id>.md is auto-created. Null/absent = no
+	// change to assumptions. Empty slice = clear all assumptions.
+	Assumptions []AssumptionRef `json:"assumptions,omitempty" jsonschema:"replace Assumptions[] (null/absent = no change; [] = clear)"`
 }
 
 type UpdateOutput struct {
 	OK   bool   `json:"ok"   jsonschema:"true on success"`
 	Path string `json:"path" jsonschema:"relative path to the patched intent file"`
+}
+
+// --- kron_assumption_create -------------------------------------------
+
+// AssumptionCreateInput is the wire shape for kron_assume_create.
+type AssumptionCreateInput struct {
+	ID              string `json:"id"               jsonschema:"kebab-case slug (must pass parser.ValidateSlug)"`
+	Text            string `json:"text"             jsonschema:"non-empty human-readable description"`
+	DefaultSeverity string `json:"default_severity" jsonschema:"hard or soft"`
+	Body            string `json:"body,omitempty"   jsonschema:"optional free-form markdown body below the frontmatter"`
+}
+
+type AssumptionCreateOutput struct {
+	OK   bool   `json:"ok"   jsonschema:"true on success"`
+	Path string `json:"path" jsonschema:"path to the created assumption file (.kron/assumptions/<id>.md)"`
+}
+
+// --- kron_assumption_update -------------------------------------------
+
+type AssumptionUpdateInput struct {
+	ID              string   `json:"id"                        jsonschema:"assumption id to update (required)"`
+	Text            *string  `json:"text,omitempty"            jsonschema:"replace text (null/absent = no change)"`
+	DefaultSeverity *string  `json:"default_severity,omitempty" jsonschema:"replace default_severity (null/absent = no change; hard or soft)"`
+	Body            *string  `json:"body,omitempty"            jsonschema:"replace body (null/absent = no change)"`
+	Status          *string  `json:"status,omitempty"          jsonschema:"replace status (null/absent = no change; draft, active, or superseded)"`
+	ExpiresAt       *string  `json:"expires_at,omitempty"       jsonschema:"replace expires_at (null/absent = no change; RFC3339)"`
+	VerifiedAt      *string  `json:"verified_at,omitempty"      jsonschema:"replace verified_at (null/absent = no change; RFC3339)"`
+	VerifiedBy      *string  `json:"verified_by,omitempty"      jsonschema:"replace verified_by (null/absent = no change)"`
+	Reviewers       []string `json:"reviewers,omitempty"        jsonschema:"replace reviewers (null/absent = no change; [] = clear)"`
+}
+
+type AssumptionUpdateOutput struct {
+	OK   bool   `json:"ok"   jsonschema:"true on success"`
+	Path string `json:"path" jsonschema:"path to the updated assumption file (.kron/assumptions/<id>.md)"`
+}
+
+// --- kron_assumption_delete -------------------------------------------
+
+type AssumptionDeleteInput struct {
+	ID string `json:"id" jsonschema:"assumption id to soft-delete (moves to .kron/.trash/assumptions/)"`
+}
+
+type AssumptionDeleteOutput struct {
+	OK                 bool     `json:"ok"                 jsonschema:"true on success"`
+	TrashedPath        string   `json:"trashed_path"        jsonschema:"path the file was moved to"`
+	ReferencingIntents []string `json:"referencing_intents" jsonschema:"intents that listed this assumption id in their frontmatter.assumptions[] (sorted; for caller awareness before deletion)"`
+}
+
+// --- kron_assumption_list --------------------------------------------
+
+type AssumptionListInput struct {
+	Status string `json:"status,omitempty" jsonschema:"optional filter: active (default, non-superseded) or superseded"`
+}
+
+type AssumptionListOutput struct {
+	Assumptions []AssumptionSummary `json:"assumptions" jsonschema:"assumption files matching the filter (sorted by id)"`
+}
+
+// AssumptionSummary is the wire projection of model.AssumptionFile.
+type AssumptionSummary struct {
+	ID              string   `json:"id"               jsonschema:"assumption id (file name without .md)"`
+	Text            string   `json:"text"             jsonschema:"human-readable description"`
+	DefaultSeverity string   `json:"default_severity" jsonschema:"hard or soft"`
+	Status          string   `json:"status"           jsonschema:"draft or active or superseded"`
+	CreatedBy       string   `json:"created_by"       jsonschema:"@handle or agent:<model>"`
+	UpdatedAt       string   `json:"updated_at"       jsonschema:"RFC3339 timestamp"`
+	ExpiresAt       string   `json:"expires_at,omitempty" jsonschema:"optional RFC3339 expiry"`
+	VerifiedAt      string   `json:"verified_at,omitempty" jsonschema:"optional last verification time (RFC3339)"`
+	VerifiedBy      string   `json:"verified_by,omitempty" jsonschema:"optional last verifier @handle"`
+	Reviewers       []string `json:"reviewers,omitempty"   jsonschema:"reviewer handles (sorted)"`
 }
 
 // --- kron_delete ------------------------------------------------------
@@ -252,7 +350,7 @@ type AnchorRef struct {
 
 type ImpactOutput struct {
 	Intent          IntentSummary `json:"intent"            jsonschema:"summary of the target intent"`
-	IncomingAnchors []AnchorRef   `json:"incoming_anchors"  jsonschema:"@kron:intent lines pointing at slug, sorted by (file, line)"`
+	IncomingAnchors []AnchorRef   `json:"incoming_anchors" jsonschema:"@kron:intent lines pointing at slug, sorted by (file, line)"`
 	References      []string      `json:"references"        jsonschema:"slugs that list slug in their References (sorted)"`
 	Prerequisites   []string      `json:"prerequisites"     jsonschema:"explicit depends_on ∪ symbol-inferred deps (sorted)"`
 }
@@ -342,6 +440,10 @@ type StaleOutput struct {
 func registerTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{Name: "kron_add", Description: "Create a new intent file at .kron/intents/<slug>.md."}, HandleAdd)
 	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_check", Description: "Inspect every intent's assumptions[] and surface expired / unverified hard assumptions."}, HandleAssumeCheck)
+	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_create", Description: "Create a new assumption registry file at .kron/assumptions/<id>.md."}, HandleAssumptionCreate)
+	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_delete", Description: "Soft-delete an assumption (move to .kron/.trash/assumptions/)."}, HandleAssumptionDelete)
+	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_list", Description: "List every assumption in the registry, optionally filtered by status."}, HandleAssumptionList)
+	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_update", Description: "Patch an existing assumption registry file (PATCH semantics)."}, HandleAssumptionUpdate)
 	mcp.AddTool(server, &mcp.Tool{Name: "kron_delete", Description: "Soft-delete an intent (move to .kron/.trash/)."}, HandleDelete)
 	mcp.AddTool(server, &mcp.Tool{Name: "kron_get", Description: "Load a single intent by slug (full frontmatter + body)."}, HandleGet)
 	mcp.AddTool(server, &mcp.Tool{Name: "kron_impact", Description: "Reverse-link view: who depends on, references, and anchors an intent."}, HandleImpact)

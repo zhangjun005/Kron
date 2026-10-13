@@ -16,8 +16,8 @@
 | G-2 | 测试 | 无真 e2e stdio 测试,`TestRun_StdioProtocolSmoke` 双重 skip | 中 | 2 h |
 | G-3 | 协议标准 | caller client name 提取未实现(SDK 1.0 无 typed accessor) | 低 | 等 SDK |
 | G-4 | 协议标准 | capabilities 未显式声明(Resources / Prompts / Logging 都缺) | 低 | 1 h |
-| G-5 | **适配层漂移** | `internal/assumption` 只读,`kron_add` / `kron_update` 不写 `.kron/assumptions/<id>.md` | **高** | 1 d |
-| G-6 | **适配层漂移** | `internal/relations.ReferencingIntents` 无人调用(无 `kron_assumption_*` 工具) | **高** | 1 d |
+| G-5 | **适配层漂移** | `internal/assumption` 只读,`kron_add` / `kron_update` 不写 `.kron/assumptions/<id>.md` | ~~高~~ — **已完成 (2026-10-13)** ✅ | — |
+| G-6 | **适配层漂移** | `internal/relations.ReferencingIntents` 无人调用(无 `kron_assumption_*` 工具) | ~~高~~ — **已完成 (2026-10-13)** ✅ (随 G-5 一起) | — |
 | G-7 | 性能 | `kron_impact` / `kron_intent_density` 重复全量 `LoadAll`,无缓存 | 低(规模敏感) | 0.5 d |
 
 ---
@@ -155,14 +155,14 @@ server := mcp.NewServer(impl, &mcp.ServerOptions{
 
 ---
 
-### G-5 ⚠️ `internal/assumption` 只读(MCP 没写路径)
+### G-5 ⚠️ `internal/assumption` 只读(MCP 没写路径) — **✅ 已完成 (2026-10-13)**
 
-**现象**(grep 结果):
+**当时的现象**(grep 结果,2026-10-11):
 - `cmd/kron/serve-mcp/` 内 4 处 `assumption.NewReader`(用)
 - `cmd/kron/serve-mcp/` 内 **0 处** `assumption.NewWriter` 或 `Writer.Create/Update`
 - `internal/assumption/writer.go` 已有实装,服务 5 个 method
 
-**问题**:
+**当时的问题**:
 - B-3 拍板意图:`.kron/assumptions/<id>.md` 是 single source of truth
 - 现实:没人写它,`kron_add` 写新 intent 时如果 `assumptions[]` 引用 `single-region`,**只**写 intent 文件,**不**写 `single-region.md`
 - 下次 `kron_get` 走 `assumesToWire` → `ar.Get(ctx, "single-region")` → `ErrNotFound` → 兜底 inline `text` → **`default_severity` 字段空着**
@@ -173,40 +173,54 @@ server := mcp.NewServer(impl, &mcp.ServerOptions{
 2. 新增 `kron_assumption_create` / `kron_assumption_update` / `kron_assumption_delete` 三个工具
 3. `kron_assumption_delete` 走 G-6 的 `ReferencingIntents` 检查 dependents
 
-**依赖**:
+**当时依赖**:
 - `internal/assumption/writer.go` 已就绪——直接调
 - 需要走 `docs/process/mcp-tool.md` 流程(新工具)
 - 需要走 `docs/process/new-internal-api.md` 流程(`internal/assumption` 是 v1.3 新包)
 
-**风险**:
+**当时风险**:
 - 与 RFC [`2026-10-08-assumptions-standalone.md`](../.deprecated/2026-10-09-process-cleanup/) 拍板本意一致——**没违反约束**
 - 但落地时**会**有"什么时候写" / "delete 怎么处理引用了它的 intent" 等问题——需要人决策
 
-**优先级**:**最高**——这是数据流断点,长期会"假装有 registry"
+**当时优先级**:**最高**——这是数据流断点,长期会"假装有 registry"
 
-**待办触发条件**:用户决定补;或第一次出现"AI 查 assumption 拿到空 default_severity"的实际事故
+**2026-10-13 落地**(本次会话,G-5 + G-6 一次 PR):
+- 新增 4 个 MCP 工具:`kron_assumption_create` / `kron_assumption_update` / `kron_assumption_delete` / `kron_assumption_get`
+- 走 `internal/assumption.NewWriter` 5 个 method,补全写路径
+- `kron_delete` 路径上同时扫 `.kron/assumptions/<id>.md` 软警告
+- `assumesToWire` 的 inline `text` 兜底**保留**(RFC 2026-10-12 §2.2 拍板后才删,与本 backlog 解耦)
+- 4 个旧 fixture 移除 inline `text:`(同步 lint 升 Error 后的清理)
+
+**关联**:
+- G-6(`ReferencingIntents`)随 G-5 一起接入,见下方 G-6 节
+- RFC [`2026-10-12-close-b3-softening.md`](../rfc/2026-10-12-close-b3-softening.md) 拍板的"inline text → 硬 Error"是**下一份** PR(本 PR 不动 parser/lint 严度,只补写路径)
 
 ---
 
-### G-6 ⚠️ `internal/relations.ReferencingIntents` 无人调用
+### G-6 ⚠️ `internal/relations.ReferencingIntents` 无人调用 — **✅ 已完成 (2026-10-13,随 G-5)**
 
-**现象**:
+**当时的现象**:
 - `internal/relations/relations.go:135-167` 显式存在,doc 说"will be needed by `kron_assumption_delete`"
 - `cmd/kron/serve-mcp/` 0 处 `ReferencingIntents` 调用
 - 0 个 `kron_assumption_*` 工具
 
-**问题**:
+**当时的问题**:
 - 删除一个 `single-region.md` 时,引用了 `single-region` 的 intent **不感知**——`kron_lint` 报 `dangling-depends-on` 错误,但**删除工具不预警告**
 - `kron_delete` 处理 intent 删除时**有** `dependents` 软警告——但 assumption 删除**没有**对应路径
 
-**修法**:
+**当时的修法候选**:
 - 新增 `kron_assumption_delete`(走 G-5 流程)
 - 删除前调 `ReferencingIntents(all, id)` 算 dependents → 软警告(类似 `kron_delete`)
 - 配合 G-5 一起做(同一份 process doc 走)
 
-**优先级**:**最高**——与 G-5 同源
+**当时优先级**:**最高**——与 G-5 同源
 
-**待办触发条件**:同 G-5
+**2026-10-13 落地**:
+- `kron_assumption_delete` handler 调 `relations.ReferencingIntents` 算引用该 ID 的 intent 列表
+- 走 `kron_delete` 同款"软警告"路径(返回 dependants 计数,force=true 才真删)
+- 同一份 PR,共用 process 流程
+
+**后续**:无独立 follow-up。ReferencingIntents 现在被 `kron_assumption_delete` + `kron_delete` 两路共用,作为"删除前预检"基础设施稳态存在。
 
 ---
 
@@ -280,7 +294,7 @@ server := mcp.NewServer(impl, &mcp.ServerOptions{
 
 如果决定**动手**做一部分(顺序按"价值 / 成本比"):
 
-1. **G-5 + G-6 一起做**(同流程,1 PR ≈ 1.5 d)— 修数据流断点
+1. ~~**G-5 + G-6 一起做**~~(同流程,1 PR ≈ 1.5 d)— **✅ 2026-10-13 完成**
 2. **G-1**(0.5 d)— 进程管理基本功
 3. **G-2**(1 d)— 协议层 coverage
 4. **G-4**(0.5 d)— 防御性显式

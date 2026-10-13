@@ -219,9 +219,11 @@ func ParseFrontmatter(raw []byte) (model.Frontmatter, error) {
 //
 // B-3 (Option B1, RFC kill-inline-assumptions.md §2.1): per B-3 the
 // text lives in the registry, not the intent frontmatter. The parser
-// still ACCEPTS inline `text:` (for round-trip), but lint uses this
+// still ACCEPTS inline `text:` (for round-trip), and lint uses this
 // function to detect the A-path leftover and emit
-// RuleAssumptionInline as a Warning.
+// RuleAssumptionInline as an Error (permanent, per RFC
+// 2026-10-12-close-b3-softening §2.2 — the Option B1 "Warning 推作者
+// 清理" window is closed; inline `text:` is a hard schema error).
 //
 // This is a cheap text-level pre-scan — it does NOT need to
 // understand YAML's full grammar. We look for the pattern of

@@ -2,6 +2,7 @@ package servemcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/xxx/kron/internal/assumption"
 	"github.com/xxx/kron/internal/identity"
 	"github.com/xxx/kron/internal/model"
 	"github.com/xxx/kron/internal/parser"
@@ -85,6 +87,21 @@ func HandleAdd(ctx context.Context, _ *mcp.CallToolRequest, in AddInput) (
 		fm.Symbol = []string{in.Symbol}
 	}
 
+	// G-5: populate Frontmatter.Assumptions[] and auto-create
+	// registry files for any IDs not yet in the registry.
+	if len(in.Assumptions) > 0 {
+		asmFw, err := maybeOpenAssumptionWriter(root)
+		if err != nil {
+			return nil, AddOutput{}, fmt.Errorf("kron_add: open assumption writer: %w", err)
+		}
+		asms, asmErrs := resolveAssumptionsForIntent(ctx, root, asmFw, handle, in.Assumptions)
+		// Surface errors as a structured error; the first error wins.
+		if len(asmErrs) > 0 {
+			return nil, AddOutput{}, asmErrs[0]
+		}
+		fm.Assumptions = asms
+	}
+
 	body := parser.IntentBodyTemplate(in.Slug)
 	if in.Why != "" {
 		body = body + "\n## Why\n\n" + in.Why + "\n"
@@ -120,4 +137,118 @@ func HandleAdd(ctx context.Context, _ *mcp.CallToolRequest, in AddInput) (
 // (parser.IntentBodyTemplateCN) to preserve its prior wording.
 func scaffoldedBody(slug string) string {
 	return parser.IntentBodyTemplate(slug)
+}
+
+// =====================================================================
+// assumption helpers (shared with kron_update)
+// =====================================================================
+
+// maybeOpenAssumptionWriter returns a Writer for the assumption registry
+// or nil if the .kron/assumptions/ directory does not exist yet.
+// The nil return is not an error — it signals that no registry
+// auto-creation is possible (pre-migration repos).
+func maybeOpenAssumptionWriter(root string) (*assumption.Writer, error) {
+	// Ensure the dir exists so NewWriter can set up .trash/.
+	// Idempotent: MkdirAll is safe to call on an existing path.
+	asmDir := filepath.Join(root, model.KronDir, "assumptions")
+	if err := os.MkdirAll(asmDir, 0o755); err != nil {
+		return nil, fmt.Errorf("assumption dir: %w", err)
+	}
+	w, err := assumption.NewWriter(root)
+	if err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
+// resolveAssumptionsForIntent converts []AssumptionRef (wire) to
+// []model.Assumption (internal) and auto-creates registry files
+// for any IDs not yet in the registry. It is called by kron_add
+// and kron_update when they receive non-empty assumptions[] in the
+// input.
+//
+// rationale validation (≥10 chars) is deferred to the lint pass
+// (RuleAssumptionRationaleRequired), not here, so that callers can
+// draft partial assumptions and fix them later without round-trip
+// errors blocking the write.
+//
+// Returns the resolved slice and any errors encountered during
+// auto-creation. If errors exist, the caller surfaces the first
+// one (fail-fast).
+func resolveAssumptionsForIntent(ctx context.Context, root string, w *assumption.Writer, actor string, refs []AssumptionRef) ([]model.Assumption, []error) {
+	if w == nil {
+		// Pre-migration repo: no registry, use raw refs directly.
+		out := make([]model.Assumption, 0, len(refs))
+		for _, r := range refs {
+			out = append(out, model.Assumption{
+				ID:         r.ID,
+				Severity:   model.Severity(r.Severity),
+				Rationale:  r.Rationale,
+				ExpiresAt:  r.ExpiresAt,
+				VerifiedAt: r.VerifiedAt,
+				VerifiedBy: r.VerifiedBy,
+			})
+		}
+		return out, nil
+	}
+
+	// Check which IDs are new and need registry files.
+	existingIDs := make(map[string]bool)
+	if ar, arErr := assumption.NewReader(root); arErr == nil {
+		all, _ := ar.List(ctx)
+		for _, af := range all {
+			existingIDs[af.Frontmatter.ID] = true
+		}
+	}
+
+	created := make(map[string]bool)
+	var errs []error
+
+	for _, r := range refs {
+		sev := model.Severity(r.Severity)
+		if sev != model.SeverityHard && sev != model.SeveritySoft {
+			errs = append(errs, fmt.Errorf("kron_add: assumption %q: severity must be hard or soft, got %q", r.ID, r.Severity))
+			continue
+		}
+		if r.ID == "" {
+			errs = append(errs, fmt.Errorf("kron_add: assumption id is required"))
+			continue
+		}
+
+		// Auto-create registry stub for new IDs.
+		if !existingIDs[r.ID] && !created[r.ID] {
+			stubText := fmt.Sprintf("Auto-created stub for assumption %q.", r.ID)
+			createParams := assumption.CreateParams{
+				ID:              r.ID,
+				Text:            stubText,
+				DefaultSeverity: sev,
+				CreatedBy:       actor,
+			}
+			if err := w.Create(ctx, createParams); err != nil {
+				// Already exists (race): not an error.
+				if !errors.Is(err, assumption.ErrAssumptionExists) {
+					errs = append(errs, fmt.Errorf("kron_add: auto-create assumption %q: %w", r.ID, err))
+					continue
+				}
+			}
+			created[r.ID] = true
+		}
+	}
+	if len(errs) > 0 {
+		return nil, errs
+	}
+
+	// Convert wire refs to model.Assumptions.
+	out := make([]model.Assumption, 0, len(refs))
+	for _, r := range refs {
+		out = append(out, model.Assumption{
+			ID:         r.ID,
+			Severity:   model.Severity(r.Severity),
+			Rationale:  r.Rationale,
+			ExpiresAt:  r.ExpiresAt,
+			VerifiedAt: r.VerifiedAt,
+			VerifiedBy: r.VerifiedBy,
+		})
+	}
+	return out, nil
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/xxx/kron/internal/identity"
 	"github.com/xxx/kron/internal/model"
 	"github.com/xxx/kron/internal/parser"
 	"github.com/xxx/kron/internal/store"
@@ -88,6 +89,27 @@ func HandleUpdate(ctx context.Context, _ *mcp.CallToolRequest, in UpdateInput) (
 	// can detect the change. Match CLI's behaviour of always
 	// refreshing the timestamp on Write.
 	intent.Frontmatter.UpdatedAt = time.Now().UTC()
+
+	// G-5: Assumptions replaces the entire slice. Null/absent = no
+	// change. Empty slice = clear all.
+	// We compute handle here so the assumption helper can use it.
+	handle := identity.Handle("", identity.GitUser())
+	if in.Assumptions != nil {
+		// nil means "no change"; empty slice means "clear".
+		asmFw, asmErr := maybeOpenAssumptionWriter(root)
+		if asmErr != nil {
+			return nil, UpdateOutput{}, fmt.Errorf("kron_update: open assumption writer: %w", asmErr)
+		}
+		if len(in.Assumptions) == 0 {
+			intent.Frontmatter.Assumptions = nil
+		} else {
+			asms, resolveErrs := resolveAssumptionsForIntent(ctx, root, asmFw, handle, in.Assumptions)
+			if len(resolveErrs) > 0 {
+				return nil, UpdateOutput{}, resolveErrs[0]
+			}
+			intent.Frontmatter.Assumptions = asms
+		}
+	}
 
 	// Re-validate the patched frontmatter BEFORE persisting so a
 	// malformed update (e.g. invalid status enum) does not corrupt
