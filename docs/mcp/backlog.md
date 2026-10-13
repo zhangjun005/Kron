@@ -12,8 +12,8 @@
 
 | 编号 | 类别 | 一句话 | 风险等级 | 估时 |
 |---|---|---|---|---|
-| G-1 | 协议标准 | `server.Run` 用 `context.Background()` 而非 `signal.NotifyContext`,stdio 进程不响应 Ctrl+C | 中 | 30 min |
-| G-2 | 测试 | 无真 e2e stdio 测试,`TestRun_StdioProtocolSmoke` 双重 skip | 中 | 2 h |
+| G-1 | 协议标准 | `server.Run` 用 `context.Background()` 而非 `signal.NotifyContext`,stdio 进程不响应 Ctrl+C | ~~中~~ — **已完成 (2026-10-13)** ✅(`runWithSignalCtx` + `signal.NotifyContext` 在 `serve_mcp.go:188`) | — |
+| G-2 | 测试 | 无真 e2e stdio 测试,`TestRun_StdioProtocolSmoke` 双重 skip | ~~中~~ — **已完成 (2026-10-13)** ✅(`cmd/kron/serve-mcp/e2e/e2e_stdio_test.go` + `serve_mcp_test.go` KRON_E2E gate) | — |
 | G-3 | 协议标准 | caller client name 提取未实现(SDK 1.0 无 typed accessor) | 低 | 等 SDK |
 | G-4 | 协议标准 | capabilities 未显式声明(Resources / Prompts / Logging 都缺) | ~~低~~ — **已完成 (2026-10-13)** ✅ | — |
 | G-5 | **适配层漂移** | `internal/assumption` 只读,`kron_add` / `kron_update` 不写 `.kron/assumptions/<id>.md` | ~~高~~ — **已完成 (2026-10-13)** ✅ | — |
@@ -320,10 +320,11 @@ server := mcp.NewServer(&mcp.Implementation{...}, nil)
 4. ~~**C-7**~~ — **✅ 2026-10-13 完成（kron_get relations.Dependents）**
 5. ~~**C-6**~~ — **✅ 2026-10-13 完成（kron_impact 拆 code/markdown）**
 6. ~~**C-3**~~ — **✅ 2026-10-13 完成（shimHandler + mcp.NewLoggingHandler）**
-7. **G-1**(0.5 d)— 进程管理基本功
-8. **G-2**(1 d)— 协议层 coverage
+7. ~~**G-1**~~ — **✅ 已实装**(`runWithSignalCtx` 在 `serve_mcp.go:188`,2026-10-13 补登)
+8. ~~**G-2**~~ — **✅ 已实装**(`cmd/kron/serve-mcp/e2e/e2e_stdio_test.go`,2026-10-13 补登)
 9. **G-3** 与 SDK 升级一起做(单独 PR)
 10. **C-1** Resources（先验证 client 支持情况）
-11. **C-5** kron_lint fix suggestion hint
+11. **Roots** （新发现；先开 RFC 拍板范围）
+12. **C-5** kron_lint fix suggestion hint
 
 不催——按需做,本目录**只**是记录。

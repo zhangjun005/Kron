@@ -323,22 +323,61 @@ func (l *kronLogger) Info(msg string) {
 
 ---
 
-## Roots Capability（新发现，低优先级）
+## Roots Capability（新发现，低优先级 — 方向在 RFC 拍板前**不**动手）
 
-MCP 的 `roots` 告诉 client "我工作在哪几个目录"。Kron 是单 repo 工具，当前没有声明。
+### MCP spec 的方向
 
-**实际场景**：如果未来 Wails GUI 支持同时看多个项目，需要 `roots` 来告知每个 session 对应的 root。
+MCP Roots 的方向是反的（[spec](https://modelcontextprotocol.io/specification/2025-06-18/client/roots)）：
 
-**修法**：在 `initialize` 握手阶段声明：
+- **Client 暴露 Roots**（在 `ClientCapabilities.Roots` 声明 + 调 `AddRoots` 注册）
+- **Server 拉取 Roots**（调 `roots/list`，或响应 `notifications/roots/list_changed`）
+- 我们的 missing-capabilities.md 旧版"在 server 端 `ServerCapabilities.Roots` 声明"是**错的** —— Roots 字段属于 `ClientCapabilities`，不在 server 侧声明。
+
+### Kron 当前的 root 来源
+
+Kron 是单 repo 工具。`resolveMCPRoot` 按以下优先级决定 root：
+
+1. `-CWD` flag（CLI 参数）
+2. process 的 `os.Getwd()`（stdio 模式下默认）
+3. `config.toml` 的 `intents_dir`（**未实现**，架构 §3.5 零配置原则）
+
+Roots 在这里**不参与** root 解析 —— client 声明的 `roots` 是 client 的工作目录，不一定是 `.kron/intents/` 所在。两者**解耦**。
+
+### 单 repo 场景下的判断
+
+Kron 当前的 stdio 进程 = 一个 session = 一个 root。`ss.ListRoots` 在这里**没价值**：
+
+- client（Claude Desktop / Cursor）声明的 root 可能是 `~/my-app`，但 Kron 需要的是 `<repo>/.kron/intents/`
+- 强行信任 `roots/list` 会让 Kron 跑错目录
+
+**结论**：Kron 作为单 repo 工具**不**需要 Roots 集成。Wails GUI 多项目是另一个层级的问题（架构 §〇 铁律 #9：GUI 是 client 层，不在 Kron 主仓），由 GUI 端用多 session 调多个 `kron serve-mcp` 子进程解决，每个子进程自己 `-CWD` 到对应 project。
+
+### 未来如果要做（仅作记录）
+
+假设未来 Wails GUI / IDE 真的需要 server 侧感知 client 的 project 根，做法是：
 
 ```go
-Roots: []mcp.Root{{
-    URI:     "file://" + root,
-    Name:    "kron",
-}},
+// serve_mcp.go
+server := mcp.NewServer(impl, &mcp.ServerOptions{
+    RootsListChangedHandler: func(ctx context.Context, req *mcp.RootsListChangedRequest) {
+        // 收到 client 通知：roots 变了，可以重新读
+        ss := req.Session
+        roots, err := ss.ListRoots(ctx, nil)
+        if err != nil { return }
+        // ... 用 roots 做点什么
+    },
+})
 ```
 
-当前不实现（单 repo 场景不需要），记录在此备查。
+注意：
+
+- **不能**用 roots 覆盖 `-CWD` 行为（必须保持显式优先）
+- LSP 层**不**改 —— Roots 是 MCP 概念；LSP 用 `workspaceFolders` 是另一套
+- 改动只发生在 `cmd/kron/serve-mcp/` 内，不进 `internal/`
+
+### 触发条件
+
+第一次出现"Wails GUI / IDE 同时管理多项目且需要 server 感知 project 根"的实际需求。届时先开 RFC 拍板范围（是否多 root、root 来源优先级、缓存策略）。
 
 ---
 
