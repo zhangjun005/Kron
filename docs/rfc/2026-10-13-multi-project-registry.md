@@ -61,6 +61,7 @@ C:\Apps\Kron\
 ```jsonc
 // projects.json
 {
+  "current_project": "E:\\works\\proj1",    // ← 当前激活项目，可空
   "projects": [
     {
       "path": "E:\\works\\my-project",
@@ -78,9 +79,10 @@ C:\Apps\Kron\
 
 | 字段 | 说明 | 谁写 |
 |---|---|---|
-| `path` | 项目根目录绝对路径（`filepath.Abs`） | `kron register` / `kron init` / GUI |
-| `added_at` | 首次注册时间 (ISO 8601 UTC) | `kron register` / `kron init` |
-| `last_opened` | 最近一次打开时间 (ISO 8601 UTC) | GUI（每次用户点开该项目时更新） |
+| `current_project` | 当前激活项目的绝对路径，可空 | GUI（用户切换项目时写）；`kron register` 成功后自动更新 |
+| `projects[].path` | 项目根目录绝对路径（`filepath.Abs`） | `kron register` / `kron init` / GUI |
+| `projects[].added_at` | 首次注册时间 (ISO 8601 UTC) | `kron register` / `kron init` |
+| `projects[].last_opened` | 最近一次打开时间 (ISO 8601 UTC) | GUI（每次用户点开该项目时更新） |
 
 **去重**：`path` 相同的项目**不**重复写入（`path` 唯一键）。
 
@@ -98,10 +100,11 @@ $ kron register E:\works\my-project
 
 **行为**：
 1. 解析 `<path>` → `filepath.Abs` → 验证目录存在
-2. 读 `projects.json`（不存在则创建 `[]`）
+2. 读 `projects.json`（不存在则创建 `{}`）
 3. 若 `path` 已存在 → 更新 `added_at`（重新注册）→ 写回
 4. 若 `path` 不存在 → 追加 → 写回
-5. 输出: `Registered: E:\works\my-project`（stdout，1 行）
+5. 更新 `current_project` = `<path>`（自动设为当前激活项目）→ 写回
+6. 输出: `Registered: E:\works\my-project`（stdout，1 行）
 
 **错误处理**：
 - 目录不存在 → `fmt.Fprintln(os.Stderr, "error: directory not found")` → exit 1
@@ -138,6 +141,79 @@ D:\另一个项目             (last opened: 2026-10-12 20:00)
 
 走同一 JSON 文件读取，**不**新增文件，**不**改数据结构。
 
+### 2.7 `current_project` — 当前项目指针
+
+**问题**：`os.Getwd()` 不一定是项目目录（用户在上级目录 / 根目录跑命令）。
+
+**解决**：在 `projects.json` 加顶级字段 `current_project`，作为"当前激活项目"的指针。
+
+```jsonc
+// projects.json
+{
+  "current_project": "E:\\works\\proj1",    // ← 绝对路径，可空
+  "projects": [
+    { "path": "E:\\works\\proj1", "added_at": "...", "last_opened": "..." },
+    { "path": "E:\\works\\proj2", "added_at": "...", "last_opened": "..." }
+  ]
+}
+```
+
+| 字段 | 说明 | 谁写 |
+|---|---|---|
+| `current_project` | 当前激活项目的绝对路径（`filepath.Abs`），可空 | GUI（用户切换项目时写）；`kron register` 注册成功后自动更新 |
+
+**向后兼容**：`current_project` 可空。空时：
+- GUI：默认选 `last_opened` 最大的那个
+- MCP server：退到 `os.Getwd()`
+
+**GUI 更新时机**：用户点击项目卡片 → 写入 `current_project` + 更新 `last_opened`（两个字段一次事务性写回）。
+
+### 2.8 MCP server 读取优先级
+
+`kron serve-mcp` 的 `resolveMCPRoot` 按以下优先级决定 repo root：
+
+| 优先级 | 来源 | 说明 |
+|---|---|---|
+| 1 (最高) | `-CWD <path>` flag | 显式指定，覆盖一切 |
+| 2 | `projects.json` 的 `current_project` | GUI 维护的当前激活项目指针 |
+| 3 (最低) | `os.Getwd()` | 进程工作目录（stdio 场景默认） |
+
+```go
+// cmd/kron/serve-mcp/serve_mcp.go:resolveMCPRoot (伪代码)
+func resolveMCPRoot(args []string, projectsJSON string) (string, error) {
+    // P1: 显式 -CWD
+    if len(args) == 2 && args[0] == "-CWD" {
+        return filepath.Abs(args[1])
+    }
+
+    // P2: projects.json 的 current_project
+    if projectsJSON != "" {
+        if data, err := os.ReadFile(projectsJSON); err == nil {
+            var cfg struct {
+                CurrentProject string `json:"current_project"`
+            }
+            if json.Unmarshal(data, &cfg) == nil && cfg.CurrentProject != "" {
+                if _, err := os.Stat(filepath.Join(cfg.CurrentProject, ".kron")); err == nil {
+                    return cfg.CurrentProject, nil
+                }
+            }
+        }
+    }
+
+    // P3: 退到 os.Getwd()
+    cwd, err := os.Getwd()
+    if err != nil {
+        return "", fmt.Errorf("getcwd: %w", err)
+    }
+    return cwd, nil
+}
+```
+
+**GUI spawn MCP server 时的行为**：
+- GUI 始终传 `-CWD <project-root>`（P1 命中，绕开指针逻辑）——这是最可靠的
+- CLI `kron` 命令不走 MCP，按 §2.3 / §2.4 行为
+- 脚本 / CI 用 `kron register` 注册后，下次 `kron lint` / `kron add` 走 §P3（`os.Getwd()` 正确时）或 §P2（不在项目目录时）
+
 ---
 
 ## 3 不做的事 (明确)
@@ -161,13 +237,14 @@ D:\另一个项目             (last opened: 2026-10-12 20:00)
 | # | 改动 | 仓库位置 | 工作量 |
 |---|---|---|---|
 | 1 | `internal/store/` 新增 `AddProject(path)` / `ListProjects()` / `RemoveProject(path)` / `UpdateLastOpened(path)` 函数 | `internal/store/project_registry.go` (新建) | 1 天 |
-| 2 | `cmd/kron/cli/` 新增 `register` 子命令 + `list-projects` 子命令 ( cobra register ) | `cmd/kron/cli/register.go` (新建) | 0.5 天 |
-| 3 | `kron init` 自动调 `AddProject()` | `cmd/kron/cli/init.go` (修改) | 0.5 天 |
+| 2 | `cmd/kron/cli/` 新增 `register` 子命令 + `list-projects` 子命令 | `cmd/kron/cli/register.go` (新建) | 0.5 天 |
+| 3 | `kron init` 自动调 `AddProject()` + 设置 `current_project` | `cmd/kron/cli/init.go` (修改) | 0.5 天 |
 | 4 | GUI 读/写 `projects.json` (Wails Go 侧 `os.ReadFile` / `os.WriteFile`) | `frontend/wails/` | 0.5 天 |
-| 5 | 修订 `docs/process/cli-flag.md` — `kron register` 是新 CLI 子命令（不是 flag 变更） | `docs/process/` | 0.5 天 |
-| 6 | 修订 `docs/rfc/2026-10-09-gui-ide-plan.md` §3.2 — 加"项目列表存储"引用 | `docs/rfc/` | 0.5 天 |
+| 5 | `serve-mcp` 的 `resolveMCPRoot` 加 3 级 fallback（-CWD → projects.json → os.Getwd()） | `cmd/kron/serve-mcp/serve_mcp.go` (修改) | 0.5 天 |
+| 6 | 修订 `docs/process/cli-flag.md` — `kron register` 是新 CLI 子命令（不是 flag 变更） | `docs/process/` | 0.5 天 |
+| 7 | 修订 `docs/rfc/2026-10-09-gui-ide-plan.md` §3.2 — 加"项目列表存储"引用 | `docs/rfc/` | 0.5 天 |
 
-**总改动 ~3.5 天. Go 主仓改动约 2 天 (store + cli), GUI 改动 0.5 天.**
+**总改动 ~4 天. Go 主仓改动约 2.5 天 (store + cli + serve-mcp), GUI 改动 0.5 天.**
 
 ---
 
