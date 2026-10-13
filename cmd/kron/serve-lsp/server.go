@@ -27,9 +27,12 @@ type server struct {
 }
 
 // anchorFinder extracts the line-level anchors in a single source file.
-// It is the injection seam for the internal anchor scanner: v1.3 wires
-// mockAnchorsForFile (see mock.go) until parser.AnchorsForFile lands on
-// master, at which point Run() switches to the real implementation.
+// It is the injection seam for the internal anchor scanner: Run()
+// wires parser.AnchorsForFile (internal/parser/anchors.go) as the
+// concrete implementation, so production traffic and tests share the
+// same parsing path. Test fixtures that want a different layout
+// (e.g. a synthesized dangling anchor) pass a closure into the
+// anchorFinder field directly.
 type anchorFinder func(filePath string) ([]model.Anchor, error)
 
 // Initialize reports the server identity and the capabilities Kron

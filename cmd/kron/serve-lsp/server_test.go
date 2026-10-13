@@ -12,6 +12,7 @@ import (
 	"go.lsp.dev/uri"
 
 	"github.com/xxx/kron/internal/model"
+	"github.com/xxx/kron/internal/parser"
 	"github.com/xxx/kron/internal/store"
 )
 
@@ -155,4 +156,72 @@ func TestInitialize_ReportsCapabilities(t *testing.T) {
 func TestShutdown_NoError(t *testing.T) {
 	s := newTestServer(t)
 	require.NoError(t, s.Shutdown(context.Background()))
+}
+
+// newTestServerWithRealParser builds a server over a temp repo that
+// has one intent (auth-jwt) and one source file (main.go) anchoring
+// it on line 3, but — unlike newTestServer — wires
+// parser.AnchorsForFile as the anchorFinder instead of fakeAnchors.
+// This exercises the real end-to-end path that production Run() takes:
+// LSP request → parser scans the .go file → server matches cursor
+// line → store.Load resolves the slug → hover renders.
+func newTestServerWithRealParser(t *testing.T) *server {
+	t.Helper()
+	root := t.TempDir()
+	writeTestFile(t, root, ".kron/intents/auth-jwt.md", sampleIntent)
+	writeTestFile(t, root, "main.go", "package main\n\n// @kron:intent auth-jwt\nfunc main() {}\n")
+
+	reader, err := store.NewReader(root)
+	require.NoError(t, err)
+	return &server{reader: reader, anchors: parser.AnchorsForFile}
+}
+
+func TestHover_RealParserEndToEnd(t *testing.T) {
+	s := newTestServerWithRealParser(t)
+	path := filepath.Join(s.reader.Root, "main.go")
+
+	// Line 2 (0-indexed) = line 3 (1-indexed) = the "@kron:intent
+	// auth-jwt" line written by newTestServerWithRealParser. The real
+	// parser must find the anchor, the store must load the intent, and
+	// the hover must render the slug + status.
+	h, err := s.Hover(context.Background(), hoverParams(path, 2))
+	require.NoError(t, err)
+	require.NotNil(t, h, "real parser must find the anchor on line 3")
+
+	mc, ok := h.Contents.(*protocol.MarkupContent)
+	require.True(t, ok)
+	assert.Equal(t, protocol.MarkupKindMarkdown, mc.Kind)
+	assert.Contains(t, mc.Value, "auth-jwt")
+	assert.Contains(t, mc.Value, "active")
+}
+
+func TestHover_RealParser_NotOnAnchor(t *testing.T) {
+	s := newTestServerWithRealParser(t)
+	path := filepath.Join(s.reader.Root, "main.go")
+
+	// Line 0 (0-indexed) = line 1 (1-indexed) = "package main" — no
+	// anchor. The real parser must return no anchors, the server
+	// must report no hover.
+	h, err := s.Hover(context.Background(), hoverParams(path, 0))
+	require.NoError(t, err)
+	assert.Nil(t, h, "non-anchor line must yield no hover")
+}
+
+func TestDefinition_RealParserEndToEnd(t *testing.T) {
+	s := newTestServerWithRealParser(t)
+	path := filepath.Join(s.reader.Root, "main.go")
+
+	result, err := s.Definition(context.Background(), &protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: uri.File(path)},
+			Position:     protocol.Position{Line: 2, Character: 0},
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	locs, ok := result.(protocol.LocationSlice)
+	require.True(t, ok)
+	require.Len(t, locs, 1)
+	assert.Contains(t, locs[0].URI.String(), "auth-jwt.md")
 }

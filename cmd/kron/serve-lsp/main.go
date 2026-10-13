@@ -28,6 +28,7 @@ import (
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 
+	"github.com/xxx/kron/internal/parser"
 	"github.com/xxx/kron/internal/store"
 )
 
@@ -54,7 +55,7 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 		return fmt.Errorf("kron serve-lsp: %w", err)
 	}
 
-	s := &server{reader: reader, anchors: mockAnchorsForFile}
+	s := &server{reader: reader, anchors: parser.AnchorsForFile}
 
 	stream := jsonrpc2.NewHeaderStream(&stdioRWC{in: in, out: out})
 	_, conn, _ := protocol.NewServer(context.Background(), s, stream)
