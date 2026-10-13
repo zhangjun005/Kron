@@ -51,10 +51,8 @@ func HandleDelete(ctx context.Context, _ *mcp.CallToolRequest, in DeleteInput) (
 	// itself is the user's intent; the dependents list is a courtesy
 	// warning.
 	dependents := []string{}
-	if r, rerr := store.NewReader(root); rerr == nil {
-		if all, lerr := r.LoadAll(ctx); lerr == nil {
-			dependents = relations.Dependents(all, in.Slug)
-		}
+	if all, lerr := LoadAllCached(ctx, root); lerr == nil {
+		dependents = relations.Dependents(all, in.Slug)
 	}
 
 	w, err := store.NewWriter(root)
@@ -64,7 +62,7 @@ func HandleDelete(ctx context.Context, _ *mcp.CallToolRequest, in DeleteInput) (
 	if err := w.MoveToTrash(ctx, in.Slug); err != nil {
 		return nil, DeleteOutput{}, err
 	}
-
+	InvalidateCache(root)
 	return nil, DeleteOutput{
 		OK:          true,
 		TrashedPath: model.TrashPath(in.Slug),

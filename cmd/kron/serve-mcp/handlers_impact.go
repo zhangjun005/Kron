@@ -64,7 +64,7 @@ func HandleImpact(ctx context.Context, _ *mcp.CallToolRequest, in ImpactInput) (
 	if err != nil {
 		return nil, ImpactOutput{}, err
 	}
-	all, err := r.LoadAll(ctx)
+	all, err := LoadAllCached(ctx, root)
 	if err != nil {
 		return nil, ImpactOutput{}, fmt.Errorf("kron_impact: load: %w", err)
 	}

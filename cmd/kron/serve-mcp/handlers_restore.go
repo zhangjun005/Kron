@@ -44,6 +44,6 @@ func HandleRestore(ctx context.Context, _ *mcp.CallToolRequest, in RestoreInput)
 	if err := w.RestoreFromTrash(ctx, in.Slug); err != nil {
 		return nil, RestoreOutput{}, err
 	}
-
+	InvalidateCache(root)
 	return nil, RestoreOutput{OK: true, Path: model.IntentPath(in.Slug)}, nil
 }

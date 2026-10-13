@@ -7,7 +7,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/xxx/kron/internal/lint"
-	"github.com/xxx/kron/internal/store"
 )
 
 // HandleStale returns the mcp.ToolHandlerFor binding for kron_stale.
@@ -43,11 +42,7 @@ func HandleStale(ctx context.Context, _ *mcp.CallToolRequest, in StaleInput) (
 		threshold = lint.StaleDaysDefault
 	}
 
-	r, err := store.NewReader(root)
-	if err != nil {
-		return nil, StaleOutput{}, fmt.Errorf("kron_stale: open store: %w", err)
-	}
-	all, err := r.LoadAll(ctx)
+	all, err := LoadAllCached(ctx, root)
 	if err != nil {
 		return nil, StaleOutput{}, fmt.Errorf("kron_stale: load: %w", err)
 	}

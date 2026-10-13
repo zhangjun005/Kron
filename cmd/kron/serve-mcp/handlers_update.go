@@ -125,7 +125,7 @@ func HandleUpdate(ctx context.Context, _ *mcp.CallToolRequest, in UpdateInput) (
 	if err := w.Write(ctx, intent); err != nil {
 		return nil, UpdateOutput{}, fmt.Errorf("kron_update: write: %w", err)
 	}
-
+	InvalidateCache(root)
 	return nil, UpdateOutput{OK: true, Path: model.IntentPath(in.Slug)}, nil
 }
 

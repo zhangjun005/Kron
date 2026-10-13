@@ -10,7 +10,6 @@ import (
 	"github.com/xxx/kron/internal/assumption"
 	"github.com/xxx/kron/internal/model"
 	"github.com/xxx/kron/internal/parser"
-	"github.com/xxx/kron/internal/store"
 )
 
 // HandleAssumeCheck returns the mcp.ToolHandlerFor binding for
@@ -61,11 +60,7 @@ func HandleAssumeCheck(ctx context.Context, _ *mcp.CallToolRequest, in AssumeChe
 		}
 	}
 
-	r, err := store.NewReader(root)
-	if err != nil {
-		return nil, AssumeCheckOutput{}, fmt.Errorf("kron_assume_check: open store: %w", err)
-	}
-	all, err := r.LoadAll(ctx)
+	all, err := LoadAllCached(ctx, root)
 	if err != nil {
 		return nil, AssumeCheckOutput{}, fmt.Errorf("kron_assume_check: load: %w", err)
 	}

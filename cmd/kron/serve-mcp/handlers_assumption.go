@@ -14,7 +14,6 @@ import (
 	"github.com/xxx/kron/internal/model"
 	"github.com/xxx/kron/internal/parser"
 	"github.com/xxx/kron/internal/relations"
-	"github.com/xxx/kron/internal/store"
 )
 
 // =====================================================================
@@ -79,7 +78,7 @@ func HandleAssumptionCreate(ctx context.Context, _ *mcp.CallToolRequest, in Assu
 	if err := w.Create(ctx, createParams); err != nil {
 		return nil, AssumptionCreateOutput{}, err
 	}
-
+	InvalidateCache(root)
 	return nil, AssumptionCreateOutput{
 		OK:   true,
 		Path: fmt.Sprintf(".kron/assumptions/%s.md", in.ID),
@@ -221,7 +220,7 @@ func HandleAssumptionUpdate(ctx context.Context, _ *mcp.CallToolRequest, in Assu
 	if err := w.Update(ctx, in.ID, patch); err != nil {
 		return nil, AssumptionUpdateOutput{}, err
 	}
-
+	InvalidateCache(root)
 	return nil, AssumptionUpdateOutput{
 		OK:   true,
 		Path: fmt.Sprintf(".kron/assumptions/%s.md", in.ID),
@@ -268,10 +267,8 @@ func HandleAssumptionDelete(ctx context.Context, _ *mcp.CallToolRequest, in Assu
 	// the same pattern as kron_delete: the list is a courtesy warning,
 	// not a hard block.
 	var referencingIntents []string
-	if r, rerr := store.NewReader(root); rerr == nil {
-		if all, lerr := r.LoadAll(ctx); lerr == nil {
-			referencingIntents = relations.ReferencingIntents(all, in.ID)
-		}
+	if all, lerr := LoadAllCached(ctx, root); lerr == nil {
+		referencingIntents = relations.ReferencingIntents(all, in.ID)
 	}
 
 	w, err := assumption.NewWriter(root)

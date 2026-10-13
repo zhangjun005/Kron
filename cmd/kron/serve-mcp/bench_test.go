@@ -330,3 +330,81 @@ func formatDur(d time.Duration) string {
 		return fmt.Sprintf("%.2fs", d.Seconds())
 	}
 }
+
+// TestCacheEffect measures the cache hit improvement when multiple
+// read tools are called in the same stdio session (the primary
+// production scenario: an AI tool making 3-5 kron_* calls in one
+// request).
+//
+// The first call populates the cache (cold); subsequent calls reuse
+// it (hot). For 500 intents the cold path is ~50ms (full LoadAll);
+// the hot path should be sub-millisecond.
+//
+//	go test ./cmd/kron/serve-mcp/ -run TestCacheEffect -v
+func TestCacheEffect(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping cache effect test in -short mode")
+	}
+	sizes := []int{10, 100, 500}
+
+	// Tools that do LoadAll and should benefit from caching.
+	readTools := []struct {
+		name string
+		args map[string]any
+	}{
+		{"kron_list", map[string]any{}},
+		{"kron_impact", map[string]any{"slug": "intent-0000"}},
+		{"kron_intent_density", map[string]any{}},
+		{"kron_lint", map[string]any{}},
+		{"kron_stale", map[string]any{"days_threshold": 90}},
+	}
+
+	t.Log("\n=== cache effect: cold (1st call) vs hot (2nd-5th call, mean) ===")
+	t.Logf("| size | tool | cold | hot (mean) | speedup |")
+	t.Logf("|---|---|---|---|---|")
+
+	for _, n := range sizes {
+		for _, tc := range readTools {
+			// Cold: fresh session, first call.
+			cold := benchMean(t, tc.name, tc.args, n, 3)
+
+			// Hot: same session, call #2..#5, mean of 4.
+			// Run the hot measurement on a separate session so the
+			// cache from the cold run doesn't pollute it.
+			var hotDurs []time.Duration
+			for i := 0; i < 4; i++ {
+				dir := t.TempDir()
+				seedNIntentsT(t, dir, n)
+				ts := newTestSession(t, dir)
+				// Warm up: call once to populate cache.
+				_, _ = ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+					Name:      tc.name,
+					Arguments: tc.args,
+				})
+				// Measure: call again (should hit cache).
+				start := time.Now()
+				_, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+					Name:      tc.name,
+					Arguments: tc.args,
+				})
+				elapsed := time.Since(start)
+				ts.Cleanup()
+				if err != nil {
+					t.Fatalf("hot call: %v", err)
+				}
+				hotDurs = append(hotDurs, elapsed)
+			}
+			// Trimmed mean of hot runs.
+			sort.Slice(hotDurs, func(i, j int) bool { return hotDurs[i] < hotDurs[j] })
+			hotDurs = hotDurs[:len(hotDurs)-1]
+			var hotSum time.Duration
+			for _, d := range hotDurs {
+				hotSum += d
+			}
+			hot := hotSum / time.Duration(len(hotDurs))
+
+			speedup := float64(cold) / float64(hot)
+			t.Logf("| %d | %s | %s | %s | %.1fx |", n, tc.name, formatDur(cold), formatDur(hot), speedup)
+		}
+	}
+}

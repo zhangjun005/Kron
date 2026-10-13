@@ -18,7 +18,7 @@
 | G-4 | 协议标准 | capabilities 未显式声明(Resources / Prompts / Logging 都缺) | 低 | 1 h |
 | G-5 | **适配层漂移** | `internal/assumption` 只读,`kron_add` / `kron_update` 不写 `.kron/assumptions/<id>.md` | ~~高~~ — **已完成 (2026-10-13)** ✅ | — |
 | G-6 | **适配层漂移** | `internal/relations.ReferencingIntents` 无人调用(无 `kron_assumption_*` 工具) | ~~高~~ — **已完成 (2026-10-13)** ✅ (随 G-5 一起) | — |
-| G-7 | 性能 | `kron_impact` / `kron_intent_density` 重复全量 `LoadAll`,无缓存 | 低(规模敏感) | 0.5 d |
+| G-7 | 性能 | `kron_impact` / `kron_intent_density` 重复全量 `LoadAll`,无缓存 | ~~低(规模敏感)~~ — **已完成 (2026-10-13)** ✅ | — |
 
 ---
 
@@ -224,9 +224,9 @@ server := mcp.NewServer(impl, &mcp.ServerOptions{
 
 ---
 
-### G-7 `kron_impact` / `kron_intent_density` 重复全量 `LoadAll`
+### G-7 `kron_impact` / `kron_intent_density` 重复全量 `LoadAll` — **✅ 已完成 (2026-10-13)**
 
-**现象**:
+**当时的现象**:
 - `handlers_impact.go:68`: `all, err := r.LoadAll(ctx)`
 - `handlers_density.go:48`: `all, err := r.LoadAll(ctx)`
 - `handlers_tree.go:48`: `all, err := r.LoadAll(ctx)`
@@ -234,29 +234,31 @@ server := mcp.NewServer(impl, &mcp.ServerOptions{
 - `handlers_stale.go:52`: `all, err := r.LoadAll(ctx)`
 - `handlers_delete.go:54`: `all, err := r.LoadAll(ctx)` (move 前算 dependents)
 
-**问题**:
+**当时的问题**:
 - 单次 MCP 调用 `LoadAll` 1 次——OK
 - AI 工具一次发 5 个 `kron_*` 工具调用 → 5 次 `LoadAll`
 - O(repo size) 的 I/O + YAML 解析 × 5 = 大仓库下明显慢
-- 现行实现**每次都重新读盘**——没有缓存层
 
-**修法**(候选):
-1. **短期**:`store.Reader` 加 sync.Map 缓存,key = `filepath.Abs(root) + mtime`;命中 → 直接返
-2. **中期**:per-Run 的 in-memory cache(`Run` 入口 `sync.Once` 初始化)——stdio 进程寿命内复用
-3. **长期**:监听 `.kron/intents/` 变更失效(架构 §〇 铁律 #6 拒绝 daemon,需要"按需"——client 显式调 invalidate)
+**2026-10-13 落地**:
 
-**风险**:
-- 缓存 = 隐式状态——架构 §〇 铁律 #6 反对
-- 但进程内 sync.Map **不**是"状态机",只是性能优化——可以**论证**不算违规
-- 真正违规的会是"文件监听自动失效"——目前不需要
+新增 `cmd/kron/serve-mcp/cache.go`：
 
-**为什么不立即做**:
-- 仓库规模不大时(架构示例的 O(10) intents)性能问题不明显
-- `bench_test.go` 已经测了——**先看 benchmark 再决定**
+- `LoadAllCached(ctx, root)` —— singleflight + mtime invalidation
+- 9 个 handler 全部改用 `LoadAllCached` 替换手写 `store.NewReader → LoadAll`
+- 写操作后（kron_add / kron_update / kron_delete / kron_restore）显式 `InvalidateCache`
+- 不下沉到 `internal/store`（铁律 #5）
 
-**待办触发条件**:
-- 第一次出现"AI 工具调 5 个 tool 慢"的用户反馈
-- 或仓库 `kron lint` 在 >100 intents 仓库下慢的反馈
+**实测效果**（`TestCacheEffect`，500 intents）：
+
+| 工具 | 冷 | 热 | 加速比 |
+|---|---|---|---|
+| `kron_stale` | 59ms | 0.17ms | **346x** |
+| `kron_impact` | 58ms | 0.35ms | **166x** |
+| `kron_intent_density` | 57ms | 1ms | **56x** |
+| `kron_list` | 65ms | 4ms | **15x** |
+| `kron_lint` | 89ms | 81ms | **1.1x**（scan 主导，无缓存收益）|
+
+**关联**：OPT-2（anchor scan 共享）待评估，见 [`docs/implementation/bench-2026-10-09.md`](../../docs/implementation/bench-2026-10-09.md) §5。
 
 ---
 
@@ -295,10 +297,10 @@ server := mcp.NewServer(impl, &mcp.ServerOptions{
 如果决定**动手**做一部分(顺序按"价值 / 成本比"):
 
 1. ~~**G-5 + G-6 一起做**~~(同流程,1 PR ≈ 1.5 d)— **✅ 2026-10-13 完成**
-2. **G-1**(0.5 d)— 进程管理基本功
-3. **G-2**(1 d)— 协议层 coverage
-4. **G-4**(0.5 d)— 防御性显式
-5. **G-3** 与 SDK 升级一起做(单独 PR)
-6. **G-7** 看 benchmark 再定(单独 PR)
+2. ~~**G-7** 看 benchmark 再定(单独 PR)~~ — **✅ 2026-10-13 完成（OPT-1）**
+3. **G-1**(0.5 d)— 进程管理基本功
+4. **G-2**(1 d)— 协议层 coverage
+5. **G-4**(0.5 d)— 防御性显式
+6. **G-3** 与 SDK 升级一起做(单独 PR)
 
 不催——按需做,本目录**只**是记录。

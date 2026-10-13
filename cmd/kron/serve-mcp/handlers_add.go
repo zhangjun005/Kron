@@ -127,6 +127,9 @@ func HandleAdd(ctx context.Context, _ *mcp.CallToolRequest, in AddInput) (
 		// happen because both paths live under root).
 		relPath = model.IntentPath(in.Slug)
 	}
+	// Invalidate the LoadAll cache so subsequent read handlers
+	// pick up the new intent without a stale cached result.
+	InvalidateCache(root)
 	return nil, AddOutput{OK: true, Path: filepath.ToSlash(relPath)}, nil
 }
 

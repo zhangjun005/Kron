@@ -33,11 +33,7 @@ func HandleList(ctx context.Context, _ *mcp.CallToolRequest, in ListInput) (
 	}
 	root := repoRootFrom(ctx)
 
-	r, err := store.NewReader(root)
-	if err != nil {
-		return nil, ListOutput{}, fmt.Errorf("kron_list: open store: %w", err)
-	}
-	all, err := r.LoadAll(ctx)
+	all, err := LoadAllCached(ctx, root)
 	if err != nil {
 		return nil, ListOutput{}, fmt.Errorf("kron_list: load: %w", err)
 	}
@@ -97,12 +93,10 @@ func HandleGet(ctx context.Context, _ *mcp.CallToolRequest, in GetInput) (
 	body := intentFromModel(intent, ar)
 	if in.IncludeRelations {
 		// Compute reverse-link + prerequisite views from a fresh
-		// LoadAll. We re-load (rather than caching) so the views
-		// are always consistent with the current on-disk state.
-		// For repos with O(100) intents this is sub-millisecond;
-		// a future cache layer (per docs/process/new-internal-api.md)
-		// can replace this if benchmarks warrant.
-		all, loadErr := r.LoadAll(ctx)
+		// LoadAll. We use LoadAllCached (singleflight + mtime
+		// invalidation) so the views are consistent with the current
+		// on-disk state while remaining fast for repeated calls.
+		all, loadErr := LoadAllCached(ctx, root)
 		if loadErr == nil {
 			refs, deps, syms := relations.ReverseLinks(all, in.Slug)
 			body.Relations = &GetRelations{

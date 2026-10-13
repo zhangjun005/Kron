@@ -6,7 +6,6 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/xxx/kron/internal/store"
 	"github.com/xxx/kron/internal/view"
 )
 
@@ -40,11 +39,7 @@ func HandleTree(ctx context.Context, _ *mcp.CallToolRequest, _ TreeInput) (
 	}
 	root := repoRootFrom(ctx)
 
-	r, err := store.NewReader(root)
-	if err != nil {
-		return nil, TreeOutput{}, fmt.Errorf("kron_tree: open store: %w", err)
-	}
-	all, err := r.LoadAll(ctx)
+	all, err := LoadAllCached(ctx, root)
 	if err != nil {
 		return nil, TreeOutput{}, fmt.Errorf("kron_tree: load: %w", err)
 	}
