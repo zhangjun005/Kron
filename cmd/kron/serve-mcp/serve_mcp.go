@@ -264,14 +264,60 @@ func (nopWriteCloser) Close() error { return nil }
 // resolveMCPRoot parses the optional "-CWD <root>" flag pair. Keeping
 // it stdlib-only (no cobra) is intentional — this layer is
 // independently testable and shouldn't drag in CLI argument conventions.
+//
+// After resolving the path, we validate that <root>/.kron/ exists.
+// MCP clients (Claude Code, Cursor MCP runtime, VSCode extensions)
+// typically spawn the kron subprocess with cwd set to the project
+// root, so os.Getwd() is correct in the common case. But there is
+// no protocol-level guarantee: a misconfigured client can spawn
+// kron in $HOME or some other directory, in which case the SDK
+// hands us a perfectly valid path that just isn't a Kron project.
+// Validating up front lets us fail with a clear, actionable error
+// ("pass -CWD <repo-root>") instead of waiting for the first
+// tool call to surface ".kron/ not found; run kron_init first"
+// — which is misleading because the project isn't missing, the
+// cwd is.
 func resolveMCPRoot(args []string) (string, error) {
-	if len(args) == 0 {
-		return os.Getwd()
+	var root string
+	switch {
+	case len(args) == 0:
+		var err error
+		root, err = os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("kron serve-mcp: cannot determine working directory: %w", err)
+		}
+	case len(args) == 2 && args[0] == "-CWD":
+		abs, err := filepath.Abs(args[1])
+		if err != nil {
+			return "", fmt.Errorf("kron serve-mcp: cannot resolve -CWD path %q: %w", args[1], err)
+		}
+		root = abs
+	default:
+		return "", fmt.Errorf("kron serve-mcp: unexpected arguments %v (only -CWD <root> is supported)", args)
 	}
-	if len(args) == 2 && args[0] == "-CWD" {
-		return filepath.Abs(args[1])
+
+	// Sanity check: a Kron project has a .kron/ directory at the
+	// root. If the resolved root doesn't have one, the client
+	// almost certainly got the cwd wrong; surface a clear
+	// pointer to the fix rather than letting the first tool
+	// call blow up with a misleading "run kron_init first".
+	kronDir := filepath.Join(root, ".kron")
+	if info, err := os.Stat(kronDir); err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf(
+				"kron serve-mcp: %s is not a Kron project (.kron/ not found). "+
+					"Pass -CWD <repo-root> to point at the directory that contains .kron/",
+				root,
+			)
+		}
+		return "", fmt.Errorf("kron serve-mcp: cannot stat %s: %w", kronDir, err)
+	} else if !info.IsDir() {
+		return "", fmt.Errorf(
+			"kron serve-mcp: %s exists but is not a directory (.kron/ must be a directory)",
+			kronDir,
+		)
 	}
-	return "", fmt.Errorf("kron serve-mcp: unexpected arguments %v (only -CWD <root> is supported)", args)
+	return root, nil
 }
 
 // callerInjectMiddleware returns a server.AddReceivingMiddleware

@@ -121,6 +121,13 @@ func newSession(t *testing.T, root string) *session {
 	if root == "" {
 		root = t.TempDir()
 	}
+	// Pre-create .kron/ so resolveMCPRoot's project-root validation
+	// passes. In production, every supported MCP client spawns
+	// kron with cwd set to a directory that already has .kron/
+	// (the client is configured to point at an existing Kron
+	// project), so the validation is correct for the production
+	// path; this helper just mirrors that for the test path.
+	require.NoError(t, os.MkdirAll(filepath.Join(root, ".kron"), 0o755))
 	bin := buildBinary(t)
 	cmd := exec.Command(bin, "serve-mcp", "-CWD", root)
 
@@ -353,6 +360,10 @@ func TestE2E_StdinEOFExitsCleanly(t *testing.T) {
 	}
 
 	dir := t.TempDir()
+	// Pre-create .kron/ so resolveMCPRoot's project-root validation
+	// passes. The production path always has it (clients point at
+	// an existing Kron project); this test mirrors that.
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".kron"), 0o755))
 	bin := buildBinary(t)
 	cmd := exec.Command(bin, "serve-mcp", "-CWD", dir)
 
@@ -391,6 +402,9 @@ func TestE2E_StdioTransportNotTTY(t *testing.T) {
 	}
 
 	dir := t.TempDir()
+	// Pre-create .kron/ so resolveMCPRoot's project-root validation
+	// passes. (See newSession for the rationale.)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".kron"), 0o755))
 	bin := buildBinary(t)
 	cmd := exec.Command(bin, "serve-mcp", "-CWD", dir)
 
@@ -449,6 +463,9 @@ func TestE2E_StdinRedirectWorks(t *testing.T) {
 	}
 
 	dir := t.TempDir()
+	// Pre-create .kron/ so resolveMCPRoot's project-root validation
+	// passes. (See newSession for the rationale.)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".kron"), 0o755))
 
 	// Write a JSON-RPC initialize frame to a temp file.
 	initFrame := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"e2e-redirect-test","version":"0.0.0"}}}

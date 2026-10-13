@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -71,8 +72,16 @@ func decodeSingleResponse(t *testing.T, output string) singleResponse {
 // instead.
 func runServer(t *testing.T, input string) (string, string, error) {
 	t.Helper()
+	dir := t.TempDir()
+	// Pre-create .kron/ so resolveMCPRoot's project-root validation
+	// passes. In production, every supported MCP client (Claude
+	// Code, Cursor MCP runtime, VSCode extensions) spawns kron
+	// with cwd set to a directory that already has .kron/, so the
+	// validation is correct for the production path; this helper
+	// just mirrors that for the test path.
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".kron"), 0o755))
 	var out, errOut bytes.Buffer
-	err := Run([]string{"-CWD", t.TempDir()}, strings.NewReader(input), &out, &errOut)
+	err := Run([]string{"-CWD", dir}, strings.NewReader(input), &out, &errOut)
 	return out.String(), errOut.String(), err
 }
 
@@ -218,11 +227,59 @@ func TestRunWithCtx_DeadlineExceededExitsCleanly(t *testing.T) {
 // conflicting with the first.
 func TestRun_NoSignalLeakBetweenInvocations(t *testing.T) {
 	for i := 0; i < 3; i++ {
+		dir := t.TempDir()
+		// Pre-create .kron/ so resolveMCPRoot's project-root validation
+		// passes. (See runServer for the rationale.)
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, ".kron"), 0o755))
 		var out, errOut bytes.Buffer
-		err := Run([]string{"-CWD", t.TempDir()}, strings.NewReader(""), &out, &errOut)
+		err := Run([]string{"-CWD", dir}, strings.NewReader(""), &out, &errOut)
 		require.NoErrorf(t, err, "iteration %d must succeed", i)
 		assert.Empty(t, out, "iteration %d: empty stdin must produce no protocol output", i)
 	}
+}
+
+// TestResolveMCPRoot_RejectsNonProject locks the contract added to
+// resolveMCPRoot: when a client (mis)configures -CWD or os.Getwd()
+// to a directory that doesn't have .kron/, the server must fail
+// fast with a clear, actionable error rather than letting the
+// first tool call blow up with a misleading "run kron_init
+// first" — the project isn't missing, the cwd is wrong.
+func TestResolveMCPRoot_RejectsNonProject(t *testing.T) {
+	dir := t.TempDir()
+	// No .kron/ here.
+	_, err := resolveMCPRoot([]string{"-CWD", dir})
+	require.Error(t, err, "must reject a directory without .kron/")
+	assert.Contains(t, err.Error(), "is not a Kron project",
+		"error must explicitly say it isn't a Kron project")
+	assert.Contains(t, err.Error(), dir,
+		"error must include the offending path so the user knows which cwd to fix")
+}
+
+// TestResolveMCPRoot_RejectsNonDirectoryDotKron locks the
+// sibling case: if .kron/ exists but is a regular file (not a
+// directory), the server must also reject — the project layout
+// is corrupted.
+func TestResolveMCPRoot_RejectsNonDirectoryDotKron(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kron"), []byte("not a dir"), 0o644))
+	_, err := resolveMCPRoot([]string{"-CWD", dir})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not a directory",
+		"error must explain .kron/ is the wrong file type")
+}
+
+// TestResolveMCPRoot_AcceptsValidProject locks the happy path:
+// a directory with a real .kron/ is accepted, and -CWD is
+// resolved to an absolute path even if the caller passed a
+// relative one.
+func TestResolveMCPRoot_AcceptsValidProject(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".kron"), 0o755))
+	got, err := resolveMCPRoot([]string{"-CWD", dir})
+	require.NoError(t, err)
+	// filepath.Abs may not equal dir on Windows if dir is a
+	// short path or has unusual casing; compare cleaned forms.
+	assert.Equal(t, filepath.Clean(got), filepath.Clean(dir))
 }
 
 // os_getenv is a small wrapper so this test file does not have to
