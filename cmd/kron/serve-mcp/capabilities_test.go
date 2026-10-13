@@ -20,10 +20,10 @@ import (
 //     errors at runtime.
 //
 //   - go-sdk v1.1.0 behaviour (see protocol.go initCaps):
-//       caps := &ServerCapabilities{ Logging: &LoggingCapabilities{} }
-//       if tools registered: caps.Tools = &ToolCapabilities{...}
-//       if prompts registered: caps.Prompts = ...
-//       if resources registered: caps.Resources = ...
+//     caps := &ServerCapabilities{ Logging: &LoggingCapabilities{} }
+//     if tools registered: caps.Tools = &ToolCapabilities{...}
+//     if prompts registered: caps.Prompts = ...
+//     if resources registered: caps.Resources = ...
 //     So the SDK ALWAYS advertises Logging: {} regardless of
 //     whether the server registered a handler. We document this
 //     in the test contract: clients may safely call

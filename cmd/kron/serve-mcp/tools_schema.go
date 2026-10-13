@@ -358,10 +358,17 @@ type AnchorRef struct {
 }
 
 type ImpactOutput struct {
-	Intent          IntentSummary `json:"intent"            jsonschema:"summary of the target intent"`
-	IncomingAnchors []AnchorRef   `json:"incoming_anchors" jsonschema:"@kron:intent lines pointing at slug, sorted by (file, line)"`
-	References      []string      `json:"references"        jsonschema:"slugs that list slug in their References (sorted)"`
-	Prerequisites   []string      `json:"prerequisites"     jsonschema:"explicit depends_on ∪ symbol-inferred deps (sorted)"`
+	Intent IntentSummary `json:"intent"            jsonschema:"summary of the target intent"`
+	// IncomingAnchors is the legacy unified field; new callers should
+	// prefer the split fields below. Retained for backward compatibility.
+	IncomingAnchors []AnchorRef `json:"incoming_anchors" jsonschema:"DEPRECATED: use incoming_anchors_code or incoming_anchors_markdown; combined list sorted by (file, line)"`
+	// IncomingAnchorsCode are the anchors from source files (Kind = "code").
+	// C-6: split from the unified incoming_anchors so GUI/IDE can render
+	// two tabs without client-side filtering.
+	IncomingAnchorsCode     []AnchorRef `json:"incoming_anchors_code" jsonschema:"@kron:intent lines from source files, sorted by (file, line)"`
+	IncomingAnchorsMarkdown []AnchorRef `json:"incoming_anchors_markdown" jsonschema:"@kron:intent lines from .md files outside .kron/intents/, sorted by (file, line)"`
+	References              []string    `json:"references"        jsonschema:"slugs that list slug in their References (sorted)"`
+	Prerequisites           []string    `json:"prerequisites"     jsonschema:"explicit depends_on ∪ symbol-inferred deps (sorted)"`
 }
 
 // --- kron_intent_density --------------------------------------------

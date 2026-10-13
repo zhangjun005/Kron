@@ -620,6 +620,72 @@ func TestImpact_MarkdownAnchorKind(t *testing.T) {
 	assert.Equal(t, "markdown", r.IncomingAnchors[0].Kind)
 }
 
+// TestImpact_C6_SplitFields verifies C-6: the incoming_anchors_code
+// and incoming_anchors_markdown split fields are populated correctly
+// while the unified incoming_anchors remains for backward compatibility.
+func TestImpact_C6_SplitFields(t *testing.T) {
+	dir := initRepo(t)
+	addIntent(t, dir, "api/rest", "", "")
+
+	// Source file with anchor (code kind).
+	src := "// @kron:intent api/rest\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "server.go"), []byte(src), 0o644))
+
+	// Markdown files with anchors (markdown kind). HTML comment syntax
+	// per RFC 2026-10-08-md-anchors.md §1.
+	md := "<!-- @kron:intent api/rest -->\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte(md), 0o644))
+
+	// Create docs/ subdirectory for the second markdown file.
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "docs"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "docs", "api.md"), []byte(md), 0o644))
+
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_impact",
+		Arguments: map[string]any{"slug": "api/rest"},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+
+	var r ImpactOutput
+	require.NoError(t, structuredInto(res, &r))
+
+	// Unified field (legacy): all 3 anchors.
+	require.Len(t, r.IncomingAnchors, 3)
+
+	// Code split: exactly 1 (server.go).
+	require.Len(t, r.IncomingAnchorsCode, 1)
+	assert.Equal(t, "server.go", r.IncomingAnchorsCode[0].FilePath)
+	assert.Equal(t, "code", r.IncomingAnchorsCode[0].Kind)
+
+	// Markdown split: exactly 2 (README.md, docs/api.md), sorted by file path.
+	// Scanner returns forward slashes per RFC 2026-10-08-path-conventions.md.
+	require.Len(t, r.IncomingAnchorsMarkdown, 2)
+	assert.Equal(t, "README.md", r.IncomingAnchorsMarkdown[0].FilePath)
+	assert.Equal(t, "docs/api.md", r.IncomingAnchorsMarkdown[1].FilePath)
+	assert.Equal(t, "markdown", r.IncomingAnchorsMarkdown[0].Kind)
+	assert.Equal(t, "markdown", r.IncomingAnchorsMarkdown[1].Kind)
+
+	// The split fields are subsets of the unified field.
+	codePaths := make(map[string]bool)
+	for _, a := range r.IncomingAnchorsCode {
+		codePaths[a.FilePath] = true
+	}
+	mdPaths := make(map[string]bool)
+	for _, a := range r.IncomingAnchorsMarkdown {
+		mdPaths[a.FilePath] = true
+	}
+	for _, a := range r.IncomingAnchors {
+		if a.Kind == "code" {
+			assert.True(t, codePaths[a.FilePath], "code anchor %v not in incoming_anchors_code", a.FilePath)
+		} else {
+			assert.True(t, mdPaths[a.FilePath], "markdown anchor %v not in incoming_anchors_markdown", a.FilePath)
+		}
+	}
+}
+
 // --- kron_intent_density --------------------------------------------
 
 func TestIntentDensity_EmptyRepo(t *testing.T) {

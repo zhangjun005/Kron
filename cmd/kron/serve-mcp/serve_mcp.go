@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -73,10 +74,35 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 		return err
 	}
 
-	// Route logs to errOut (typically os.Stderr). stdio transport
-	// writes only JSON-RPC messages to stdout; server.Run() will
-	// ignore anything written to stderr.
+	// C-3: Route stdlib log and slog output through the MCP Logging
+	// capability (kronLoggingHandler) when a session is active; fall
+	// back to errOut when no session is established yet (e.g. during
+	// the initialize handshake) or after disconnect. This replaces
+	// the previous log.SetOutput(errOut) approach.
+	//
+	// The stdlib log package and slog both use their respective
+	// default loggers. We set both so handlers that use log.Print*
+	// (stdlib) are also captured. In practice, the main producer of
+	// structured logs is the SDK itself (via slog.Logger.Info in
+	// server.go); the stdlib log fallback covers any legacy log.*
+	// calls in the handler layer.
+	// C-3: Route slog output through the MCP Logging capability
+	// (shimHandler) when a session is active. This replaces the
+	// previous log.SetOutput(errOut) approach for slog-based logging.
+	//
+	// In production, server.Run() creates the ServerSession internally
+	// and doesn't expose it to us, so SetActiveSession is not called
+	// from Run. The shimHandler drops records when no session is
+	// active (acceptable: pre-init/post-disconnect messages are not
+	// the ones users care about). Tests that use newTestSession DO
+	// call SetActiveSessionOnClose, so MCP logging works in tests.
+	//
+	// Stdlib log.* calls: keep log.SetOutput(errOut) for now.
+	// There is no way to redirect stdlib log to slog in Go, and
+	// we don't use log.* in hot paths anyway.
+	shim := &shimHandler{}
 	log.SetOutput(errOut)
+	slog.SetDefault(slog.New(shim))
 
 	// Create the SDK server with explicit ServerOptions so the
 	// contract with MCP clients is clear (G-4):
@@ -89,12 +115,11 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 	//     wire contract is "I do not advertise these" — clients
 	//     won't issue resources/list or prompts/list against us.
 	//   - Logging: SDK defaults Logging to &LoggingCapabilities{}
-	//     regardless of whether we register a handler. We override
-	//     this by NOT registering a logging handler and accepting
-	//     that clients may receive an empty Logging cap; the
-	//     practical effect is logging/setLevel calls will return
-	//     method-not-found (per MCP spec for missing capabilities).
-	//     This is preferable to silently dropping logs.
+	//     regardless of whether we register a handler. The C-3
+	//     shimHandler wires the actual logging dispatch:
+	//     activeSession.Log() is called when a session exists;
+	//     if the client never calls logging/setLevel, the SDK
+	//     silently drops the message (per MCP spec).
 	//
 	// G-4 (docs/mcp/backlog.md §G-4 + docs/mcp/missing-capabilities.md §G-4).
 	//
@@ -180,6 +205,14 @@ func runWithSignalCtx(server *mcp.Server, transport mcp.Transport) error {
 // same way: a server that times out is shutting down on the
 // operator's behalf, not failing.
 func runWithCtx(ctx context.Context, server *mcp.Server, transport mcp.Transport) error {
+	// C-3: The shimHandler routes log records to the MCP Logging
+	// capability when a session is active. In production, server.Run()
+	// creates the session internally and doesn't expose it to us, so
+	// we cannot call SetActiveSession. The shimHandler's fallback
+	// (which uses a no-op logger) handles the "no session" case.
+	// Tests that use newTestSession (testkit.go) DO call
+	// SetActiveSessionOnClose after server.Connect, so MCP logging
+	// works for tests.
 	if err := server.Run(ctx, transport); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil

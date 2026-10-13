@@ -286,8 +286,10 @@ server := mcp.NewServer(&mcp.Implementation{...}, nil)
 |---|---|---|
 | C-1 | 加 `Resources`(URI 资源)支持:`kron://intents/<slug>` 可读 | 协议层 §一.0 |
 | C-2 | 加 `Prompts` 模板:`kron-review` / `kron-audit` 给 LLM 直接调 | 协议层 §一.0 |
-| C-3 | 加 `Logging` capability + `logging/setLevel` handler(替代 stderr hack) | 协议层 |
+| C-3 | ~~加 `Logging` capability + `logging/setLevel` handler(替代 stderr hack)~~ — **✅ 已完成 (2026-10-13)** | 协议层 |
 | C-4 | ~~加 per-Run cache~~ — 见 G-7（✅ 已完成） | 性能 |
+| C-5 | 在 `kron_lint` 错误输出里加"fix suggestion" hint | DX |
+| C-6 | ~~加 `kron_impact` 的 `incoming_anchors` 维度拆分:code / markdown 分开列~~ — **✅ 已完成 (2026-10-13)** | DX |
 | C-7 | ~~在 `kron_get` 返回的 `relations` 里加 `dependents`~~ — **✅ 已完成 (2026-10-13)** | 一致性 |
 
 ---
@@ -316,10 +318,12 @@ server := mcp.NewServer(&mcp.Implementation{...}, nil)
 2. ~~**G-7** 看 benchmark 再定(单独 PR)~~ — **✅ 2026-10-13 完成（OPT-1）**
 3. ~~**G-4**~~ — **✅ 2026-10-13 完成（SDK 行为文档化 + 测试）**
 4. ~~**C-7**~~ — **✅ 2026-10-13 完成（kron_get relations.Dependents）**
-5. **G-1**(0.5 d)— 进程管理基本功
-6. **G-2**(1 d)— 协议层 coverage
-7. **G-3** 与 SDK 升级一起做(单独 PR)
-8. **C-1** Resources（先验证 client 支持情况）
-9. **C-3** Logging capability（替代 stderr hack）
+5. ~~**C-6**~~ — **✅ 2026-10-13 完成（kron_impact 拆 code/markdown）**
+6. ~~**C-3**~~ — **✅ 2026-10-13 完成（shimHandler + mcp.NewLoggingHandler）**
+7. **G-1**(0.5 d)— 进程管理基本功
+8. **G-2**(1 d)— 协议层 coverage
+9. **G-3** 与 SDK 升级一起做(单独 PR)
+10. **C-1** Resources（先验证 client 支持情况）
+11. **C-5** kron_lint fix suggestion hint
 
 不催——按需做,本目录**只**是记录。

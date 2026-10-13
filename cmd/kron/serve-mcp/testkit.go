@@ -69,6 +69,11 @@ func newTestSession(t *testing.T, root string) *testSession {
 	cleanup := func() {
 		_ = cs.Close()
 		_ = ss.Close()
+		ClearActiveSession(ss)
 	}
+	// C-3: wire active session for MCP logging so tests can also
+	// exercise the logging path (even though tests don't verify it yet).
+	clearSession := SetActiveSessionOnClose(ss)
+	t.Cleanup(clearSession)
 	return &testSession{Server: server, Session: cs, Cleanup: cleanup}
 }
