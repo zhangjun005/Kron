@@ -50,3 +50,10 @@ frontend/wails/.vite/
 # Accidental redirect output (e.g. `cmd > dev/null` mistake on PowerShell
 # creates a literal dev/null file; not the Unix /dev/null device).
 dev/null
+
+# D end-to-end test fixture (serve-lsp manual verification):
+# contains a minimal Kron repo (intents + source files) used by
+# cmd/kron-d-test/ to verify the LSP driver wires correctly.
+# The driver itself (cmd/kron-d-test/) IS committed; only this
+# throwaway repo fixture is ignored.
+.d-test/
