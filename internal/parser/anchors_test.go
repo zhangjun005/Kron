@@ -289,3 +289,119 @@ func TestScanMarkdownAnchors_FilePathIsRepoRelative(t *testing.T) {
 	assert.Equal(t, "docs/notes.md", anchors[0].FilePath)
 	assert.Equal(t, "docs/spec.md", anchors[1].FilePath)
 }
+
+// AnchorsForFile tests — keyed to RFC 2026-10-12-lsp-decision-points.md §2.
+
+// TestAnchorsForFile_Basic exercises the happy path: file with multiple
+// anchors on distinct lines, returns all entries with correct LineNumbers.
+func TestAnchorsForFile_Basic(t *testing.T) {
+	dir := t.TempDir()
+	writeSourceFile(t, dir, "main.go", `package main
+
+// @kron:intent auth-jwt
+func Login() {}
+
+// @kron:intent rate-limit
+func Rate() {}
+
+func main() {}
+`)
+
+	anchors, err := AnchorsForFile(filepath.Join(dir, "main.go"))
+	require.NoError(t, err)
+	require.Len(t, anchors, 2)
+
+	// No deduplication: every anchor line appears.
+	assert.Equal(t, "auth-jwt", anchors[0].Slug)
+	assert.Equal(t, 3, anchors[0].LineNumber)
+	assert.Equal(t, "rate-limit", anchors[1].Slug)
+	assert.Equal(t, 6, anchors[1].LineNumber)
+}
+
+// TestAnchorsForFile_DuplicateSlugOnDifferentLines verifies that when
+// the same slug appears on multiple lines, both entries are returned
+// (serve-lsp needs line numbers to answer hover by position).
+func TestAnchorsForFile_DuplicateSlugOnDifferentLines(t *testing.T) {
+	dir := t.TempDir()
+	writeSourceFile(t, dir, "multi.go", `package x
+
+// @kron:intent auth-jwt
+func A() {}
+
+// @kron:intent rate-limit
+func B() {}
+
+// @kron:intent auth-jwt
+func C() {}
+`)
+
+	anchors, err := AnchorsForFile(filepath.Join(dir, "multi.go"))
+	require.NoError(t, err)
+	require.Len(t, anchors, 3)
+
+	// "auth-jwt" appears on lines 3 and 9 — both returned.
+	assert.Equal(t, "auth-jwt", anchors[0].Slug)
+	assert.Equal(t, 3, anchors[0].LineNumber)
+	assert.Equal(t, "rate-limit", anchors[1].Slug)
+	assert.Equal(t, 6, anchors[1].LineNumber)
+	assert.Equal(t, "auth-jwt", anchors[2].Slug)
+	assert.Equal(t, 9, anchors[2].LineNumber)
+}
+
+// TestAnchorsForFile_EmptyFile returns nil slice, not an error.
+func TestAnchorsForFile_EmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	writeSourceFile(t, dir, "empty.go", `package x
+`)
+
+	anchors, err := AnchorsForFile(filepath.Join(dir, "empty.go"))
+	require.NoError(t, err)
+	assert.Empty(t, anchors)
+}
+
+// TestAnchorsForFile_FileNotFound returns a wrapped error.
+func TestAnchorsForFile_FileNotFound(t *testing.T) {
+	_, err := AnchorsForFile(filepath.Join(t.TempDir(), "nonexistent.go"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nonexistent.go")
+}
+
+// TestAnchorsForFile_EmptyPath returns a descriptive error.
+func TestAnchorsForFile_EmptyPath(t *testing.T) {
+	_, err := AnchorsForFile("")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "filePath is empty")
+}
+
+// TestAnchorsForFile_RepoRelativePath: AnchorsForFile accepts
+// absolute paths (filepath.Join produces OS-native absolute paths).
+// This test confirms the function works end-to-end.
+func TestAnchorsForFile_RepoRelativePath(t *testing.T) {
+	dir := t.TempDir()
+	writeSourceFile(t, dir, "internal/x.go", "// @kron:intent auth/jwt\n")
+
+	anchors, err := AnchorsForFile(filepath.Join(dir, "internal", "x.go"))
+	require.NoError(t, err)
+	require.Len(t, anchors, 1)
+	assert.Equal(t, "auth/jwt", anchors[0].Slug)
+	assert.Equal(t, 1, anchors[0].LineNumber)
+}
+
+// TestAnchorsForFile_SortedOutput: returned slice is sorted by
+// (FilePath, LineNumber) even when lines are written out of order.
+func TestAnchorsForFile_SortedOutput(t *testing.T) {
+	dir := t.TempDir()
+	writeSourceFile(t, dir, "z.go", `package z
+// @kron:intent second
+// @kron:intent first
+`)
+
+	anchors, err := AnchorsForFile(filepath.Join(dir, "z.go"))
+	require.NoError(t, err)
+	require.Len(t, anchors, 2)
+	// Line 2 ("second") < line 3 ("first") by line number.
+	assert.Equal(t, "second", anchors[0].Slug)
+	assert.Equal(t, 2, anchors[0].LineNumber)
+	assert.Equal(t, "first", anchors[1].Slug)
+	assert.Equal(t, 3, anchors[1].LineNumber)
+}

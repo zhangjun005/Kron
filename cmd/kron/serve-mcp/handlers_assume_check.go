@@ -92,13 +92,18 @@ func HandleAssumeCheck(ctx context.Context, _ *mcp.CallToolRequest, in AssumeChe
 			// Registry (when present) is the source of truth for
 			// text + default_severity. Per-intent severity
 			// (a.Severity) and expires_at stay on the intent.
-			text := a.Text
+			//
+			// RFC 2026-10-12-close-b3-softening §2.2: there is
+			// no per-intent Text field any more. If the registry
+			// is absent or the entry is missing, text stays empty
+			// (the missing entry is a lint RuleAssumptionRegistryIdMismatch
+			// finding; the wire consumer sees an empty text rather
+			// than a silently-wrong fallback).
+			text := ""
 			defaultSev := ""
 			if ar != nil {
 				if af, gerr := ar.Get(ctx, a.ID); gerr == nil && af != nil {
-					if af.Frontmatter.Text != "" {
-						text = af.Frontmatter.Text
-					}
+					text = af.Frontmatter.Text
 					defaultSev = string(af.Frontmatter.DefaultSeverity)
 				}
 			}

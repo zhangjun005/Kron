@@ -149,13 +149,16 @@ assumptions:
     verified_by: "@handle"   # （可选）确认人
 ```
 
-**B-3 关键变化**（v1.3, 落地无迁移）：
+**B-3 关键变化**（v1.3, 落地无迁移, Option B1 拍板 2026-10-12）：
 
-- **共享 `text` 存于 registry**：`.kron/assumptions/<id>.md` 里的 `text:` 是单一真理源；intent frontmatter 的 `text:` 是迁移期兼容的 inline copy，B-3 起**不再需要**——新写的 intent **直接**只引用 id 即可
+- **共享 `text` 存于 registry**：`.kron/assumptions/<id>.md` 里的 `text:` 是单一真相源；intent frontmatter 的 `text:` 仍**允许**（parser 接受, 作 round-trip 兼容, lint `RuleAssumptionInline` 推作者清理）
 - **`default_severity` 取代 `severity`**（在 registry 文件里）：表示"该假设通常多严"；intent 各自的 `severity` 字段是 ground truth
 - **`rationale` 必填**（≥ 10 字符）：避免"凭直觉设 hard/soft"的反模式；v1.3 迁移期是 Warning，v1.5 改 Error
 - **跨意图 severity 可不同**：同一条假设（`single-region`）在 `auth/jwt.md` 可能是 `hard`、在 `ui/console.md` 可能是 `soft`，各自的 `rationale` 解释"为什么"
-- **本仓库无存量数据**：不需要假设迁移脚本——见 [RFC §1.2](../../rfc/2026-10-08-assumptions-standalone.md) "无存量迁移"
+- **本仓库无存量数据**：不需要假设迁移脚本——见 [RFC §1.2](../../rfc/archive/2026-10-08-assumptions-standalone.md) "无存量迁移"
+- **`@kron:assumes <id>` body marker** ([`docs/process/kill-inline-assumptions.md`](../../process/kill-inline-assumptions.md) §2.3)：intent body 内的行级 marker, 与 `@kron:intent` 同设计。lint `RuleAssumptionOrphan` 走 frontmatter ∪ body marker 双路径判断 "假设是否被引用"
+
+> **新 intent 写作指引**: frontmatter 写 `{id, severity, rationale, expires_at, verified_at, verified_by}` (per-intent 元数据), `text` **不写** (registry 是源)。body 内可选放 `<!-- @kron:assumes <id> -->` 作为冗余引用声明, 让 lint orphan 规则走双路径。
 
 `severity` 语义：
 - `hard`：假设破裂时，相关代码逻辑必须修改。例如"Redis 可用性 ≥ 99.9%"破了意味着 token 吊销完全失效，必须改。

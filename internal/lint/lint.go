@@ -40,14 +40,6 @@ type RunOptions struct {
 	// other rules active.
 	StaleDaysThreshold int
 
-	// MigrationMode controls how RuleAssumptionRationaleRequired is
-	// surfaced. During the A→B migration window (v1.3 → v1.5),
-	// empty-rationale is a Warning to avoid blocking existing repos.
-	// v1.5+ flips this to Error. CLI `kron lint` calls RunWith
-	// with MigrationMode = true; CI in a v1.5+ project passes
-	// MigrationMode = false.
-	MigrationMode bool
-
 	// now is the reference time used by the staleness rules. Tests
 	// inject a fixed value; production code leaves it zero, which
 	// means "time.Now().UTC()" at call time.
@@ -87,11 +79,7 @@ func (o RunOptions) resolveNow() time.Time {
 //
 // Use RunWith when staleness threshold tuning or test-time now
 // injection is needed. Run is the no-options equivalent of
-// RunWith(ctx, root, RunOptions{MigrationMode: true}).
-//
-// MigrationMode defaults to TRUE so that the v1.3 → v1.5 migration
-// window remains non-blocking for existing repos. v1.5+ callers
-// (CI in upgraded projects) pass MigrationMode = false explicitly.
+// RunWith(ctx, root, RunOptions{}).
 //
 // Errors are returned only for scope-cream failures: a missing root,
 // an I/O error walking the source tree, or a catastrophic parse failure
@@ -120,7 +108,7 @@ func (o RunOptions) resolveNow() time.Time {
 // (which don't need intent data) are still produced. S-class rules
 // follow the same gating as C-class.
 func Run(ctx context.Context, root string) ([]Diag, error) {
-	return RunWith(ctx, root, RunOptions{MigrationMode: true})
+	return RunWith(ctx, root, RunOptions{})
 }
 
 // RunWith is the configurable variant of Run.
@@ -310,7 +298,7 @@ func RunWith(ctx context.Context, root string, opts RunOptions) ([]Diag, error) 
 			Severity: SeverityError,
 		})
 	}
-	diags = append(diags, runAssumptionRules(intents, arReader, opts)...)
+	diags = append(diags, runAssumptionRules(root, intents, arReader, opts)...)
 
 	// T-class: tree-shape rules (RFC 2026-10-08-writer-readme-symmetry
 	// §5). Runs AFTER the intents are loaded so Kind is already

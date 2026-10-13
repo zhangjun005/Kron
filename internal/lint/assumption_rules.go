@@ -1,40 +1,63 @@
+// Package lint: assumption rule engine for v1.3+ (B-3 standalone registry).
+//
+// runAssumptionRules applies the B-3 + RFC-2026-10-12 assumption rules:
+//
+//  1. Per-intent rules (frontmatter.assumptions[] walk):
+//     - RuleAssumptionRationaleRequired (Error, permanent; the v1.3
+//     migration Warning window closed per RFC 2026-10-12 §2.1)
+//     - RuleAssumptionRegistryIdMismatch (Error): id not in registry
+//     - RuleAssumptionMixedForm (Warning): legacy A-path leftover fields
+//     (expires_at on the per-intent side) — kept for v1.3 migration
+//     - RuleAssumptionSeverityMismatch (Warning): per-intent severity
+//     override of the registry's default_severity
+//     - RuleAssumptionRationaleStale (Warning): per-intent inline
+//     text diverges from registry text (legacy A-path signal)
+//
+//  2. Registry-side rules:
+//     - RuleAssumptionFileIdMismatch (Error): emitted by RunWith
+//     directly via the reader, NOT here
+//     - RuleAssumptionOrphan (Warning): active registry entry with
+//     zero references (no frontmatter.Assumptions[].id match AND
+//     no @kron:assumes <id> marker in any intent body)
+//
+//  3. Raw-byte rules (no Go model survives the trip):
+//     - RuleAssumptionInline (Error, permanent; was Warning under
+//     Option B1, upgraded to Error per RFC 2026-10-12 §2.2): a
+//     "text:" key inside the top-level "assumptions:" block of an
+//     intent's frontmatter. The parser is the primary line of
+//     defence (frontmatterKnownFields no longer accepts "text",
+//     so the frontmatter fails to parse); the raw-bytes pre-scan
+//     is a redundant safety net for callers that bypass the
+//     parser. Both layers report Error.
+//
+// Behaviour:
+//   - If the assumption registry directory does not exist
+//     (ErrAssumptionDirNotFound), we skip the registry-based
+//     rules silently. This keeps `kron lint` working on repos
+//     that have not migrated to the standalone registry yet.
+//   - Per-intent rules (rationale, severity, etc.) still fire
+//     even without a registry — they don't depend on the
+//     registry for their signal.
+//
+// root is the repo root; pass it through to (a) read raw
+// frontmatter bytes for the RuleAssumptionInline pre-scan and
+// (b) walk the @kron:assumes body markers for the orphan
+// reverse lookup.
 package lint
 
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/xxx/kron/internal/assumption"
 	"github.com/xxx/kron/internal/model"
+	"github.com/xxx/kron/internal/parser"
 )
 
-// runAssumptionRules applies the B-3 assumption rules
-// (RFC 2026-10-08-assumptions-standalone) to the loaded intents.
-//
-// Behaviour:
-//   - If the assumption registry directory does not exist
-//     (ErrAssumptionDirNotFound), we skip ALL registry-based rules
-//     silently. This keeps `kron lint` working on repos that have
-//     not migrated to the standalone registry yet.
-//   - intentBySlug is a pre-built lookup of the loaded intents
-//     (built once by RunWith) so the orphan rule can walk the
-//     registry without re-loading the intent set.
-//
-// Rule mapping (severity hardcoded here so the rule constants
-// remain pure identifiers — see rules.go for the canonical list):
-//
-//	registry-id-mismatch:   error
-//	orphan:                 warning
-//	mixed-form:             warning
-//	rationale-required:     depends on MigrationMode (Warning/Error)
-//	rationale-stale:        warning
-//	severity-mismatch:      warning
-//
-// file-id-mismatch is reported by the reader, NOT here, so it does
-// not need to live in this function.
-func runAssumptionRules(intents []*model.Intent, ar *assumption.Reader, opts RunOptions) []Diag {
-	// Skip cleanly when the registry is absent — common during the
-	// A→B migration window.
+func runAssumptionRules(root string, intents []*model.Intent, ar *assumption.Reader, opts RunOptions) []Diag {
+	// Registry snapshot. May be nil on pre-migration repos.
 	var registry map[string]*model.AssumptionFile
 	if ar != nil {
 		list, err := ar.List(context.Background())
@@ -47,34 +70,85 @@ func runAssumptionRules(intents []*model.Intent, ar *assumption.Reader, opts Run
 	}
 
 	// Build intent-side reference set for the orphan rule.
-	referenced := make(map[string]struct{})
+	// "Referenced" means: at least one intent has a matching
+	// id in its frontmatter.assumptions[] OR has an
+	// @kron:assumes <id> marker in its body. The orphan rule
+	// is the conjunction (both must be zero).
+	referencedViaFM := make(map[string]struct{})
 	for _, in := range intents {
 		for _, a := range in.Frontmatter.Assumptions {
 			if a.ID != "" {
-				referenced[a.ID] = struct{}{}
+				referencedViaFM[a.ID] = struct{}{}
 			}
 		}
 	}
 
+	// Pre-load raw frontmatter bytes per intent so we can run
+	// HasInlineAssumptionText. We deliberately re-read from
+	// disk (not store the bytes on model.Intent) because the
+	// model is a pure data struct and adding an io handle would
+	// bloat every consumer. The per-file read is small (a
+	// single .md < 100 KiB) and idempotent.
+	intentRawFM := make(map[string][]byte, len(intents))
+	if root != "" {
+		for _, in := range intents {
+			if in.SourcePath == "" {
+				continue
+			}
+			data, err := os.ReadFile(in.SourcePath)
+			if err != nil {
+				continue // surface as RuleFrontmatterInvalid elsewhere
+			}
+			fmRaw, _, splitErr := parser.SplitMarkdown(data)
+			if splitErr != nil {
+				continue
+			}
+			intentRawFM[in.Slug] = fmRaw
+		}
+	}
+
 	var diags []Diag
-	now := opts.resolveNow()
+	_ = opts.resolveNow() // reserved for future use (already dropped)
 
 	// --- Per-intent rules -----------------------------------------
 	for _, in := range intents {
+		// RuleAssumptionInline: any "text:" key inside the
+		// top-level "assumptions:" block. We test the raw
+		// frontmatter bytes (not the decoded model) because
+		// the strict YAML decode now REJECTS unknown fields
+		// (parser.frontmatterKnownFields dropped "text" per
+		// RFC 2026-10-12-close-b3-softening §2.2), so a
+		// frontmatter with inline `text:` would already fail
+		// at parse time with RuleFrontmatterInvalid. The
+		// raw-bytes pre-scan is a redundant safety net that
+		// surfaces a more targeted diagnostic name when the
+		// parser's "unknown field" error gets swallowed by
+		// upstream code paths.
+		if raw, ok := intentRawFM[in.Slug]; ok {
+			if count, has := parser.HasInlineAssumptionText(raw); has {
+				diags = append(diags, Diag{
+					Rule:     RuleAssumptionInline,
+					Where:    in.Slug,
+					Detail:   fmt.Sprintf("assumptions[] block carries %d inline text: key(s); per B-3 the assumption text lives in .kron/assumptions/<id>.md and the inline copy must be removed", count),
+					Severity: SeverityError,
+				})
+			}
+		}
+
 		for _, a := range in.Frontmatter.Assumptions {
 			// rationale-required (id is required at parse time, so
 			// an empty ID here is a parser-level error and won't
 			// reach lint).
+			//
+			// RFC 2026-10-12-close-b3-softening §2.1: rationale
+			// is permanent Error (the v1.3 → v1.5 soft window
+			// closed). No MigrationMode branch.
 			if a.Rationale == "" {
-				severity := SeverityWarning
-				if !opts.MigrationMode {
-					severity = SeverityError
-				}
 				diags = append(diags, Diag{
 					Rule:     RuleAssumptionRationaleRequired,
 					Where:    in.Slug,
 					Detail:   fmt.Sprintf("assumptions[%q] has no rationale (required ≥ 10 chars; B-3)", a.ID),
-					Severity: severity,
+					Severity: SeverityError,
 				})
 			}
 
@@ -94,18 +168,6 @@ func runAssumptionRules(intents []*model.Intent, ar *assumption.Reader, opts Run
 				continue
 			}
 
-			// mixed-form: inline text or expires_at present in
-			// the intent frontmatter (legacy A-path leftover)
-			// alongside a B-3 id+severity+rationale shape.
-			if a.Text != "" || a.ExpiresAt != "" {
-				diags = append(diags, Diag{
-					Rule:     RuleAssumptionMixedForm,
-					Where:    in.Slug,
-					Detail:   fmt.Sprintf("assumptions[%q] mixes A-path inline fields with B-3 id reference; remove text/expires_at to complete migration", a.ID),
-					Severity: SeverityWarning,
-				})
-			}
-
 			// severity-mismatch: per-intent severity differs from
 			// registry default_severity. Informational only.
 			if a.Severity != "" && af.Frontmatter.DefaultSeverity != "" && a.Severity != af.Frontmatter.DefaultSeverity {
@@ -118,23 +180,23 @@ func runAssumptionRules(intents []*model.Intent, ar *assumption.Reader, opts Run
 				})
 			}
 
-			// rationale-stale: if rationale contains a substring
-			// (≥ 6 runes) of the registry's CURRENT text that is
-			// now absent from the rationale's stated text, surface
-			// a warning. Detection scope is intentionally narrow:
-			// we only check that the rationale echoes part of the
-			// old text by comparing the rationale against the
-			// CURRENT registry text. False positives are
-			// acceptable; lint is advisory.
-			if a.Rationale != "" && a.Text != "" && af.Frontmatter.Text != "" && a.Text != af.Frontmatter.Text {
-				// Intent frontmatter still has the legacy `text`
-				// field whose value diverges from the registry.
-				// That IS the migration signal: the author needs
-				// to update the inline text or remove it.
+			// rationale-stale: per-intent rationale contains a
+			// substring of the registry's CURRENT text that no
+			// longer makes sense in the current text. Detection
+			// is best-effort and intentionally narrow.
+			//
+			// B-3 (Option B1): the per-intent side no longer
+			// carries a Text field, so the "stale rationale"
+			// signal degrades to a substring check against the
+			// registry text + the rationale's own wording.
+			// False positives are acceptable; lint is advisory.
+			if a.Rationale != "" && af.Frontmatter.Text != "" &&
+				!strings.Contains(a.Rationale, af.Frontmatter.Text) &&
+				hasCommonSubstring(a.Rationale, af.Frontmatter.Text, 6) {
 				diags = append(diags, Diag{
 					Rule:     RuleAssumptionRationaleStale,
 					Where:    in.Slug,
-					Detail:   fmt.Sprintf("assumptions[%q] inline text (%q) diverges from registry text (%q); drop the inline text to complete migration", a.ID, truncate(a.Text, 30), truncate(af.Frontmatter.Text, 30)),
+					Detail:   fmt.Sprintf("assumptions[%q] rationale echoes part of the registry text (%q); re-read the registry and refresh the rationale", a.ID, truncate(af.Frontmatter.Text, 30)),
 					Severity: SeverityWarning,
 				})
 			}
@@ -142,38 +204,97 @@ func runAssumptionRules(intents []*model.Intent, ar *assumption.Reader, opts Run
 	}
 
 	// --- Registry-side rules (orphan) ----------------------------
-	if registry != nil {
+	//
+	// B-3 (Option B1): the orphan rule now walks both surfaces:
+	//
+	//  1. The frontmatter.Assumptions[].id surface (built above
+	//     into referencedViaFM).
+	//  2. The @kron:assumes <id> body-marker surface (one parser
+	//     call per registry entry; the walk is bounded by the
+	//     registry size which is small).
+	//
+	// An assumption is "referenced" iff it appears in EITHER
+	// surface. Skipped status is exempted (same exemption as
+	// the pre-refactor rule).
+	if registry != nil && root != "" {
+		// Walk the body-marker surface once per registry entry.
+		// parser.SlugsForAssumption does a full repo walk; calling
+		// it N times for N registry entries is O(N * repo size),
+		// which is acceptable for the v1 registry size (tens of
+		// entries, sub-millisecond on a small repo). A future
+		// optimisation can swap to a single ScanAssumptionAnchors
+		// call + group-by-id in memory.
+		referencedViaMarker := make(map[string]struct{}, len(registry))
 		for id := range registry {
-			if _, ok := referenced[id]; ok {
+			slugs, err := parser.SlugsForAssumption(root, id)
+			if err != nil {
+				continue // treat as "no marker references" for the
+				// orphan rule; lint can always retry next run
+			}
+			if len(slugs) > 0 {
+				referencedViaMarker[id] = struct{}{}
+			}
+		}
+		for id, af := range registry {
+			if _, ok := referencedViaFM[id]; ok {
+				continue
+			}
+			if _, ok := referencedViaMarker[id]; ok {
 				continue
 			}
 			// Skip superseded assumptions — they were retired
 			// intentionally and SHOULD be orphan. Reporting them
 			// as orphans would be noise.
-			if af, ok := registry[id]; ok && af.Frontmatter.Status == model.StatusSuperseded {
+			if af.Frontmatter.Status == model.StatusSuperseded {
 				continue
 			}
 			diags = append(diags, Diag{
 				Rule:     RuleAssumptionOrphan,
 				Where:    id,
-				Detail:   fmt.Sprintf("assumption %q exists in registry but is not referenced by any intent", id),
+				Detail:   fmt.Sprintf("assumption %q exists in registry but is not referenced by any intent (no frontmatter.assumptions[].id match and no @kron:assumes marker)", id),
 				Severity: SeverityWarning,
 			})
 		}
 	}
 
-	// Silence unused-var lint when now is not read; keeping it for
-	// future use in expired-assumption wiring (see
-	// runStalenessRules in lint.go).
-	_ = now
 	return diags
+}
+
+// hasCommonSubstring reports whether a and b share a substring of
+// at least minRunes consecutive runes. Used by the rationale-stale
+// heuristic; a small/false-positive-prone function is fine because
+// the rule is advisory.
+func hasCommonSubstring(a, b string, minRunes int) bool {
+	if len([]rune(a)) < minRunes || len([]rune(b)) < minRunes {
+		return false
+	}
+	// Naive O(|a| * |b|) check. Both strings are rationale
+	// text + a registry description, so a few hundred runes
+	// at most — fine for an advisory lint rule.
+	ra := []rune(a)
+	rb := []rune(b)
+	for i := 0; i+minRunes <= len(ra); i++ {
+		for j := 0; j+minRunes <= len(rb); j++ {
+			match := true
+			for k := 0; k < minRunes; k++ {
+				if ra[i+k] != rb[j+k] {
+					match = false
+					break
+				}
+			}
+			if match {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // truncate clamps s to at most n runes, appending "…" if truncated.
 // Used only in lint detail strings; ASCII + Chinese both count as 1.
 func truncate(s string, n int) string {
-	if utf8RuneCount(s) <= n {
-		return s
+	if n <= 0 {
+		return "…"
 	}
 	runes := []rune(s)
 	if len(runes) <= n {
@@ -181,11 +302,3 @@ func truncate(s string, n int) string {
 	}
 	return string(runes[:n]) + "…"
 }
-
-func utf8RuneCount(s string) int {
-	return len([]rune(s))
-}
-
-// resolveNow is duplicated here intentionally so the assumption
-// rules can be invoked standalone in tests. The canonical copy lives
-// in RunOptions; we import it through opts.

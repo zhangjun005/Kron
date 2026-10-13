@@ -105,11 +105,10 @@ const (
 	// Always severity: error.
 	RuleAssumptionFileIdMismatch Rule = "assumption-file-id-mismatch"
 
-	// RuleAssumptionRationaleRequired (Error, v1.3+ Warning during
-	// migration window): an intent's assumptions[] entry has no
-	// rationale field. v1.3 emits Warning to ease the A→B
-	// migration; v1.5+ emits Error (hard gate). Severity is
-	// applied by the linter based on a MigrationMode flag.
+	// RuleAssumptionRationaleRequired (Error): an intent's
+	// assumptions[] entry has no rationale field. Hard Error
+	// since v1.3 (the A→B migration Warning window closed per
+	// RFC 2026-10-12-close-b3-softening §2.1).
 	RuleAssumptionRationaleRequired Rule = "assumption-rationale-required"
 
 	// RuleAssumptionRationaleStale (Warning): the rationale of an
@@ -125,6 +124,17 @@ const (
 	// default_severity. Purely informational; an override is
 	// legitimate when the rationale explains why.
 	RuleAssumptionSeverityMismatch Rule = "assumption-severity-mismatch"
+
+	// RuleAssumptionInline (Warning): an intent's assumptions[]
+	// block in frontmatter carries a "text:" key. Per B-3 the
+	// text lives in the registry (.kron/assumptions/<id>.md) and
+	// is the sole source of truth; an inline `text:` is the
+	// A-path leftover from the migration window. The parser
+	// silently drops the key (the registry is canonical) so the
+	// file still loads; this rule nudges the author to clean up
+	// the inline copy. Severity: warning (advisory; the file
+	// is correct, just stylistically outdated).
+	RuleAssumptionInline Rule = "assumption-inline-text"
 
 	// T-class (RFC 2026-10-08-writer-readme-symmetry): tree-shape
 	// rules. These read the on-disk intent layout to flag intents

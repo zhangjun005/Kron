@@ -214,6 +214,7 @@ func TestRuleConstantsAreStable(t *testing.T) {
 	assert.Equal(t, Rule("self-reference"), RuleSelfReference)
 	assert.Equal(t, Rule("stale-superseded-candidate"), RuleStaleSupersededCandidate)
 	assert.Equal(t, Rule("expired-hard-assumption"), RuleExpiredHardAssumption)
+	assert.Equal(t, Rule("assumption-inline-text"), RuleAssumptionInline)
 }
 
 // --- A-class: markdown anchor (RFC 2026-10-08-md-anchors.md §3.2) ---
@@ -515,7 +516,6 @@ created_by: "@alice"
 updated_at: 2026-01-01T00:00:00Z
 assumptions:
   - id: region-stays-single
-    text: single region
     severity: hard
     rationale: "service must remain in single region for token consistency"
     expires_at: %s
@@ -524,7 +524,7 @@ assumptions:
 # Has expiry
 `, expiry.Format(time.RFC3339)))
 
-	diags, err := RunWith(context.Background(), dir, RunOptions{MigrationMode: true}.WithNow(now))
+	diags, err := RunWith(context.Background(), dir, RunOptions{}.WithNow(now))
 	require.NoError(t, err)
 	require.Len(t, diags, 1)
 	assert.Equal(t, RuleExpiredHardAssumption, diags[0].Rule)
@@ -544,7 +544,6 @@ created_by: "@alice"
 updated_at: 2026-01-01T00:00:00Z
 assumptions:
   - id: region-stays-single
-    text: single region
     severity: hard
     rationale: "service must remain in single region for token consistency"
     expires_at: %s
@@ -555,7 +554,7 @@ assumptions:
 # Verified after expiry
 `, expiry.Format(time.RFC3339), verified.Format(time.RFC3339)))
 
-	diags, err := RunWith(context.Background(), dir, RunOptions{MigrationMode: true}.WithNow(now))
+	diags, err := RunWith(context.Background(), dir, RunOptions{}.WithNow(now))
 	require.NoError(t, err)
 	assert.Empty(t, diags)
 }
@@ -570,7 +569,6 @@ created_by: "@alice"
 updated_at: 2026-01-01T00:00:00Z
 assumptions:
   - id: dau-under-10k
-    text: DAU under 10k
     severity: soft
     rationale: "soft DAU budget for the system's scale, can degrade"
     expires_at: %s
@@ -579,7 +577,7 @@ assumptions:
 # Soft
 `, expiry.Format(time.RFC3339)))
 
-	diags, err := RunWith(context.Background(), dir, RunOptions{MigrationMode: true}.WithNow(now))
+	diags, err := RunWith(context.Background(), dir, RunOptions{}.WithNow(now))
 	require.NoError(t, err)
 	assert.Empty(t, diags)
 }
@@ -606,7 +604,6 @@ created_by: "@alice"
 updated_at: 2026-01-01T00:00:00Z
 assumptions:
   - id: x
-    text: x
     severity: hard
     rationale: "x assumption rationale is at least 10 chars"
     expires_at: %s
@@ -615,7 +612,7 @@ assumptions:
 # Has expiry
 `, expiry.Format(time.RFC3339)))
 
-	opts := RunOptions{MigrationMode: true}.WithNow(now)
+	opts := RunOptions{}.WithNow(now)
 	diags, err := RunWith(context.Background(), dir, opts)
 	require.NoError(t, err)
 
@@ -701,6 +698,57 @@ func TestRun_AssumptionOrphan(t *testing.T) {
 	assertDiagRule(t, diags, RuleAssumptionOrphan, SeverityWarning, "lonely")
 }
 
+func TestRun_AssumptionOrphan_NotOrphanIfBodyMarker(t *testing.T) {
+	// B-3 (Option B1): an assumption is "referenced" if EITHER
+	//   (a) some intent's frontmatter.assumptions[].id matches, OR
+	//   (b) some intent body has a @kron:assumes <id> marker.
+	// This test covers case (b): no frontmatter reference, but
+	// the body has the marker → not orphan.
+	dir := t.TempDir()
+	writeAssumption(t, dir, "single-region", "single region", "hard", "active")
+	writeFile(t, dir, ".kron/intents/auth.md", `<!-- kron:frontmatter -->
+created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+<!-- /kron:frontmatter -->
+
+# Auth
+
+This intent depends on the <!-- @kron:assumes single-region --> assumption.
+`)
+
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	for _, d := range diags {
+		if d.Rule == RuleAssumptionOrphan && d.Where == "single-region" {
+			t.Fatalf("expected NO orphan diag for single-region (body marker should satisfy the rule), got: %+v", d)
+		}
+	}
+}
+
+func TestRun_AssumptionOrphan_NoMarkerNoFM(t *testing.T) {
+	// B-3 (Option B1): an assumption with NEITHER a frontmatter
+	// reference NOR a body marker is orphan. This is the
+	// strictest reading — covers the "registered but unused"
+	// signal the orphan rule exists to surface.
+	dir := t.TempDir()
+	writeAssumption(t, dir, "lonely-marker", "lonely via body only", "soft", "active")
+	// Intent body mentions a DIFFERENT marker (different id),
+	// not the one we registered.
+	writeFile(t, dir, ".kron/intents/auth.md", `<!-- kron:frontmatter -->
+created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+<!-- /kron:frontmatter -->
+
+# Auth
+
+This intent depends on the <!-- @kron:assumes csrf-protected --> assumption.
+`)
+
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	assertDiagRule(t, diags, RuleAssumptionOrphan, SeverityWarning, "lonely-marker")
+}
+
 func TestRun_AssumptionSupersededSkipped(t *testing.T) {
 	dir := t.TempDir()
 	// Superseded assumption is referenced; should not surface as orphan.
@@ -727,8 +775,9 @@ assumptions:
 }
 
 func TestRun_AssumptionRationaleRequired(t *testing.T) {
+	// RFC 2026-10-12-close-b3-softening §2.1: rationale is
+	// permanent Error. The v1.3 Warning window is closed.
 	dir := t.TempDir()
-	// In MigrationMode (default for CLI): Warning. Without: Error.
 	writeAssumption(t, dir, "x", "x", "soft", "active")
 	writeFile(t, dir, ".kron/intents/needs-rationale.md", `<!-- kron:frontmatter -->
 created_by: "@a"
@@ -741,13 +790,7 @@ assumptions:
 # needs-rationale
 `)
 
-	// MigrationMode: Warning
-	diags, err := RunWith(context.Background(), dir, RunOptions{MigrationMode: true})
-	require.NoError(t, err)
-	assertDiagRule(t, diags, RuleAssumptionRationaleRequired, SeverityWarning, "needs-rationale")
-
-	// Non-migration: Error
-	diags, err = RunWith(context.Background(), dir, RunOptions{MigrationMode: false})
+	diags, err := RunWith(context.Background(), dir, RunOptions{})
 	require.NoError(t, err)
 	assertDiagRule(t, diags, RuleAssumptionRationaleRequired, SeverityError, "needs-rationale")
 }
@@ -790,10 +833,15 @@ updated_at: 2026-09-22T10:00:00Z
 	assertDiagRule(t, diags, RuleAssumptionFileIdMismatch, SeverityError, "z")
 }
 
-func TestRun_AssumptionMixedForm(t *testing.T) {
-	// A intent frontmatter has assumptions[].text (A-path inline
-	// leftover) alongside B-3 id+severity+rationale — fires
-	// RuleAssumptionMixedForm as a Warning so authors clean up.
+func TestRun_AssumptionInlineText_Fires(t *testing.T) {
+	// RFC 2026-10-12-close-b3-softening §2.2: the parser REJECTS
+	// unknown fields, so a frontmatter with `text:` inside
+	// `assumptions:` fails at parse time with RuleFrontmatterInvalid
+	// — the strict parser is the first line of defence. The lint
+	// raw-bytes pre-scan (parser.HasInlineAssumptionText) is a
+	// redundant safety net for callers that bypass the parser,
+	// and it now fires Error (not Warning) so the diagnostic is
+	// unmissable when both layers report.
 	dir := t.TempDir()
 	writeAssumption(t, dir, "region", "服务仅部署在单 region", "hard", "active")
 	writeFile(t, dir, ".kron/intents/uses-mixed.md", `<!-- kron:frontmatter -->
@@ -801,7 +849,6 @@ created_by: "@a"
 updated_at: 2026-10-01T10:00:00Z
 assumptions:
   - id: region
-    text: 服务仅部署在单 region
     severity: hard
     rationale: "this is a long enough rationale string"
     expires_at: "2026-12-31T00:00:00Z"
@@ -809,15 +856,42 @@ assumptions:
 
 # uses-mixed
 `)
+	// Sanity: a clean intent (no inline text) fires nothing.
 	diags, err := Run(context.Background(), dir)
 	require.NoError(t, err)
-	assertDiagRule(t, diags, RuleAssumptionMixedForm, SeverityWarning, "uses-mixed")
+	assertDiagRuleAbsent(t, diags, RuleAssumptionInline, "uses-mixed")
+}
+
+func TestRun_AssumptionInlineText_RejectsAtParseTime(t *testing.T) {
+	// The parser is the primary line of defence: an intent with
+	// inline `text:` inside the assumptions block fails to parse,
+	// surfacing as RuleFrontmatterInvalid (Error). This test pins
+	// that contract.
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/intents/inline-text.md", `<!-- kron:frontmatter -->
+created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+assumptions:
+  - id: region
+    text: 服务仅部署在单 region
+    severity: hard
+    rationale: "this is a long enough rationale string"
+<!-- /kron:frontmatter -->
+
+# inline-text
+`)
+	diags, err := Run(context.Background(), dir)
+	require.NoError(t, err)
+	assertDiagRule(t, diags, RuleFrontmatterInvalid, SeverityError, "<root>")
 }
 
 func TestRun_AssumptionRationaleStale(t *testing.T) {
 	// Inline text on intent frontmatter diverges from registry text;
 	// fires RuleAssumptionRationaleStale as a Warning to nudge the
-	// author to drop the inline copy.
+	// author to drop the inline copy. The detection now uses a
+	// substring check (B-3 Option B1: per-intent side no longer
+	// has a Text field, so we compare the rationale wording
+	// against the registry text).
 	dir := t.TempDir()
 	writeAssumption(t, dir, "region", "服务仅部署在单 region, 新版描述", "hard", "active")
 	writeFile(t, dir, ".kron/intents/stale-rationale.md", `<!-- kron:frontmatter -->
@@ -825,9 +899,8 @@ created_by: "@a"
 updated_at: 2026-10-01T10:00:00Z
 assumptions:
   - id: region
-    text: 服务仅部署在单 region, 旧版描述
     severity: hard
-    rationale: "this is a long enough rationale string"
+    rationale: "this rationale echoes part of the old region description 旧版描述"
 <!-- /kron:frontmatter -->
 
 # stale-rationale
@@ -850,6 +923,21 @@ func assertDiagRule(t *testing.T, diags []Diag, rule Rule, wantSev Severity, whe
 		seen = append(seen, fmt.Sprintf("%s/%s/%s", d.Rule, d.Severity, d.Where))
 	}
 	t.Fatalf("expected diag rule=%s severity=%s where=%q, got: %v", rule, wantSev, whereContains, seen)
+}
+
+// assertDiagRuleAbsent is the negative of assertDiagRule: it FAILS the
+// test if any diag matches rule + whereContains (severity-agnostic).
+// Used to pin "this rule should NOT fire on a clean fixture" cases
+// so a future regression that re-enables the rule gets caught here
+// instead of silently passing.
+func assertDiagRuleAbsent(t *testing.T, diags []Diag, rule Rule, whereContains string) {
+	t.Helper()
+	for _, d := range diags {
+		if d.Rule == rule && (whereContains == "" || d.Where == whereContains) {
+			t.Fatalf("expected NO diag rule=%s where=%q, but got: %s/%s/%s",
+				rule, whereContains, d.Rule, d.Severity, d.Where)
+		}
+	}
 }
 
 // =====================================================================

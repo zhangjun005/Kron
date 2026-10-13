@@ -113,10 +113,9 @@ func TestSeverity(t *testing.T) {
 
 func TestAssumption(t *testing.T) {
 	a := Assumption{
-		ID:         "single-region",
-		Text:       "服务仅部署在单 region，无跨区时钟漂移问题",
-		Severity:   SeverityHard,
-		ExpiresAt:  "2026-12-31",
+		ID:        "single-region",
+		Severity:  SeverityHard,
+		ExpiresAt: "2026-12-31",
 		VerifiedAt: "2026-09-22",
 		VerifiedBy: "@zhangjun005",
 	}
@@ -185,12 +184,10 @@ func TestFrontmatterWithAssumptions(t *testing.T) {
 		Assumptions: []Assumption{
 			{
 				ID:       "single-region",
-				Text:     "服务仅部署在单 region",
 				Severity: SeverityHard,
 			},
 			{
 				ID:       "redis-availability",
-				Text:     "Redis 可用性 ≥ 99.9%",
 				Severity: SeveritySoft,
 			},
 		},
