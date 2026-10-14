@@ -14,6 +14,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/xxx/kron/internal/store"
 )
 
 // Since v1.2 the MCP protocol layer is owned by the official
@@ -280,6 +282,109 @@ func TestResolveMCPRoot_AcceptsValidProject(t *testing.T) {
 	// filepath.Abs may not equal dir on Windows if dir is a
 	// short path or has unusual casing; compare cleaned forms.
 	assert.Equal(t, filepath.Clean(got), filepath.Clean(dir))
+}
+
+// TestResolveMCPRoot_PrefersCurrentProjectOverGetwd locks RFC
+// docs/rfc/2026-10-13-multi-project-registry.md §2.8 priority 2:
+// when -CWD is absent AND the cwd does NOT contain .kron/, but
+// projects.json::current_project points at a valid Kron project,
+// the server should use current_project.
+//
+// This is the "user opened a new terminal at a non-Kron dir
+// but the GUI has Kron's current project set" case — common
+// when the user shells out from an editor that doesn't share
+// the working directory.
+func TestResolveMCPRoot_PrefersCurrentProjectOverGetwd(t *testing.T) {
+	// 1. The cwd is some unrelated directory (no .kron/).
+	notProject := t.TempDir()
+	t.Chdir(notProject)
+
+	// 2. The current_project points at a real Kron project.
+	goodProject := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(goodProject, ".kron"), 0o755))
+
+	// 3. Wire projects.json (test escape hatch) to point at goodProject.
+	registryPath := filepath.Join(t.TempDir(), "projects.json")
+	t.Setenv("KRON_PROJECTS_JSON_PATH", registryPath)
+	reg := &store.ProjectRegistry{CurrentProject: goodProject, Projects: []store.ProjectEntry{
+		{Path: goodProject, AddedAt: "2026-10-14T00:00:00Z"},
+	}}
+	require.NoError(t, store.WriteProjectsJSON(reg))
+
+	got, err := resolveMCPRoot(nil)
+	require.NoError(t, err, "must not fail when current_project is valid")
+	assert.Equal(t, filepath.Clean(goodProject), filepath.Clean(got),
+		"current_project should win over the unrelated cwd")
+}
+
+// TestResolveMCPRoot_CurrentProjectMissingDotKronFallsBackToGetwd:
+// when current_project points at a directory that no longer
+// has .kron/ (e.g. user removed it after registering), fall
+// through to os.Getwd() rather than erroring out. The current
+// registry entry is essentially stale; the server shouldn't
+// refuse to start just because the user's cleanup is in
+// progress.
+func TestResolveMCPRoot_CurrentProjectMissingDotKronFallsBackToGetwd(t *testing.T) {
+	// 1. The cwd IS a valid Kron project.
+	cwd := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(cwd, ".kron"), 0o755))
+	t.Chdir(cwd)
+
+	// 2. But current_project points at a directory with NO .kron/.
+	staleProject := t.TempDir() // no .kron/
+
+	registryPath := filepath.Join(t.TempDir(), "projects.json")
+	t.Setenv("KRON_PROJECTS_JSON_PATH", registryPath)
+	reg := &store.ProjectRegistry{CurrentProject: staleProject, Projects: []store.ProjectEntry{
+		{Path: staleProject, AddedAt: "2026-10-14T00:00:00Z"},
+	}}
+	require.NoError(t, store.WriteProjectsJSON(reg))
+
+	got, err := resolveMCPRoot(nil)
+	require.NoError(t, err, "stale current_project must not error; fall through to cwd")
+	assert.Equal(t, filepath.Clean(cwd), filepath.Clean(got),
+		"stale current_project must fall through to the valid cwd")
+}
+
+// TestResolveMCPRoot_NoRegistryFallsBackToGetwd: when
+// projects.json doesn't exist at all (first-run case), the
+// server must still work — fall through to os.Getwd(). This
+// matches the "user just installed kron and ran `kron serve-mcp`
+// without ever running `kron register` first" workflow.
+func TestResolveMCPRoot_NoRegistryFallsBackToGetwd(t *testing.T) {
+	cwd := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(cwd, ".kron"), 0o755))
+	t.Chdir(cwd)
+
+	// Point at a path that does not exist.
+	t.Setenv("KRON_PROJECTS_JSON_PATH", filepath.Join(t.TempDir(), "does-not-exist.json"))
+
+	got, err := resolveMCPRoot(nil)
+	require.NoError(t, err, "missing registry must not error; fall through to cwd")
+	assert.Equal(t, filepath.Clean(cwd), filepath.Clean(got))
+}
+
+// TestResolveMCPRoot_CWDWinsOverCurrentProject: -CWD is the
+// top-priority source (RFC §2.8 priority 1). Even when
+// current_project is set, an explicit -CWD overrides it.
+func TestResolveMCPRoot_CWDWinsOverCurrentProject(t *testing.T) {
+	// Set up current_project to point at project A.
+	projectA := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(projectA, ".kron"), 0o755))
+	registryPath := filepath.Join(t.TempDir(), "projects.json")
+	t.Setenv("KRON_PROJECTS_JSON_PATH", registryPath)
+	require.NoError(t, store.WriteProjectsJSON(&store.ProjectRegistry{
+		CurrentProject: projectA,
+		Projects:       []store.ProjectEntry{{Path: projectA, AddedAt: "2026-10-14T00:00:00Z"}},
+	}))
+
+	// But pass -CWD to project B.
+	projectB := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(projectB, ".kron"), 0o755))
+	got, err := resolveMCPRoot([]string{"-CWD", projectB})
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Clean(projectB), filepath.Clean(got),
+		"-CWD must win over current_project (RFC §2.8 priority 1)")
 }
 
 // os_getenv is a small wrapper so this test file does not have to

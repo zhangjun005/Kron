@@ -29,6 +29,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/xxx/kron/internal/model"
+	"github.com/xxx/kron/internal/store"
 )
 
 // ErrNotImplemented is the v1 sentinel kept for backwards compatibility
@@ -272,6 +273,13 @@ func (nopWriteCloser) Close() error { return nil }
 // it stdlib-only (no cobra) is intentional — this layer is
 // independently testable and shouldn't drag in CLI argument conventions.
 //
+// Fallback priority (RFC docs/rfc/2026-10-13-multi-project-registry.md
+// §2.8 + docs/rfc/2026-10-14-projects-json-schema-extension.md §2.1):
+//
+//  1. -CWD <root> flag   — explicit override, wins
+//  2. projects.json::current_project — GUI-maintained active project
+//  3. os.Getwd()         — stdio default
+//
 // After resolving the path, we validate that <root>/.kron/ exists.
 // MCP clients (Claude Code, Cursor MCP runtime, VSCode extensions)
 // typically spawn the kron subprocess with cwd set to the project
@@ -285,46 +293,85 @@ func (nopWriteCloser) Close() error { return nil }
 // — which is misleading because the project isn't missing, the
 // cwd is.
 func resolveMCPRoot(args []string) (string, error) {
-	var root string
 	switch {
-	case len(args) == 0:
-		var err error
-		root, err = os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("kron serve-mcp: cannot determine working directory: %w", err)
-		}
 	case len(args) == 2 && args[0] == "-CWD":
 		abs, err := filepath.Abs(args[1])
 		if err != nil {
 			return "", fmt.Errorf("kron serve-mcp: cannot resolve -CWD path %q: %w", args[1], err)
 		}
-		root = abs
+		return validateIsKronProject(abs)
+
+	case len(args) == 0:
+		// Try current_project from projects.json before falling
+		// back to os.Getwd(). Per RFC §2.8 priority 2. A missing
+		// or unparseable registry is NOT an error here — we
+		// silently fall through to os.Getwd() because the stdio
+		// spawn may legitimately happen before any kron
+		// register/init has ever run (e.g. first-time setup).
+		if cp, err := readCurrentProjectFromRegistry(); err == nil && cp != "" {
+			if abs, err := filepath.Abs(cp); err == nil {
+				if _, statErr := os.Stat(filepath.Join(abs, ".kron")); statErr == nil {
+					return abs, nil
+				}
+				// current_project points at a non-Kron path
+				// (e.g. user removed .kron/ since registering).
+				// Fall through to os.Getwd() rather than
+				// failing — the user may have multiple
+				// checkouts and this one simply isn't
+				// current anymore.
+			}
+		}
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("kron serve-mcp: cannot determine working directory: %w", err)
+		}
+		return validateIsKronProject(wd)
+
 	default:
 		return "", fmt.Errorf("kron serve-mcp: unexpected arguments %v (only -CWD <root> is supported)", args)
 	}
+}
 
-	// Sanity check: a Kron project has a .kron/ directory at the
-	// root. If the resolved root doesn't have one, the client
-	// almost certainly got the cwd wrong; surface a clear
-	// pointer to the fix rather than letting the first tool
-	// call blow up with a misleading "run kron_init first".
-	kronDir := filepath.Join(root, ".kron")
-	if info, err := os.Stat(kronDir); err != nil {
+// readCurrentProjectFromRegistry reads the multi-project
+// registry and returns its current_project field, or "" +
+// non-nil error if anything goes wrong (missing file, parse
+// error, empty current_project). The non-nil error lets the
+// caller distinguish "no registry" from "registry without
+// current_project" — both are valid fallback states.
+func readCurrentProjectFromRegistry() (string, error) {
+	reg, err := store.ReadProjectsJSON()
+	if err != nil {
+		return "", err
+	}
+	if reg == nil || reg.CurrentProject == "" {
+		return "", fmt.Errorf("no current_project set")
+	}
+	return reg.CurrentProject, nil
+}
+
+// validateIsKronProject checks that path contains a .kron/
+// directory and returns a clear error if not. Used by
+// resolveMCPRoot after picking a root from -CWD or os.Getwd().
+func validateIsKronProject(path string) (string, error) {
+	kronDir := filepath.Join(path, ".kron")
+	info, err := os.Stat(kronDir)
+	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf(
 				"kron serve-mcp: %s is not a Kron project (.kron/ not found). "+
 					"Pass -CWD <repo-root> to point at the directory that contains .kron/",
-				root,
+				path,
 			)
 		}
 		return "", fmt.Errorf("kron serve-mcp: cannot stat %s: %w", kronDir, err)
-	} else if !info.IsDir() {
+	}
+	if !info.IsDir() {
 		return "", fmt.Errorf(
 			"kron serve-mcp: %s exists but is not a directory (.kron/ must be a directory)",
 			kronDir,
 		)
 	}
-	return root, nil
+	return path, nil
 }
 
 // callerInjectMiddleware returns a server.AddReceivingMiddleware
