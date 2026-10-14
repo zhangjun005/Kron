@@ -307,7 +307,7 @@ func Rate() {}
 func main() {}
 `)
 
-	anchors, err := AnchorsForFile(filepath.Join(dir, "main.go"))
+	anchors, err := AnchorsForFile("", filepath.Join(dir, "main.go"))
 	require.NoError(t, err)
 	require.Len(t, anchors, 2)
 
@@ -335,7 +335,7 @@ func B() {}
 func C() {}
 `)
 
-	anchors, err := AnchorsForFile(filepath.Join(dir, "multi.go"))
+	anchors, err := AnchorsForFile("", filepath.Join(dir, "multi.go"))
 	require.NoError(t, err)
 	require.Len(t, anchors, 3)
 
@@ -354,21 +354,21 @@ func TestAnchorsForFile_EmptyFile(t *testing.T) {
 	writeSourceFile(t, dir, "empty.go", `package x
 `)
 
-	anchors, err := AnchorsForFile(filepath.Join(dir, "empty.go"))
+	anchors, err := AnchorsForFile("", filepath.Join(dir, "empty.go"))
 	require.NoError(t, err)
 	assert.Empty(t, anchors)
 }
 
 // TestAnchorsForFile_FileNotFound returns a wrapped error.
 func TestAnchorsForFile_FileNotFound(t *testing.T) {
-	_, err := AnchorsForFile(filepath.Join(t.TempDir(), "nonexistent.go"))
+	_, err := AnchorsForFile("", filepath.Join(t.TempDir(), "nonexistent.go"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nonexistent.go")
 }
 
 // TestAnchorsForFile_EmptyPath returns a descriptive error.
 func TestAnchorsForFile_EmptyPath(t *testing.T) {
-	_, err := AnchorsForFile("")
+	_, err := AnchorsForFile("", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "filePath is empty")
 }
@@ -380,7 +380,7 @@ func TestAnchorsForFile_RepoRelativePath(t *testing.T) {
 	dir := t.TempDir()
 	writeSourceFile(t, dir, "internal/x.go", "// @kron:intent auth/jwt\n")
 
-	anchors, err := AnchorsForFile(filepath.Join(dir, "internal", "x.go"))
+	anchors, err := AnchorsForFile("", filepath.Join(dir, "internal", "x.go"))
 	require.NoError(t, err)
 	require.Len(t, anchors, 1)
 	assert.Equal(t, "auth/jwt", anchors[0].Slug)
@@ -396,7 +396,7 @@ func TestAnchorsForFile_SortedOutput(t *testing.T) {
 // @kron:intent first
 `)
 
-	anchors, err := AnchorsForFile(filepath.Join(dir, "z.go"))
+	anchors, err := AnchorsForFile("", filepath.Join(dir, "z.go"))
 	require.NoError(t, err)
 	require.Len(t, anchors, 2)
 	// Line 2 ("second") < line 3 ("first") by line number.

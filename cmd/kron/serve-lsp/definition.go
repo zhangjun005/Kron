@@ -2,9 +2,12 @@ package lsp
 
 import (
 	"context"
+	"errors"
 
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
+
+	"github.com/xxx/kron/internal/model"
 )
 
 // Definition resolves the anchor under the cursor to the location of
@@ -12,13 +15,17 @@ import (
 // a position that is not on an anchor line yields a nil result — the
 // editor simply does not navigate — rather than a protocol error.
 func (s *server) Definition(ctx context.Context, params *protocol.DefinitionParams) (protocol.DefinitionResult, error) {
-	slug, ok := s.anchorSlugAt(&params.TextDocumentPositionParams)
+	slug, ok := s.anchorSlugAt(ctx, &params.TextDocumentPositionParams)
 	if !ok {
 		return nil, nil
 	}
 
 	intent, err := s.reader.Load(ctx, slug)
 	if err != nil {
+		if errors.Is(err, model.ErrIntentNotFound) {
+			return nil, nil // dangling: degrade to no-jump
+		}
+		s.logf(ctx, protocol.MessageTypeError, "kron serve-lsp: definition: load %s: %v", slug, err)
 		return nil, nil
 	}
 

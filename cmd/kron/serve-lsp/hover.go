@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -17,13 +18,22 @@ import (
 // the RFC requires hover to degrade to no content, never to report a
 // protocol failure.
 func (s *server) Hover(ctx context.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
-	slug, ok := s.anchorSlugAt(&params.TextDocumentPositionParams)
+	slug, ok := s.anchorSlugAt(ctx, &params.TextDocumentPositionParams)
 	if !ok {
 		return nil, nil
 	}
 
 	intent, err := s.reader.Load(ctx, slug)
 	if err != nil {
+		// Dangling anchor (RFC §6): not-found is the expected failure
+		// mode for a stale @kron:intent line; degrade to no hover
+		// without surfacing an LSP error. Any other error (frontmatter
+		// corruption, I/O failure) is logged via the notifier so the
+		// editor's Output panel surfaces it.
+		if errors.Is(err, model.ErrIntentNotFound) {
+			return nil, nil
+		}
+		s.logf(ctx, protocol.MessageTypeError, "kron serve-lsp: hover: load %s: %v", slug, err)
 		return nil, nil
 	}
 

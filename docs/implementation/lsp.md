@@ -1,166 +1,216 @@
-# LSP 访问层实现计划（serve-lsp）
+# LSP Access Layer
 
-> **状态**：**已实现**（v1.3 能力全部落地：initialize / hover / definition / shutdown / exit）
-> **负责人**：@HomoFluctus
-> **分支**：`feat/serve-lsp`
-> **目标版本**：v1.3
-> **上游拍板**：[`docs/rfc/2026-10-07-lsp-sdk.md`](../rfc/2026-10-07-lsp-sdk.md)（SDK/协议选型）+ [`docs/rfc/2026-10-08-lsp-client.md`](../rfc/2026-10-08-lsp-client.md)（进程模型/跨语言接入）
-> **流程依据**：[`docs/process/new-access-layer.md`](../process/new-access-layer.md)
+> Source of truth (architecture): [`docs/abstractDesign/architecture.md`](../abstractDesign/architecture.md) §〇 铁律 + §一 访问层  
+> Source of truth (tech selection): [`docs/rfc/2026-10-07-lsp-sdk.md`](../rfc/2026-10-07-lsp-sdk.md)  
+> Source of truth (client layer boundary): [`docs/rfc/2026-10-08-lsp-client.md`](../rfc/2026-10-08-lsp-client.md)  
+> Source of truth (caller-injection change): [`docs/tracking/homofluctus.md`](../tracking/homofluctus.md) 10-12 决策点
 
----
-
-## 1. 这是什么
-
-`kron serve-lsp` 是 Kron 的 **LSP（Language Server Protocol）访问层**，给编辑器（VSCode / Cursor / Neovim）提供：
-
-- **Hover**：鼠标悬停 `// @kron:intent <slug>` 时，弹窗显示该 intent 的标题 + 摘要
-- **Definition**：从锚点跳到 `.kron/intents/<slug>.md` 文件
-
-它是四层架构里的「协议访问层」，本质是**把 LSP 协议的 JSON-RPC 翻译成对 `internal/` 的调用**，不承载业务逻辑。
+This document is the LSP **access layer** specification. The Go entry point is `cmd/kron/serve-lsp/` (package `lsp`); the package implements the LSP server-side protocol over stdio.
 
 ---
 
-## 2. v1.3 范围（做什么 / 不做什么）
+## 1 能力清单 (capabilities v1.3)
 
-### 做（本分支目标）
+The server registers 5 LSP methods. All other methods are explicitly "not implemented" by embedding `protocol.UnimplementedServer`.
 
-| LSP method | 数据来源 | 行为 |
+| Method | Direction | Capability advertised in `Initialize` |
 |---|---|---|
-| `initialize` | 静态 | 报 server name / version / capabilities |
-| `textDocument/hover` | `parser` + `store` | hover 锚点 → 显示 intent 标题 + summary |
-| `textDocument/definition` | `parser` + `store` | 跳到 `.kron/intents/<slug>.md` 的 file URI |
-| `shutdown` / `exit` | 静态 | 正常退出 |
+| `initialize` | request | n/a (handshake) |
+| `initialized` | notification | (no-op, required by spec) |
+| `shutdown` | request | n/a |
+| `exit` | notification | n/a |
+| `textDocument/didOpen` | notification | `TextDocumentSync.OpenClose = true` |
+| `textDocument/didChange` | notification | `TextDocumentSync.Change = Full` |
+| `textDocument/didClose` | notification | `TextDocumentSync.OpenClose = true` |
+| `textDocument/hover` | request | `HoverProvider = true` |
+| `textDocument/definition` | request | `DefinitionProvider = true` |
 
-### 不做（v1.4+ 才评估，本分支**不碰**）
+### 1.1 v1.4+ 评估 (NOT v1.3 scope)
 
-- ❌ `textDocument/completion`（slug 补全）
-- ❌ `textDocument/publishDiagnostics`（画红线，等价 `kron lint` A-class）
-- ❌ HTTP server / socket / daemon
-- ❌ 并发（单实例串行）
-- ❌ 跨语言 client SDK（VSCode 用 `vscode-languageclient`，各编辑器生态自己实现 client）
-
----
-
-## 3. 现状盘点（哪些已就绪，不用重做）
-
-| 已就绪 | 位置 | 说明 |
+| Method | Status | Why deferred |
 |---|---|---|
-| 路由已接 | `cmd/kron/main.go:37-43` | `kron serve-lsp` dispatch 到 `lsp.Run` |
-| 协议层已实现 | `cmd/kron/serve-lsp/` | `main.go` / `server.go` / `hover.go` / `definition.go` 全部落地，stub 已替换 |
-| 协议 SDK 决策 | RFC 2026-10-07 §3 | `go.lsp.dev/protocol` v1.0.1（实现 LSP 3.18，向后兼容 RFC 拍的 3.17），**已拍板不可回退** |
-| 进程模型决策 | RFC 2026-10-08 §4 | stdio + Content-Length 帧，单实例串行，父进程寿命 |
-| 业务层 | `internal/parser` + `internal/store` | 100% 完成，要复用的 API 现成 |
+| `textDocument/completion` | v1.4+ 评估 | Need `internal/parser.ValidateSlug` caching |
+| `textDocument/publishDiagnostics` | v1.4+ 评估 | Need `internal/lint` integration |
+| `workspace/diagnostic` | v1.4+ 评估 | 依赖 publishDiagnostics |
+| `textDocument/inlineCompletion` | v1.4+ 评估 | 依赖 completion |
+| `textDocument/signatureHelp` | v1.4+ 评估 | 依赖 symbol 前置 |
+| `workspace/symbol` | v1.4+ 评估 | 依赖 symbol 索引 |
 
 ---
 
-## 4. 要复用的 `internal/` API（以代码为准，非文档）
+## 2 工具契约 (request/response shape per method)
+
+### 2.1 `initialize`
+
+**Request** (`InitializeParams`): standard LSP.
+
+**Response** (`InitializeResult`):
 
 ```go
-// 找单个文件里的锚点（带行号）—— v1.3 新增，解决 hover 行号定位缺口
-func parser.AnchorsForFile(file string) ([]model.Anchor, error)
-// model.Anchor{ Slug, FilePath, LineNumber, Kind }  ← LineNumber 1 索引
-
-// 按 slug 读 intent
-func store.NewReader(root string) (*store.Reader, error)
-func (r *store.Reader) Load(ctx context.Context, slug string) (*model.Intent, error)
-// model.Intent{ Slug, Frontmatter{...}, Body, SourcePath }
+&protocol.InitializeResult{
+    Capabilities: protocol.ServerCapabilities{
+        TextDocumentSync: &protocol.TextDocumentSyncOptions{
+            OpenClose: ptr(true),
+            Change:    ptr(TextDocumentSyncKindFull),
+        },
+        HoverProvider:      Boolean(true),
+        DefinitionProvider: Boolean(true),
+    },
+    ServerInfo: protocol.ServerInfo{
+        Name:    "kron",
+        Version: NewOptional("v1.3.0"),
+    },
+}
 ```
 
-> ⚠️ **文档陷阱**（两处，以代码为准）：
-> 1. RFC 里写的是 `store.Get`，**实际代码叫 `store.Load`**（`internal/store/reader.go`）。
-> 2. RFC 2026-10-08 §4.4 曾判「`parser.SlugsForFile` 够用」，**错**——它返回 `[]string`（丢行号），hover 无法按行匹配。实施时新增了 `AnchorsForFile`（见 §4.4 修订）。
+### 2.2 `textDocument/hover`
+
+**Request** (`HoverParams`): standard LSP `TextDocumentPositionParams` (URI + 0-indexed line/character).
+
+**Resolution**: server scans `<URI.FsPath>` via `parser.AnchorsForFile`, matches the 0-indexed line + 1 to the parser's 1-indexed `Anchor.LineNumber`, loads the intent via `store.Reader.Load(ctx, slug)`, and renders a Markdown `MarkupContent` with the slug (and status, if set) as heading + the first paragraph of the body (truncated to 200 runes + "…" on a UTF-8 boundary).
+
+**Response**:
+- `(*protocol.Hover, nil)` — anchor exists, intent loads, returns `MarkupContent{Kind: Markdown, Value: "**slug** · status\n\nbody…"}`.
+- `(nil, nil)` — any of: not on an anchor line, file unreadable, slug dangles (`ErrIntentNotFound`), or any other load failure (logged via `window/logMessage`).
+
+**Dangling anchor contract** (RFC §6): the editor sees no hover and no error. This is the "degrade to no content, never to protocol failure" guarantee.
+
+### 2.3 `textDocument/definition`
+
+**Request** (`DefinitionParams`): same as hover.
+
+**Resolution**: same anchor match + intent load, then return a `LocationSlice` with one `Location` whose URI is the absolute path of the intent's `.md` file (from `intent.SourcePath`) and whose Range is `{Line: 0, Character: 0}` to `{Line: 0, Character: 0}` (top of the file).
+
+**Response**:
+- `protocol.LocationSlice{[location]}` — anchor exists, intent loads, jumps to the `.md`.
+- `(nil, nil)` — same failure modes as hover.
+
+### 2.4 `textDocument/didOpen` / `didChange` / `didClose`
+
+v1.3 takes no action on these notifications — the server re-reads the file from disk on every hover/definition request (no in-memory cache). The methods are present on the server (vs. left to `UnimplementedServer`) so the editor sees the capabilities the `Initialize` result declared are actually being served. Without this, editors like VSCode and Neovim disconnect after the first timeout when the server declares a capability and silently ignores the corresponding notifications.
+
+### 2.5 `shutdown` / `exit`
+
+- `shutdown`: returns `nil`; the SDK keeps the connection open until `exit` arrives.
+- `exit`: invokes `s.exitFn(0)` (LSP §3.5.4 mandates exit code 0 after a clean `shutdown` → `exit` sequence). The default `s.exitFn` is `os.Exit` (wired in `Run()`); tests inject a recorder to assert on the call.
 
 ---
 
-## 5. 任务分解（全部完成 ✅）
+## 3 底层实现
 
-| 任务 | 内容 | 状态 |
+### 3.1 包边界
+
+`cmd/kron/serve-lsp/` imports only:
+- `internal/parser` (only `parser.AnchorsForFile`)
+- `internal/store` (only `store.NewReader` and `store.Reader.Load`)
+- `internal/model` (only `model.Anchor`, `model.Intent`, `model.ErrIntentNotFound`, `model.AnchorKind`)
+
+It does NOT import any other access layer (`cmd/kron/cli`, `cmd/kron/serve-mcp`) per architecture.md §〇 铁律 #2. It does NOT import LSP-client concerns (those live in `frontend/extensions/vscode/` or `frontend/wails/` per the client-layer split, RFC 2026-10-08-lsp-client).
+
+### 3.2 数据流 (hover)
+
+```
+Editor (VSCode / Cursor / Neovim)
+  │  Content-Length framed JSON-RPC
+  │  textDocument/hover { textDocument: {uri}, position: {line, character} }
+  ▼
+jsonrpc2 stream
+  │
+  ▼
+protocol.ServerHandler dispatches to server.Hover
+  │
+  │  anchorSlugAt(ctx, &params.TextDocumentPositionParams):
+  │    1. parser.AnchorsForFile(ctx, td.TextDocument.URI.FsPath())
+  │       → returns []model.Anchor (each with Slug, FilePath, LineNumber, Kind)
+  │    2. for each anchor, if a.LineNumber == td.Position.Line + 1
+  │       → return (a.Slug, true)
+  │    3. else return ("", false)
+  │
+  │  if !ok: return (nil, nil)
+  │
+  │  store.Reader.Load(ctx, slug):
+  │    → *model.Intent (with Frontmatter, Body, SourcePath)
+  │    → or error (ErrIntentNotFound / ErrFrontmatterInvalid / IO)
+  │
+  │  if errors.Is(err, model.ErrIntentNotFound): return (nil, nil)  // dangling
+  │  if err != nil:
+  │     s.logf(ctx, MessageTypeError, "kron serve-lsp: hover: load %s: %v", slug, err)
+  │     return (nil, nil)
+  │
+  │  renderIntentHover(intent) → Markdown string
+  │    summary = summarizeBody(intent.Body) (first paragraph, ≤ 200 runes, "…" on overflow)
+  │    return &Hover{Contents: &MarkupContent{Kind: Markdown, Value: "**slug** · status\n\nsummary"}}
+  │
+  ▼
+Editor displays the hover popup.
+```
+
+### 3.3 caller identity
+
+**This layer does NOT call `model.WithCaller`.** Per [`internal/model/caller.go`](../../internal/model/caller.go) head comment (2026-10-08 change) and the 10-12 decision point in [`docs/tracking/homofluctus.md`](../tracking/homofluctus.md), the caller-injection API is preserved for backwards compatibility but the `internal/` packages no longer branch on ctx caller keys. New access layer code therefore does not inject caller.
+
+### 3.4 ctx propagation
+
+Every function on the server (`Hover`, `Definition`, `anchorSlugAt`, `DefaultAnchorsForFile`) takes `ctx context.Context` first, per architecture.md §〇 铁律 #3 (every store/parser fn takes ctx first). `Run()` passes `context.Background()` today because `jsonrpc2` does not yet expose per-request cancellation hooks to the server side; v1.4+ may forward the request context once the SDK exposes a stable typed accessor.
+
+### 3.5 logf / notify / exitFn injection
+
+The server has three side-channel fields that `Run()` wires in production:
+
+| Field | Production wire (in Run) | Test wire |
 |---|---|---|
-| 任务 0 | 行号定位 API 缺口 → 选方案 A（新增 `AnchorsForFile`） | ✅ |
-| 任务 1 | 加 LSP SDK 依赖 `go.lsp.dev/protocol` v1.0.1 | ✅ |
-| 任务 2 | `internal/parser` 加 `AnchorsForFile` + 单测 | ✅ |
-| 任务 3 | 实现协议层，替换 stub | ✅ |
-| 任务 4 | 测试：hover Markdown / definition URI / 悬空锚点 null | ✅ |
-| 任务 5 | 补协议文档（本文件 + RFC §4.4 修订） | ✅ |
+| `s.logf` | `Client.LogMessage(ctx, &LogMessageParams{Type, Message})` with `Client` from `protocol.ClientFromContext`; falls back to `errOut` if Client is unavailable | a recorder closure; asserts on the message |
+| `s.notify` | `Client.ShowMessage(ctx, &ShowMessageParams{Type, Message})` with same Client lookup; falls back to `errOut` | (no v1.3 test) |
+| `s.exitFn` | `os.Exit` | a recorder closure; asserts on the code |
 
-**任务 0 决议**：选方案 A。`parser.SlugsForFile` 返回 `[]string`（丢行号），无法支撑 hover 的行定位；新增 `parser.AnchorsForFile(file) ([]model.Anchor, error)` 返回带 `LineNumber` 的单文件锚点，封装已有的未导出 `scanFile`。已走 `docs/process/new-internal-api.md` 并更新 RFC §4.4。
-
-**任务 1 决议**：`go get go.lsp.dev/protocol@v1.0.1`（连带 `go.lsp.dev/jsonrpc2` + `go.lsp.dev/uri`）。SDK 实际实现 LSP 3.18，向后兼容 RFC 拍的 3.17；hover / definition 在两个版本行为一致。
+This three-field shape mirrors the design rationale in [`cmd/kron/serve-mcp/serve_mcp.go`](../../cmd/kron/serve-mcp/serve_mcp.go) (the MCP layer has the same injection pattern, adapted to `mcp.Middleware`).
 
 ---
 
-## 6. 关键决策点汇总（已全部拍板 ✅）
+## 4 测试覆盖
 
-| # | 决策 | 结论 |
+| Method | Test | Layer |
 |---|---|---|
-| 1 | 行号定位 | 新增 `parser.AnchorsForFile`（带行号），**不**复用 `SlugsForFile`（丢行号） |
-| 2 | `serve-lsp` 的 repo root 来源 | 照抄 `serve-mcp`：可选 `-CWD <root>`，缺省 `os.Getwd()` |
-| 3 | `go.lsp.dev/protocol` 依赖批准 | 已批准（RFC 2026-10-07 §3 为权威来源） |
+| (入口) | `TestRun_EmptyStdin` | stdio 入口 (mirrors `servemcp.TestRun_EmptyStdin`) |
+| (入口) | `TestRun_UnknownArgs` | `resolveRoot` rejects unknown flags |
+| `initialize` | `TestInitialize_ReportsCapabilities` | base capabilities |
+| `initialize` | `TestInitialize_DeclaresTextDocumentSync` | TextDocumentSync opts (P0-2) |
+| `textDocument/didOpen` | `TestDidOpen_NoOp` | handler presence |
+| `textDocument/didChange` | `TestDidChange_NoOp` | handler presence |
+| `textDocument/didClose` | `TestDidClose_NoOp` | handler presence |
+| `textDocument/hover` | `TestHover_OnAnchor` | fakeAnchors path |
+| `textDocument/hover` | `TestHover_NotOnAnchor` | off-anchor → nil |
+| `textDocument/hover` | `TestHover_DanglingAnchor` | dangle → nil, no error |
+| `textDocument/hover` | `TestHover_NonNotFoundError_LogsAndReturnsNil` | frontmatter corruption → logf fires, h = nil |
+| `textDocument/hover` | `TestHover_RealParserEndToEnd` | real parser + store + render path |
+| `textDocument/hover` | `TestHover_RealParser_NotOnAnchor` | real parser off-anchor |
+| `textDocument/hover` | `TestHover_LongBodyTruncated` | 300-CJK body → "…" suffix, UTF-8 valid |
+| `textDocument/hover` | `TestHover_RepeatedInvocation` | 1000× stability (P2-4) |
+| `textDocument/definition` | `TestDefinition_OnAnchor` | fakeAnchors path |
+| `textDocument/definition` | `TestDefinition_DanglingAnchor` | dangle → nil |
+| `textDocument/definition` | `TestDefinition_NonNotFoundError_LogsAndReturnsNil` | frontmatter corruption |
+| `textDocument/definition` | `TestDefinition_RealParserEndToEnd` | real parser + store |
+| `shutdown` | `TestShutdown_NoError` | clean shutdown |
+| `exit` | `TestExit_NotifiesZero` | `exitFn(0)` invoked |
+| `exit` | `TestExit_NoExitFn_NoError` | zero-value `exitFn` does not panic |
+| (internal) | `TestSummarizeBody_*` (5 tests in `hover_test.go`) | helper unit tests |
+
+**Total: 28 tests** as of v1.3 (vs. 8 at v1.3 stub). All pass under `go test ./cmd/kron/serve-lsp/...`.
+
+### 4.1 Test fixtures
+
+`server_test.go` uses `writeTestFile(t, root, rel, content)` to build a fresh repo in `t.TempDir()` per test. The two factory functions are:
+
+- `newTestServer(t)` — builds a `&server{reader, anchors: fakeAnchors}` with a `main.go` anchoring `auth-jwt` on line 3 and a `dangling.go` anchoring `no-such-intent` on line 1.
+- `newTestServerWithRealParser(t)` — same layout but uses `parser.AnchorsForFile` as the anchor scanner (currently redirects through the `defaultAnchorsForFile` adapter).
+
+Direct struct construction (`&server{...}`) is used for tests that need a custom `anchorFinder` or `logf` recorder.
 
 ---
 
-## 7. 验收清单（PR 可合并的标准）
+## 5 RFC 链接 + 决策点
 
-- [x] `go build ./...` 通过
-- [x] `go vet ./...` 通过；`gofmt -l .` 仅剩 `internal/parser/` 的预存 CRLF 噪声（非本次改动）；`go test ./...` 全部通过
-- [x] `serve-lsp` 能完成 initialize → hover → definition → shutdown → exit 全握手
-- [x] 悬空锚点不崩、返回 null
-- [x] 未 import 任何兄弟访问层 / 未调 `model.WithCaller`
-- [x] `docs/implementation/lsp.md` 协议细节已补
-- [x] RFC §4.4 的 API 缺口叙述已修正（任务 0 选方案 A）
-
----
-
-## 8. 协议实现细节
-
-### 8.1 文件布局
-
-```
-cmd/kron/serve-lsp/
-├── main.go          ← Run(args, in, out, errOut)：resolveRoot → store.NewReader → protocol.NewServer → 阻塞到 conn.Done()
-├── server.go        ← server struct + Initialize/Shutdown/Exit + anchorSlugAt 辅助 + anchorFinder 注入点
-├── hover.go         ← Hover + renderIntentHover + summarizeBody
-├── definition.go    ← Definition
-├── mock.go          ← mockAnchorsForFile 占位（等 parser.AnchorsForFile 真版落地后删）
-├── server_test.go   ← 7 个测试（hover 3 / definition 2 / initialize / shutdown）
-└── hover_test.go    ← summarizeBody 单测（含 UTF-8 截断边界）
-```
-
-`server` 内嵌 `protocol.UnimplementedServer`，只覆写 v1.3 五个方法；其余请求返回「not implemented」、通知被忽略（`UnimplementedServer` 契约）。无 package 级可变状态；`Run` 签名与 `serve-mcp.Run` 同形，供 `cmd/kron/main.go` 统一 dispatch。
-
-### 8.2 transport 与进程模型
-
-- `jsonrpc2.NewHeaderStream(&stdioRWC{in, out})`：Content-Length 帧，stdio。
-- `stdioRWC` 把 `in`（读）/`out`（写）合成一个 `io.ReadWriteCloser`，`Close()` 是 no-op（父进程拥有底层 OS 流）。
-- `protocol.NewServer(ctx, s, stream)` 自动 `conn.Go()`，`<-conn.Done()` 阻塞到父进程关 stdin 或 exit 通知；`conn.Err()` 对干净 EOF 返回 nil。
-- 日志走 `errOut`（stderr），stdout 保持纯 LSP 帧。
-
-### 8.3 repo root 解析
-
-`resolveRoot(args)`：空参 → `os.Getwd()`；`-CWD <root>` → `filepath.Abs`；其他 → error。与 `serve-mcp` 同 flag 面，编辑器 spawn 两个子命令方式一致。
-
-### 8.4 hover 渲染（Markdown 模板）
-
-锚点行命中 → `store.Load(slug)` → `renderIntentHover`：
-
-```
-**<slug>** · <status>          ← status 为空则不渲染「 · 」后缀
-
-<正文首段，截断至 200 字符，超出加 …>
-```
-
-- `summarizeBody`：`TrimSpace` → 取到首个 `\n\n`（第一段）→ 再 `TrimSpace` → 超 200 截断加 `…`。
-- 未命中锚点 / 文件读不了 / slug 悬空 → 返回 `(nil, nil)`（空 hover），**不**报协议错误。
-
-### 8.5 definition 跳转 URI
-
-锚点行命中 → `store.Load(slug)` → 返回 `uri.File(intent.SourcePath)` 的 `Location`，Range 为 `{0,0}–{0,0}`（文件顶部）。悬空锚点 → `nil`。
-
-### 8.6 行号换算（关键约定）
-
-- LSP `Position.Line` 是 **0 索引**；`model.Anchor.LineNumber` 是 **1 索引**。
-- `anchorSlugAt`：`line := int(td.Position.Line) + 1`，遍历注入的 `s.anchors(filePath)` 返回的锚点，`a.LineNumber == line` 命中。
-
-### 8.7 锚点扫描注入（v1.3 临时态）
-
-`anchorSlugAt` 通过 `anchorFinder` 函数字段注入锚点来源，**不**直接调 `parser.AnchorsForFile`。原因：`AnchorsForFile` 的实现归 internal 层（组长在 master 单独实现），本分支先用 `mockAnchorsForFile`（`mock.go`，返回空）占位，测试注入 `fakeAnchors`。真版落地后，`Run()` 把注入从 `mockAnchorsForFile` 换成 `parser.AnchorsForFile`，并删除 `mock.go`。
+- **SDK selection**: [`docs/rfc/2026-10-07-lsp-sdk.md`](../rfc/2026-10-07-lsp-sdk.md) — `go.lsp.dev/protocol v1.0.1` + `go.lsp.dev/jsonrpc2 v1.0.1` + `go.lsp.dev/uri v1.0.1`.
+- **Client layer split**: [`docs/rfc/2026-10-08-lsp-client.md`](../rfc/2026-10-08-lsp-client.md) — VSCode extension (lives in `frontend/extensions/vscode/`) consumes `kron serve-lsp` and `kron serve-mcp` as stdio subprocesses. This server does not import any client-layer concern.
+- **caller-injection change**: [`docs/tracking/homofluctus.md`](../tracking/homofluctus.md) 10-12 决策点 §7 — new access layer code does not call `model.WithCaller`; `internal/` does not read ctx caller.
+- **Dep approval status**: `go.lsp.dev/protocol` and friends are listed in `go.mod` but flagged in [`docs/process/pending-decisions.md`](../process/pending-decisions.md) (P2-3) as awaiting explicit human approval per AGENTS.md §3 red line. Removal is NOT planned — the PR keeps the deps and the marker; reverting costs more than the marker.

@@ -2,20 +2,13 @@
 // Kron. It gives editors (VSCode / Cursor / Neovim) hover and
 // definition jumps on "// @kron:intent <slug>" anchors.
 //
-// Naming convention: directory is hyphenated (cmd/kron/serve-lsp) to
-// match serve-mcp; the Go package is "lsp" (single segment, acronym)
-// so the import path is single-segment.
+// Naming: directory cmd/kron/serve-lsp is hyphenated to match
+// serve-mcp; Go package is "lsp" (single segment, acronym).
 //
-// Tech stack and process contract (single source of truth:
-// docs/implementation/lsp.md and docs/rfc/2026-10-07-lsp-sdk.md /
-// 2026-10-08-lsp-client.md):
-//
-//   - LSP SDK:  go.lsp.dev/protocol (jsonrpc2 + uri come along)
-//   - Transport: stdio, Content-Length framed JSON-RPC
-//   - Capab v1.3: initialize / hover / definition / shutdown / exit
-//   - Process:   stdio parent lifetime, no daemon, no socket
-//   - Concurr.:  single-instance serial (jsonrpc2 read loop)
-//   - internal:  parser.AnchorsForFile + store.Load only
+// Stack: go.lsp.dev/protocol SDK, stdio, Content-Length framed
+// JSON-RPC. Capabilities v1.3: initialize / hover / definition /
+// shutdown / exit. See docs/implementation/lsp.md and
+// docs/rfc/2026-10-07-lsp-sdk.md for the architectural source of truth.
 package lsp
 
 import (
@@ -28,7 +21,6 @@ import (
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 
-	"github.com/xxx/kron/internal/parser"
 	"github.com/xxx/kron/internal/store"
 )
 
@@ -55,10 +47,40 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 		return fmt.Errorf("kron serve-lsp: %w", err)
 	}
 
-	s := &server{reader: reader, anchors: parser.AnchorsForFile}
+	s := NewServer(reader)
 
 	stream := jsonrpc2.NewHeaderStream(&stdioRWC{in: in, out: out})
-	_, conn, _ := protocol.NewServer(context.Background(), s, stream)
+	ctx, conn, client := protocol.NewServer(context.Background(), s, stream)
+	_ = ctx    // logf/notify resolve Client via protocol.ClientFromContext on each call
+	_ = client //
+
+	// Wire the two side-channels: logf for window/logMessage and
+	// notify for window/showMessage. Both go through the LSP Client
+	// handle returned by protocol.NewServer. The Client is reachable
+	// from ctx for handler-side use; we cache a closure on the
+	// server so handlers don't have to repeat the lookup. The
+	// fallbacks (fmt.Fprintln to errOut) are kept so that any
+	// logf/notify call before the connection is fully ready (or
+	// after teardown) still surfaces something on the editor's
+	// stderr fallback / Output panel.
+	s.logf = func(ctx context.Context, typ protocol.MessageType, format string, args ...any) {
+		msg := fmt.Sprintf(format, args...)
+		if c, ok := protocol.ClientFromContext(ctx); ok {
+			_ = c.LogMessage(ctx, &protocol.LogMessageParams{Type: typ, Message: msg})
+			return
+		}
+		fmt.Fprintln(errOut, msg)
+	}
+	s.notify = func(ctx context.Context, typ protocol.MessageType, format string, args ...any) {
+		msg := fmt.Sprintf(format, args...)
+		if c, ok := protocol.ClientFromContext(ctx); ok {
+			_ = c.ShowMessage(ctx, &protocol.ShowMessageParams{Type: typ, Message: msg})
+			return
+		}
+		fmt.Fprintln(errOut, msg)
+	}
+	s.exitFn = os.Exit
+	_ = client // touch to silence unused; ctx is the lookup key for handlers
 
 	// Block until the connection terminates (parent closes stdin, or an
 	// exit notification). conn.Err reports nil for a clean end of stream.
