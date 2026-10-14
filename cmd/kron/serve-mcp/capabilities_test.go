@@ -44,6 +44,9 @@ func TestCapabilities_ExplicitContract(t *testing.T) {
 	server := mcp.NewServer(&mcp.Implementation{Name: "kron-cap-test", Version: "v1.2.0"}, nil)
 	server.AddReceivingMiddleware(callerInjectMiddleware(t.TempDir()))
 	registerTools(server)
+	// 2026-10-14: register the 3 prompts so the capability check
+	// below covers the new auto-inferred prompts capability too.
+	registerPrompts(server)
 
 	st, ct := mcp.NewInMemoryTransports()
 	ss, err := server.Connect(context.Background(), st, nil)
@@ -90,10 +93,7 @@ func TestCapabilities_ExplicitContract(t *testing.T) {
 		t.Fatalf("unmarshal caps: %v", err)
 	}
 
-	// Prompts and Resources MUST be absent (we never register any).
-	if _, ok := caps["prompts"]; ok {
-		t.Errorf("expected prompts to be absent, got %s", string(caps["prompts"]))
-	}
+	// Resources MUST be absent (we never register any).
 	if _, ok := caps["resources"]; ok {
 		t.Errorf("expected resources to be absent, got %s", string(caps["resources"]))
 	}
@@ -111,6 +111,26 @@ func TestCapabilities_ExplicitContract(t *testing.T) {
 	}
 	if !toolsCap.ListChanged {
 		t.Error("expected tools.listChanged = true (SDK auto-infer from registered tools)")
+	}
+
+	// 2026-10-14: Prompts must be present (we register 3 prompts
+	// via registerPrompts). SDK auto-infers the prompts
+	// capability from AddPrompt calls, just like AddTool for
+	// tools. listChanged should be true to signal that the set
+	// is dynamic (so future prompts don't break clients that
+	// cache the initial list).
+	prompts, ok := caps["prompts"]
+	if !ok {
+		t.Fatal("expected prompts capability to be present (we register 3 prompts via registerPrompts)")
+	}
+	var promptsCap struct {
+		ListChanged bool `json:"listChanged"`
+	}
+	if err := json.Unmarshal(prompts, &promptsCap); err != nil {
+		t.Fatalf("unmarshal prompts cap: %v", err)
+	}
+	if !promptsCap.ListChanged {
+		t.Error("expected prompts.listChanged = true (SDK auto-infer from registered prompts)")
 	}
 
 	// Logging: SDK unconditionally advertises Logging: {} (we

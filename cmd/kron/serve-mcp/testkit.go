@@ -52,6 +52,11 @@ func newTestSession(t *testing.T, root string) *testSession {
 	// so test clients can exercise resources/list + resources/read
 	// against the same handler the production server uses.
 	registerResources(server)
+	// RFC 2026-10-14-mcp-prompts.md: register the 3 prompt
+	// templates so test clients can exercise prompts/list +
+	// prompts/get against the same handlers the production server
+	// uses.
+	registerPrompts(server)
 
 	st, ct := mcp.NewInMemoryTransports()
 

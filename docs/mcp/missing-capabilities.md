@@ -226,7 +226,7 @@ handler 行为：
 
 ---
 
-## C-2 — Prompts（kron-review / kron-audit 模板）（低优先级）
+## C-2 — Prompts（kron-implement / kron-drift-check / kron-review 模板）✅ **完成 (2026-10-14)**
 
 ### 背景
 

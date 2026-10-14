@@ -58,11 +58,18 @@
 - 预置 prompt 比 AI 自由发挥更稳定
 - v1.3 GUI / IDE 客户端可以快速接入"一键审计"按钮
 
-**拍板建议**：
+**拍板建议**（2026-10-13）：
 - **优先级**：中（不是高，AI 工具一般直接调 Tools）
 - **实施时机**：v1.3 GUI 上线前
 - **工作量**：~1 天
 - **关联流程**：`docs/process/mcp-tool.md`（Prompts 算 protocol-level 资源，类似 tools/resources 走同一流程）
+
+**2026-10-14 落地**（zhangjun005 拍板改名 + RFC [`2026-10-14-mcp-prompts.md`](../rfc/2026-10-14-mcp-prompts.md)）：
+- 3 个真名 = `kron-implement` / `kron-drift-check` / `kron-review`（替代原 `kron-assumption-audit` / `kron-stale-report` / `kron-review`）
+- `server.AddPrompt` × 3（go-sdk v1.1 已支持, 无新 dep）
+- handler 内部走 `internal/` 直接（不调 `kron_*` tool, 避免 server 内部 RPC 自身）
+- `prompts: { listChanged: true }` SDK 自动推断 + capabilities_test 锁定
+- 单 PR，~320 行 handler + ~60 行 register + ~190 行 test
 
 ### 3.2 Roots
 

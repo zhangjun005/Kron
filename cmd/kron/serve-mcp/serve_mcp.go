@@ -151,6 +151,13 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 	// docs/mcp/missing-capabilities.md §C-1.
 	registerResources(server)
 
+	// RFC docs/rfc/2026-10-14-mcp-prompts.md: register 3 prompt
+	// templates (kron-implement / kron-drift-check / kron-review).
+	// The SDK auto-infers the prompts capability from AddPrompt
+	// calls (same path as AddTool/AddResourceTemplate); the
+	// capabilities_test.go suite asserts this stays true.
+	registerPrompts(server)
+
 	// Run blocks until the client closes stdin or the transport
 	// errors out. Returning a non-nil error here means
 	// unrecoverable transport failure (rare).
