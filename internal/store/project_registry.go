@@ -59,8 +59,18 @@ type ProjectEntry struct {
 // directory). The path is stable across invocations as long as the
 // binary is not moved; this is intentional — single-file portable
 // distribution is the design (no %APPDATA%, no ~/.config/kron/, no
-// env var override).
+// env var override for production).
+//
+// The KRON_PROJECTS_JSON_PATH env var IS honoured as a test escape
+// hatch — when set, it overrides the canonical path so unit tests
+// can run in an isolated temp directory without polluting the real
+// projects.json next to the kron binary. Production invocations MUST
+// NOT set this env var; the documented contract is "next to the
+// binary".
 func ProjectsJSONPath() (string, error) {
+	if override := os.Getenv("KRON_PROJECTS_JSON_PATH"); override != "" {
+		return override, nil
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("store: locate kron binary for projects.json: %w", err)

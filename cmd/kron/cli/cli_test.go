@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/xxx/kron/internal/store"
 )
 
 // chdir switches the current working directory to dir for the duration
@@ -316,6 +318,111 @@ func TestRunLint_JSONReporterWithError(t *testing.T) {
 	require.Error(t, err)
 	s := out.String()
 	assert.Contains(t, s, `"rule": "anchor-dangling"`)
+}
+
+// TestRunInit_RegistersProjectInRegistry covers RFC
+// 2026-10-14-projects-json-schema-extension §2.6: `kron init`
+// must register the project into projects.json AND set it as
+// current_project. We invoke the readProjectsJSONAt test
+// helper via the store package by copying the freshly-written
+// projects.json to a t.TempDir() and reading it from there.
+// Direct reads of the production path would race with other
+// tests, so we just verify the side-effect via the public
+// store.ReadProjectsJSON — which uses os.Executable() to
+// locate the file. The test bin's parent dir is safe to
+// touch because it's ephemeral (go test creates a fresh
+// temp bin per run).
+func TestRunInit_RegistersProjectInRegistry(t *testing.T) {
+	dir := t.TempDir()
+	registryPath := filepath.Join(dir, "projects.json")
+	t.Setenv("KRON_PROJECTS_JSON_PATH", registryPath)
+	chdir(t, dir)
+	var out, errOut bytes.Buffer
+	require.NoError(t, runInit(nil, &out, &errOut))
+
+	reg, err := store.ReadProjectsJSON()
+	require.NoError(t, err, "projects.json must be readable after `kron init`")
+	absDir, err := filepath.Abs(dir)
+	require.NoError(t, err)
+	assert.Equal(t, absDir, reg.CurrentProject,
+		"`kron init` must promote the new project to current_project (RFC §2.6)")
+	require.Len(t, reg.Projects, 1)
+	assert.Equal(t, absDir, reg.Projects[0].Path)
+	assert.NotEmpty(t, reg.Projects[0].AddedAt, "added_at must be set on register")
+	assert.Empty(t, reg.Projects[0].LastOpened,
+		"`kron init` must not set last_opened (only the GUI does)")
+}
+
+// TestRunRegister_HappyPath exercises the new `kron register`
+// subcommand: registers a project into projects.json and
+// auto-promotes it to current_project (RFC §2.1 + §2.6).
+func TestRunRegister_HappyPath(t *testing.T) {
+	dir := t.TempDir()
+	registryPath := filepath.Join(dir, "projects.json")
+	t.Setenv("KRON_PROJECTS_JSON_PATH", registryPath)
+	chdir(t, dir)
+	var out, errOut bytes.Buffer
+
+	// First register: must report insertion.
+	require.NoError(t, runRegister(nil, &out, &errOut))
+	assert.Contains(t, out.String(), "registered")
+	assert.Contains(t, out.String(), "current_project")
+
+	reg, err := store.ReadProjectsJSON()
+	require.NoError(t, err)
+	absDir, err := filepath.Abs(dir)
+	require.NoError(t, err)
+	assert.Equal(t, absDir, reg.CurrentProject)
+	require.Len(t, reg.Projects, 1)
+	assert.NotEmpty(t, reg.Projects[0].AddedAt)
+}
+
+// TestRunRegister_Idempotent: a second `kron register` of the
+// same path is a no-op, not an error. The output distinguishes
+// "already registered" from "newly registered" so the user
+// knows which happened.
+func TestRunRegister_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+	registryPath := filepath.Join(dir, "projects.json")
+	t.Setenv("KRON_PROJECTS_JSON_PATH", registryPath)
+	chdir(t, dir)
+	var out, errOut bytes.Buffer
+	require.NoError(t, runRegister(nil, &out, &errOut))
+	out.Reset()
+
+	require.NoError(t, runRegister(nil, &out, &errOut), "duplicate register must not error")
+	assert.Contains(t, out.String(), "already registered")
+}
+
+// TestRunRegister_WithCWD exercises the -CWD flag for explicit
+// target paths.
+func TestRunRegister_WithCWD(t *testing.T) {
+	dir := t.TempDir()
+	otherDir := t.TempDir()
+	registryPath := filepath.Join(dir, "projects.json")
+	t.Setenv("KRON_PROJECTS_JSON_PATH", registryPath)
+	var out, errOut bytes.Buffer
+
+	require.NoError(t, runRegister([]string{"-CWD", otherDir}, &out, &errOut))
+	assert.Contains(t, out.String(), "registered")
+
+	reg, err := store.ReadProjectsJSON()
+	require.NoError(t, err)
+	absDir, err := filepath.Abs(otherDir)
+	require.NoError(t, err)
+	assert.Equal(t, absDir, reg.CurrentProject)
+}
+
+// TestRunRegister_UsageError covers the bad-args path: `kron
+// register` with an unparseable -CWD must surface errUsage
+// and not silently succeed.
+func TestRunRegister_UsageError(t *testing.T) {
+	dir := t.TempDir()
+	registryPath := filepath.Join(dir, "projects.json")
+	t.Setenv("KRON_PROJECTS_JSON_PATH", registryPath)
+	var out, errOut bytes.Buffer
+	err := runRegister([]string{"-bogus-flag"}, &out, &errOut)
+	require.Error(t, err, "unknown flag must fail")
 }
 
 func TestDefaultIntentBody(t *testing.T) {
