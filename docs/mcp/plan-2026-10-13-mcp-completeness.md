@@ -87,7 +87,7 @@
 
 ---
 
-## 4 待加 tool — `kron_assume_get`
+## 4 待加 tool — `kron_assume_get` ✅ **完成 (2026-10-14)**
 
 **问题**：当前 4 个 `kron_assume_*` tool（create / update / delete / list）+ 1 个 `kron_assume_check`（扫过期），**没有** `kron_assume_get` 按 ID 读单个 assumption。
 

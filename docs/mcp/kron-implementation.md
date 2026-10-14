@@ -23,6 +23,7 @@
 | `handlers_delete.go` | 75 | `kron_delete` |
 | `handlers_restore.go` | 50 | `kron_restore` |
 | `handlers_assume_check.go` | 135 | `kron_assume_check` |
+| `handlers_assumption.go` | 200 | `kron_assume_create` / `kron_assume_list` / `kron_assume_update` / `kron_assume_delete` / **`kron_assume_get`** (2026-10-14) |
 | `handlers_impact.go` | 155 | `kron_impact` |
 | `handlers_density.go` | 160 | `kron_intent_density` + `scanOrphanFiles` / `countLines` |
 | `handlers_tree.go` | 85 | `kron_tree` + `treeNodeFromView` 投影 |
@@ -327,6 +328,10 @@ return nil, DeleteOutput{OK: true, TrashedPath: ..., Dependents: dependents}, ni
 
 ① **move 前算** dependents——避免 move 后 LoadAll 漏数据(并发安全)
 ② `dependents` **不阻塞** delete——v1 软警告(RFC `2026-10-03-frontmatter-references` §5.3)
+
+#### 4.3.7 `HandleAssumptionGet`(`kron_assume_get`)——[`handlers_assumption.go`](handlers_assumption.go) (2026-10-14 追加)
+
+走 `internal/assumption.Reader.Get(ctx, id)`(reader.go:65-100), 投影到 `AssumptionDetail`(含 `body` + `source_path`)。新 struct 而非扩展 `AssumptionSummary`——保持 list 响应最小。错误路径:`ErrAssumptionNotFound` / `ErrAssumptionFileIdMismatch`(均 → IsError=true);**不**静默回退 id-mismatched 文件(与 `List` 行为不同)。
 
 ---
 

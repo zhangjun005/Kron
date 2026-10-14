@@ -288,6 +288,67 @@ func HandleAssumptionDelete(ctx context.Context, _ *mcp.CallToolRequest, in Assu
 }
 
 // =====================================================================
+// kron_assume_get
+// =====================================================================
+
+// HandleAssumptionGet returns the mcp.ToolHandlerFor binding for
+// kron_assume_get.
+//
+// Wire contract: see docs/mcp/plan-2026-10-13-mcp-completeness.md §4
+// (kron_assume_get).
+//
+//	in:  { id }
+//	out: { assumption: AssumptionDetail }
+//
+// Returns ErrAssumptionNotFound (→ IsError=true) if the file does not
+// exist. Returns ErrAssumptionFileIdMismatch (→ IsError=true) if the
+// file exists but its frontmatter id does not match the file name —
+// the wire consumer has to decide whether to surface the file
+// (re-read it directly if the frontmatter id matters) or treat the
+// mismatch as a hard failure. We do NOT silently return the
+// id-mismatched file because the point of kron_assume_get is "I
+// asked for this id, give me exactly this id" (mirror of List, which
+// enumerates mismatched files for lint to flag them).
+func HandleAssumptionGet(ctx context.Context, _ *mcp.CallToolRequest, in AssumptionGetInput) (
+	*mcp.CallToolResult, AssumptionGetOutput, error,
+) {
+	if err := assertCallerMCP(ctx); err != nil {
+		return nil, AssumptionGetOutput{}, err
+	}
+	if err := parser.ValidateSlug(in.ID); err != nil {
+		return nil, AssumptionGetOutput{}, fmt.Errorf("kron_assume_get: %w", err)
+	}
+
+	root := repoRootFrom(ctx)
+	r, err := assumption.NewReader(root)
+	if err != nil {
+		return nil, AssumptionGetOutput{}, fmt.Errorf("kron_assume_get: open reader: %w", err)
+	}
+	af, err := r.Get(ctx, in.ID)
+	if err != nil {
+		return nil, AssumptionGetOutput{}, fmt.Errorf("kron_assume_get: get: %w", err)
+	}
+
+	fm := af.Frontmatter
+	return nil, AssumptionGetOutput{
+		Assumption: AssumptionDetail{
+			ID:              fm.ID,
+			Text:            fm.Text,
+			DefaultSeverity: string(fm.DefaultSeverity),
+			Status:          string(fm.Status),
+			CreatedBy:       fm.CreatedBy,
+			UpdatedAt:       fm.UpdatedAt,
+			ExpiresAt:       fm.ExpiresAt,
+			VerifiedAt:      fm.VerifiedAt,
+			VerifiedBy:      fm.VerifiedBy,
+			Reviewers:       fm.Reviewers,
+			Body:            af.Body,
+			SourcePath:      af.SourcePath,
+		},
+	}, nil
+}
+
+// =====================================================================
 // shared helpers
 // =====================================================================
 

@@ -287,7 +287,42 @@ type AssumptionListOutput struct {
 	Assumptions []AssumptionSummary `json:"assumptions" jsonschema:"assumption files matching the filter (sorted by id)"`
 }
 
+// --- kron_assume_get -------------------------------------------------
+
+// AssumptionGetInput is the wire shape for kron_assume_get.
+type AssumptionGetInput struct {
+	ID string `json:"id" jsonschema:"kebab-case slug (must pass parser.ValidateSlug)"`
+}
+
+// AssumptionGetOutput wraps the full detail (frontmatter + body + path).
+type AssumptionGetOutput struct {
+	Assumption AssumptionDetail `json:"assumption" jsonschema:"full assumption (id, text, default_severity, status, body, source_path)"`
+}
+
+// AssumptionDetail is the full wire projection of model.AssumptionFile,
+// including the raw markdown body and on-disk path. Used by
+// kron_assume_get. Plan-2026-10-13-mcp-completeness.md §4 (b): we
+// expose a new Detail type (not extend AssumptionSummary) so the
+// list response stays minimal.
+type AssumptionDetail struct {
+	ID              string   `json:"id"                          jsonschema:"kebab-case slug"`
+	Text            string   `json:"text"                        jsonschema:"human-readable description"`
+	DefaultSeverity string   `json:"default_severity"            jsonschema:"hard or soft"`
+	Status          string   `json:"status"                      jsonschema:"draft / active / superseded"`
+	CreatedBy       string   `json:"created_by"                  jsonschema:"@handle or agent:<model>"`
+	UpdatedAt       string   `json:"updated_at"                  jsonschema:"RFC3339 timestamp"`
+	ExpiresAt       string   `json:"expires_at,omitempty"        jsonschema:"optional RFC3339 expiry"`
+	VerifiedAt      string   `json:"verified_at,omitempty"       jsonschema:"optional last verification time (RFC3339)"`
+	VerifiedBy      string   `json:"verified_by,omitempty"       jsonschema:"optional last verifier @handle"`
+	Reviewers       []string `json:"reviewers,omitempty"         jsonschema:"reviewer handles (sorted)"`
+	Body            string   `json:"body,omitempty"              jsonschema:"raw markdown body below the frontmatter (empty if none)"`
+	SourcePath      string   `json:"source_path"                 jsonschema:"absolute on-disk path of .kron/assumptions/<id>.md"`
+}
+
 // AssumptionSummary is the wire projection of model.AssumptionFile.
+// Used in kron_assume_list / kron_assume_check / kron_delete
+// (referencing_intents) responses. Stays free of body + source_path
+// to keep the list response small; for full detail use kron_assume_get.
 type AssumptionSummary struct {
 	ID              string   `json:"id"               jsonschema:"assumption id (file name without .md)"`
 	Text            string   `json:"text"             jsonschema:"human-readable description"`
@@ -466,6 +501,7 @@ func registerTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_check", Description: "Inspect every intent's assumptions[] and surface expired / unverified hard assumptions."}, HandleAssumeCheck)
 	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_create", Description: "Create a new assumption registry file at .kron/assumptions/<id>.md."}, HandleAssumptionCreate)
 	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_delete", Description: "Soft-delete an assumption (move to .kron/.trash/assumptions/)."}, HandleAssumptionDelete)
+	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_get", Description: "Load a single assumption by id (full frontmatter + body + source path)."}, HandleAssumptionGet)
 	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_list", Description: "List every assumption in the registry, optionally filtered by status."}, HandleAssumptionList)
 	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_update", Description: "Patch an existing assumption registry file (PATCH semantics)."}, HandleAssumptionUpdate)
 	mcp.AddTool(server, &mcp.Tool{Name: "kron_delete", Description: "Soft-delete an intent (move to .kron/.trash/)."}, HandleDelete)

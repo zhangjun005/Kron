@@ -1006,13 +1006,14 @@ func TestServer_AllToolsRegistered(t *testing.T) {
 		"kron_assume_create": {"id": "smoke-assumption", "text": "smoke test text", "default_severity": "soft"},
 		"kron_assume_update": {"id": "smoke-assumption-ux"},
 		"kron_assume_delete": {"id": "smoke-assumption-delete"},
+		"kron_assume_get":    {"id": "smoke-assumption-get"},
 		"kron_assume_list":   {},
 	}
 	for _, name := range []string{
 		"kron_lint", "kron_list", "kron_get",
 		"kron_init", "kron_add", "kron_update", "kron_delete", "kron_restore",
 		"kron_assume_check", "kron_assume_create", "kron_assume_update",
-		"kron_assume_delete", "kron_assume_list",
+		"kron_assume_delete", "kron_assume_get", "kron_assume_list",
 		"kron_impact", "kron_intent_density", "kron_stale",
 		"kron_tree",
 	} {
