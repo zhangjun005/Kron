@@ -3,6 +3,7 @@
 > Branch: `optimize/mcp`
 > Tester: AI agent via Git Bash + Go `kron serve-mcp` stdio subprocess
 > Goal: 真正用 (real shell + real protocol + real disk), **不**在 Go 里写 test 包
+> Rev: r1 2026-10-15 12:25 首次; r2 2026-10-15 12:50 加 §4.8 fixture 根因 + §4.9 fixture 必须含 src/ (zhangjun005 指出 code anchor 是 Kron 核心, 我没放)
 
 ## 1 Setup
 
@@ -127,6 +128,35 @@ charge `depends_on=[auth/jwt]` → 我以为 impact(auth/jwt) 看到 dependents=
 ### 4.7 `kron_intent_density` 只验了 dict shape, 没验 metric
 
 测试只 `assert(res != nil)`, 实际值 (`max_depth` / `intent_count` / `leaves_count` / `orphans`) 全没验. 这是**真正的覆盖缺口** — 见 §5 RFC.
+
+### 4.8 fixture 是**空仓库** — 全局根因
+
+最严重的真用问题, 但**测试自身察觉不到** (40 调全 PASS):
+
+`project-full/` 是个**只有 `.kron/` 零源文件**的仓库. 也就是说, 我**测了一个没有 src/ 的 Kron 项目** — 而 Kron 的核心就是"代码 ↔ intent 双向链接" (架构 §0, AGENTS.md §1).
+
+具体后果 (按工具):
+- `kron_impact auth/jwt` 返 `incoming_anchors: []` (我**期望**有, 但**没**造 src/ file)
+- `kron_impact` 的 `incoming_anchors_code` / `incoming_anchors_markdown` 拆字段 (C-6) = 永远空
+- `kron_lint` 8 个 rule 里的 5 个 (anchor-dangling × 2 + stale-superseded-candidate + expired-hard-assumption + 任何 A-class) **0 触发**
+- `kron_get` 的 `Relations` 全字段 (Dependents / SymbolInferred / DependsOnDependents) — SymbolInferred 走 `frontmatter.symbol` ↔ code 互查, 缺 src/ = 0 验
+- `kron_assume_check file_path=<src>` (我**没**测) — 缺 src/ = 0 验
+- `kron_intent_density` 的 `orphans` metric — 是 "intent 没有任何 anchor 指向它" = 缺 src/ = 永远 = 0
+- 真实 GUI/IDE 用户**用** Kron 时, src/ 一定存在; 测一个**无** src/ 的 Kron = 测个**半个产品**
+
+**这才是真用的根因**, G1, G2, G3, G11, G13 全部被它拖累. **不是** 14 个独立缺口, 是 1 个 fixture 错了.
+
+### 4.9 fixture 必须含 src/ — RFC 拍板后才能改
+
+`project-full/` 跟 `project-smoke/` / `project-real/` / `project-diag/` 一样, 都是**空仓库** fixture. 修法是 RFC 拍板后:
+
+1. 新建 `project-full-with-src/` 模板, 含 `src/auth/jwt.go` / `src/auth/session.go` / `src/payments/charge.go` / `src/payments/refund.go` (4 个 leaf 各对应一个 src/ file)
+2. 每个 src/ file 顶部 `// @kron:intent <slug>` 注释
+3. **额外造** `src/orphan.go` (anchor 但 intent 不存在) 验 A-class rule
+4. **额外造** `src/dangling.go` (`// @kron:intent does/not/exist` 同上)
+5. Markdown anchor 同样: `docs/adr/0001-jwt.md` 含 `// @kron:intent auth/jwt` (md-anchors RFC §2)
+
+主仓 `internal/parser/anchors_test.go` 已经有完整 unit 测 (4 注释形式 / .kron/ skip / binary skip / 排序 / FilePath 规则 / parseAnchorLine 表格). **白盒 100% 覆盖**, **黑盒 0 覆盖** — 这才是 G11 的真状态, 不只是"造 1 个 dangling".
 
 ## 5 测试覆盖缺口 (要 RFC 拍板后才能加)
 
