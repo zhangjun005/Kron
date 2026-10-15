@@ -1,13 +1,13 @@
 // Packageessemcp exposes MCP tools via stdio.
 //
 // This file implements OPT-1 from docs/implementation/bench-2026-10-09.md §4:
-// a per-call LoadAll cache with singleflight deduplication and mtime
-// invalidation.
+// a per-call LoadAll cache with singleflight deduplication and intent-file
+// metadata snapshot invalidation.
 //
 // Cache invariants:
 //   - Keyed by absolute root path (stable within a stdio process lifetime).
-//   - Valid iff .kron/intents/ directory mtime has not changed since
-//     the last cache entry was populated.
+//   - Valid iff the path, size, and mtime of every .kron/intents/**/*.md
+//     file match the snapshot captured when the entry was populated.
 //   - Invalidated explicitly by write handlers (kron_add, kron_update,
 //     kron_delete, kron_restore) after a successful mutation.
 //   - Not shared across stdio process invocations (each spawn is fresh).
@@ -20,8 +20,12 @@ package servemcp
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/xxx/kron/internal/model"
@@ -32,9 +36,24 @@ import (
 // The nil entry means "cache was populated at some point but has
 // since been invalidated".
 type intentCache struct {
-	intents []*model.Intent
-	mtime   int64 // os.FileInfo.Mtime() Unix nanos — zero = unpopulated
+	intents  []*model.Intent
+	snapshot intentSnapshot
 }
+
+// intentFileStamp is the inexpensive filesystem metadata needed to decide
+// whether a parsed intent graph is still current. We intentionally do not
+// hash file contents: this check runs before every cached read, so it must
+// avoid reopening and parsing every intent file.
+type intentFileStamp struct {
+	size    int64
+	modTime int64
+}
+
+// intentSnapshot is keyed by slash-normalised paths relative to
+// .kron/intents/. Including the path as a key detects additions, removals,
+// and renames; the stamp detects edits to an existing file. It never scans
+// project source files.
+type intentSnapshot map[string]intentFileStamp
 
 // cache is the process-global cache keyed by absolute repo root.
 // The singleflight group ensures that concurrent MCP calls sharing
@@ -46,7 +65,7 @@ var (
 )
 
 // LoadAllCached returns []*model.Intent for the given root, using a
-// singleflight-deduplicated, mtime-invalidated in-process cache.
+// singleflight-deduplicated, metadata-snapshot-invalidated in-process cache.
 //
 // This is the drop-in replacement for the pattern:
 //
@@ -66,12 +85,11 @@ func LoadAllCached(ctx context.Context, root string) ([]*model.Intent, error) {
 	entry := cache[abs]
 	mu.RUnlock()
 
-	// Fast path: entry is present and mtime is current.
-	if entry != nil {
-		currMtime, merr := intentsDirMtime(abs)
-		if merr == nil && currMtime == entry.mtime {
-			return entry.intents, nil
-		}
+	// Fast path: entry is present and every intent file's metadata is
+	// unchanged. This is deliberately scoped to .kron/intents/: normal
+	// list/tree/stale requests never scan project source files.
+	if entry != nil && cacheEntryCurrent(abs, entry) {
+		return entry.intents, nil
 	}
 
 	// Slow path: singleflight ensures only one goroutine does the load.
@@ -94,35 +112,42 @@ func LoadAllCached(ctx context.Context, root string) ([]*model.Intent, error) {
 		mu.RLock()
 		entry2 := cache[abs]
 		mu.RUnlock()
-		if entry2 != nil {
-			currMtime, merr := intentsDirMtime(abs)
-			if merr == nil && currMtime == entry2.mtime {
-				return cacheResult{intents: entry2.intents}
+		if entry2 != nil && cacheEntryCurrent(abs, entry2) {
+			return cacheResult{intents: entry2.intents}
+		}
+
+		// Capture a snapshot on both sides of LoadAll. If another process
+		// writes while we are parsing, retry once; if it keeps changing, do
+		// not cache that race-prone read. The next request will retry from
+		// disk instead of inheriting a stale cache entry.
+		var latest []*model.Intent
+		for attempt := 0; attempt < 2; attempt++ {
+			before, serr := snapshotIntents(abs)
+			if serr != nil {
+				return cacheResult{err: serr}
 			}
+			r, err := store.NewReader(abs)
+			if err != nil {
+				return cacheResult{err: err}
+			}
+			intents, lerr := r.LoadAll(ctx)
+			if lerr != nil {
+				return cacheResult{err: lerr}
+			}
+			latest = intents
+			after, serr := snapshotIntents(abs)
+			if serr != nil {
+				return cacheResult{err: serr}
+			}
+			if !snapshotsEqual(before, after) {
+				continue
+			}
+			mu.Lock()
+			cache[abs] = &intentCache{intents: intents, snapshot: after}
+			mu.Unlock()
+			return cacheResult{intents: intents}
 		}
-
-		// Actually load.
-		r, err := store.NewReader(abs)
-		if err != nil {
-			return cacheResult{err: err}
-		}
-		intents, lerr := r.LoadAll(ctx)
-		if lerr != nil {
-			return cacheResult{err: lerr}
-		}
-
-		// Populate cache.
-		currMtime, merr := intentsDirMtime(abs)
-		if merr != nil {
-			// mtime unavailable (Windows permissions, etc.) — cache
-			// without mtime guard; next call will re-load.
-			currMtime = 0
-		}
-		mu.Lock()
-		cache[abs] = &intentCache{intents: intents, mtime: currMtime}
-		mu.Unlock()
-
-		return cacheResult{intents: intents}
+		return cacheResult{intents: latest}
 	})
 
 	return res.(cacheResult).intents, res.(cacheResult).err
@@ -143,19 +168,65 @@ func InvalidateCache(root string) {
 	mu.Unlock()
 }
 
-// intentsDirMtime returns the mtime of the .kron/intents/ directory
-// for root. Returns 0 and nil error if the directory does not exist.
-// Used as the cache invalidation sentinel.
-func intentsDirMtime(root string) (int64, error) {
+// cacheEntryCurrent reports whether the cached graph still matches the intent
+// files visible on disk. Each MCP/LSP process owns its own cache, so this
+// disk comparison is how one process observes edits made by another process
+// or by a user editing Markdown directly.
+func cacheEntryCurrent(root string, entry *intentCache) bool {
+	current, err := snapshotIntents(root)
+	return err == nil && snapshotsEqual(entry.snapshot, current)
+}
+
+// snapshotIntents walks only .kron/intents and captures metadata for markdown
+// files. A missing intent directory has the same snapshot as an empty one,
+// mirroring store.Reader.LoadAll's behaviour.
+func snapshotIntents(root string) (intentSnapshot, error) {
 	dir := filepath.Join(root, model.KronDir, model.IntentDir)
-	info, err := os.Stat(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, nil
+	if _, err := os.Stat(dir); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return intentSnapshot{}, nil
 		}
-		return 0, err
+		return nil, fmt.Errorf("kron cache: stat intents directory: %w", err)
 	}
-	return info.ModTime().UnixNano(), nil
+
+	snapshot := make(intentSnapshot)
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), model.IntentExtension) {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		snapshot[filepath.ToSlash(rel)] = intentFileStamp{
+			size:    info.Size(),
+			modTime: info.ModTime().UnixNano(),
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("kron cache: scan intents directory: %w", err)
+	}
+	return snapshot, nil
+}
+
+func snapshotsEqual(a, b intentSnapshot) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for path, left := range a {
+		if right, ok := b[path]; !ok || left != right {
+			return false
+		}
+	}
+	return true
 }
 
 // singleflight is a cut-down re-implementation of golang.org/x/sync/singleflight.

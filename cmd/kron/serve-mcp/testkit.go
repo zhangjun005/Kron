@@ -59,6 +59,7 @@ func newTestSession(t *testing.T, root string) *testSession {
 	// Inject the repo root on the ctx so handlers read .kron/intents/
 	// from the test's temp dir, not from os.Getwd().
 	server.AddReceivingMiddleware(callerInjectMiddleware(root))
+	server.AddReceivingMiddleware(coerceMiddleware())
 
 	registerTools(server)
 	// C-1: register the kron://intents/{slug} resource template

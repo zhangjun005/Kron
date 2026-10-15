@@ -975,6 +975,47 @@ func TestGet_NoRelationsByDefault(t *testing.T) {
 	assert.Nil(t, r.Intent.Relations, "default kron_get must not populate relations")
 }
 
+// TestCursorBridgeShapesAreCoerced verifies the live SDK dispatch path accepts
+// the three argument shapes emitted by Cursor's MCP bridge.
+func TestCursorBridgeShapesAreCoerced(t *testing.T) {
+	dir := initRepo(t)
+	addIntent(t, dir, "auth/jwt", "AuthService", "# JWT\n")
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+
+	// why: JSON-RPC arguments are intentionally untyped at the protocol boundary
+	// so this test can reproduce Cursor's malformed JSON shapes.
+	getResult, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "kron_get",
+		Arguments: map[string]any{
+			"slug":              "auth/jwt",
+			"include_relations": "true",
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, getResult.IsError)
+	var get GetOutput
+	require.NoError(t, structuredInto(getResult, &get))
+	require.NotNil(t, get.Intent.Relations, "string true must be coerced to boolean true")
+
+	updateResult, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "kron_update",
+		Arguments: map[string]any{
+			"slug":      "auth/jwt",
+			"reviewers": map[string]any{"item": "@cursor"},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, updateResult.IsError)
+
+	staleResult, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_stale",
+		Arguments: map[string]any{"days_threshold": "0"},
+	})
+	require.NoError(t, err)
+	require.False(t, staleResult.IsError)
+}
+
 // --- kron_tree -----------------------------------------------------
 
 // TestTree_Empty verifies an empty repo returns a synthetic root

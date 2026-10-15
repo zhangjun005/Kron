@@ -261,7 +261,7 @@ server := mcp.NewServer(&mcp.Implementation{...}, nil)
 
 新增 `cmd/kron/serve-mcp/cache.go`：
 
-- `LoadAllCached(ctx, root)` —— singleflight + mtime invalidation
+- `LoadAllCached(ctx, root)` —— singleflight + intent 文件 metadata snapshot invalidation
 - 9 个 handler 全部改用 `LoadAllCached` 替换手写 `store.NewReader → LoadAll`
 - 写操作后（kron_add / kron_update / kron_delete / kron_restore）显式 `InvalidateCache`
 - 不下沉到 `internal/store`（铁律 #5）
