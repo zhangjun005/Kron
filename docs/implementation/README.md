@@ -50,12 +50,12 @@
 任何新 `internal/` API、新 MCP 工具、新 lint 规则落地时，**先**改 `internal/*` 代码 + 测，
 **然后**按需重写 `docs/implementation/<topic>.md`（不走本 README——本 README 只起"已归档"提示作用）。
 
-## 客户端层与 LSP 协议访问层（待写）
+## 客户端层与 LSP 协议访问层
 
 | 文档 | 状态 | 触发条件 |
 |---|---|---|
-| `lsp.md` (LSP 协议实现细节) | 🔜 待写 | `cmd/kron/serve-lsp/` 实施时（按 `docs/process/new-access-layer.md` §3 交付物 2 + 5）|
-| `vscode-extension.md` (VSCode 扩展) | 📦 内部 (`frontend/vscode/`) | 2026-10-09 修订：客户端层进主仓 `frontend/` |
-| `gui.md` / `wails.md` (Wails GUI) | 📦 内部 (`frontend/wails/`) | 2026-10-09 修订：`frontend/` 不再是纯占位，实施代码在 `frontend/wails/` |
+| [`lsp.md`](./lsp.md) | ✅ 活跃 | LSP 职责、位置语义与实施边界；实际协议实现仍须走 `new-access-layer.md` |
+| [`vscode-extension.md`](./vscode-extension.md) | ✅ 活跃 | `.vsix` 职责、MCP/LSP 双进程与人类编辑闭环 |
+| [`gui-client.md`](./gui-client.md) | ✅ 活跃 | Wails 整体预览职责与 MCP 只读边界 |
 | `mcp.md` (MCP 协议实现细节) | 🔜 待重写 | 与 `lsp.md` 同批——按 `docs/process/new-internal-api.md` 流程触发 |
 | `status-2026-10-09.md` (现状快照) | ✅ 活跃 | internal + CLI/MCP/LSP 适配情况 + 协议层硬约束；user 2026-10-09 拍板 |
