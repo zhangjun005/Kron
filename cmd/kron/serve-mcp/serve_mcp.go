@@ -142,6 +142,17 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 	// for ping / initialize) it falls back to bare "mcp".
 	server.AddReceivingMiddleware(callerInjectMiddleware(root))
 
+	// Coerce the well-known Cursor-bridge type-encoding bugs
+	// (B1 boolean, B2 array, B3 integer) on tools/call arguments
+	// before the SDK unmarshals them into the typed handler Input
+	// struct. RFC docs/rfc/2026-10-15-mcp-coerce-middleware.md.
+	// The middleware is conservative (only flips values that
+	// match a small whitelist of "client obviously meant the
+	// schema type" patterns) and a strict no-op for already-correct
+	// inputs, so raw stdio / Go SDK / Claude Code clients see no
+	// difference. The schema itself is unchanged.
+	server.AddReceivingMiddleware(coerceMiddleware())
+
 	// Register the 12 kron_* tools. Done after middleware so
 	// handlers see the injected caller on their ctx.
 	registerTools(server)
