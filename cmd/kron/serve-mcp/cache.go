@@ -179,6 +179,10 @@ func (g *singleflight) Do(key string, fn func() any) (v any, err error, shared b
 		g.m = make(map[string]*singleflightCall)
 	}
 	if c, ok := g.m[key]; ok {
+		// Re-use the in-flight call: the original goroutine's
+		// fn() result will land in c.val after wg.Done(). We
+		// return immediately so the caller can either share
+		// the cached value or do its own work.
 		c.wg.Wait()
 		g.mu.Unlock()
 		return c.val, nil, true
@@ -188,13 +192,23 @@ func (g *singleflight) Do(key string, fn func() any) (v any, err error, shared b
 	g.m[key] = c
 	g.mu.Unlock()
 
-	result := fn()
-	c.val = result
+	// fn() is expected to return a struct that carries the
+	// (result, error) pair — singleflight's own fn shape only
+	// returns any, so the caller (see cache.go LoadAllCached)
+	// uses a cacheResult wrapper. We never synthesise an
+	// err here; the wrapper's err field is the source of
+	// truth.
+	c.val = fn()
 	c.wg.Done()
 
 	g.mu.Lock()
 	delete(g.m, key)
 	g.mu.Unlock()
 
-	return c.val, nil, c.val != nil
+	// shared = false: this goroutine is the one that ran fn().
+	// The fn() caller's val is non-nil by construction (the
+	// wrapper is a value type, never a nil pointer), so we
+	// don't use c.val != nil as a "did it run" sentinel — we
+	// rely on the explicit shared bool instead.
+	return c.val, nil, false
 }

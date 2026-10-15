@@ -10,7 +10,6 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/xxx/kron/internal/assumption"
 	"github.com/xxx/kron/internal/lint"
 	"github.com/xxx/kron/internal/model"
 	"github.com/xxx/kron/internal/relations"
@@ -151,19 +150,13 @@ func kronDriftCheckPrompt(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.
 	if err != nil {
 		return nil, fmt.Errorf("kron-drift-check: load intents: %w", err)
 	}
-	ar, arErr := assumption.NewReader(root)
-	if arErr != nil {
-		// No registry is fine — the stale signal just degrades to
-		// "active-old" without expired-assumption drill-down.
-		ar = nil
-	}
+	// ComputeStaleReport consumes the already-loaded intents only
+	// (the structured view does not need the assumption registry
+	// reader; the full lint.RunWith path is the one that
+	// consumes an AssumptionReader). No ar handle needed here.
 	report := lint.ComputeStaleReport(all, lint.RunOptions{
 		StaleDaysThreshold: threshold,
 	}.WithNow(time.Now().UTC()))
-	_ = ar // ar isn't threaded through ComputeStaleReport (the
-	// structured view takes the already-loaded intents only; the
-	// full lint.RunWith path is the one that consumes AssumptionReader,
-	// but we want the structured view here, not the diag list).
 
 	// Translate lint's expired-assumption findings into a sorted
 	// list of "what's drifted" for the prompt.
@@ -231,16 +224,13 @@ func kronReviewPrompt(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetP
 	if err != nil {
 		return nil, fmt.Errorf("kron-review: load intents: %w", err)
 	}
-	ar, arErr := assumption.NewReader(root)
-	if arErr != nil {
-		ar = nil
-	}
+	// lint.RunWith internally re-opens the assumption registry on
+	// its own (see internal/lint/lint.go), so the prompt handler
+	// does not need an AssumptionReader handle here.
 	diags, lerr := lint.RunWith(ctx, root, lint.RunOptions{})
 	if lerr != nil {
 		return nil, fmt.Errorf("kron-review: lint: %w", lerr)
 	}
-	_ = ar // ar isn't needed here — RunWith internally re-opens the
-	// assumption registry on its own (see internal/lint/lint.go).
 
 	// Group findings by rule code.
 	byRule := make(map[string][]string)

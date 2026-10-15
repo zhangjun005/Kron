@@ -442,7 +442,7 @@ func repoRootFrom(ctx context.Context) string {
 // the Session interface itself does not expose a typed ClientInfo
 // accessor at this version; we fall back to "" and rely on the
 // future SDK to add the typed accessor. See
-// docs/process/rfc-2026-10-04-mcp-sdk-adoption.md §C for the
+// docs/rfc/2026-10-04-mcp-sdk-adoption.md §C for the
 // follow-up that wires ClientInfo-based attribution once the SDK
 // stabilises.
 func clientNameFromReq(req mcp.Request) string {

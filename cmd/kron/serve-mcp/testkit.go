@@ -2,6 +2,7 @@ package servemcp
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -39,8 +40,20 @@ type testSession struct {
 //
 // The returned cleanup closes the client session and the server.
 // The test should defer cleanup() right after the call.
+//
+// KRON_PROJECTS_JSON_PATH isolation: kron_init's RFC 2026-10-14-§2.6
+// side effect (register project + set current_project) writes to
+// the multi-project registry at <kron-bin>/projects.json. Without
+// isolation every test would race on the same on-disk file. We
+// honour the project's documented test escape hatch (see
+// internal/store/project_registry.go: ProjectsJSONPath reads
+// KRON_PROJECTS_JSON_PATH first) and set it to a per-test temp path.
+// t.Setenv auto-cleans on test end.
 func newTestSession(t *testing.T, root string) *testSession {
 	t.Helper()
+	registryPath := filepath.Join(t.TempDir(), "projects.json")
+	t.Setenv("KRON_PROJECTS_JSON_PATH", registryPath)
+
 	server := mcp.NewServer(&mcp.Implementation{Name: "kron-test", Version: "v1.2.0"}, nil)
 
 	// Inject the repo root on the ctx so handlers read .kron/intents/

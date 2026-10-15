@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -170,10 +171,14 @@ func maybeOpenAssumptionWriter(root string) (*assumption.Writer, error) {
 // and kron_update when they receive non-empty assumptions[] in the
 // input.
 //
-// rationale validation (≥10 chars) is deferred to the lint pass
-// (RuleAssumptionRationaleRequired), not here, so that callers can
-// draft partial assumptions and fix them later without round-trip
-// errors blocking the write.
+// rationale validation (non-empty; mirrors lint
+// RuleAssumptionRationaleRequired) happens at write time so the
+// caller gets an immediate "kron_add: assumption %q: rationale is
+// required" rather than writing a partial entry only to be
+// rejected by `kron_lint` on the next call. The lint rule stays
+// in place for writers that bypass this helper (manual edits, the
+// CLI `kron update` path) and for the historical "write first,
+// fix later" workflow on partial drafts.
 //
 // Returns the resolved slice and any errors encountered during
 // auto-creation. If errors exist, the caller surfaces the first
@@ -215,6 +220,19 @@ func resolveAssumptionsForIntent(ctx context.Context, root string, w *assumption
 		}
 		if r.ID == "" {
 			errs = append(errs, fmt.Errorf("kron_add: assumption id is required"))
+			continue
+		}
+		// rationale-required: mirror the lint rule at write time
+		// (see lint.RuleAssumptionRationaleRequired). The rule is
+		// documented as "non-empty"; we reject whitespace-only as
+		// well because the parse layer would happily round-trip
+		// "   " as a 3-character rationale and the lint rule
+		// would not catch the failure (its check is `== ""`, not
+		// `len < 10` as the surrounding docs suggest). This
+		// pre-write check is the load-bearing one; the lint
+		// rule is a backstop for edits that bypass the helper.
+		if strings.TrimSpace(r.Rationale) == "" {
+			errs = append(errs, fmt.Errorf("kron_add: assumption %q: rationale is required", r.ID))
 			continue
 		}
 

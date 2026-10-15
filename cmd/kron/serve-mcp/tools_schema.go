@@ -37,6 +37,19 @@ type InitOutput struct {
 	// JSON-RPC error and may not know which path was rejected).
 	// See handlers_init.go for the rationale.
 	RepoRoot string `json:"repo_root" jsonschema:"absolute on-disk path of the project root the server is operating on (for AI-side diagnostics)"`
+	// RegisteredCurrentProject is the projects.json::current_project
+	// after the init+register side effect (RFC
+	// 2026-10-14-projects-json-schema-extension.md §2.6). Empty
+	// when the side effect was skipped (e.g. a previous init
+	// already promoted another project and the user did not
+	// intend to switch). Surfaced so an AI caller that just
+	// bootstrapped a project via `kron_init` knows whether
+	// subsequent MCP calls will resolve MCPRoot to this project
+	// (current_project set) or to the previously-active one
+	// (unchanged). Equal to RepoRoot on the common case; equal
+	// to "" when the registry write was skipped due to a
+	// non-fatal warning (see handlers_init.go).
+	RegisteredCurrentProject string `json:"registered_current_project,omitempty" jsonschema:"projects.json::current_project after init+register side effect; empty when the registry write was skipped or unchanged"`
 }
 
 // --- kron_lint --------------------------------------------------------

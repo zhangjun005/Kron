@@ -12,6 +12,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/xxx/kron/internal/store"
 )
 
 // These tests cover the 12 v1.1+ handlers (kron_init / add / update /
@@ -164,10 +166,55 @@ func TestInit_HappyPath(t *testing.T) {
 	// — see HandleInit for the rationale.
 	assert.Equal(t, filepath.Clean(dir), filepath.Clean(r.RepoRoot),
 		"repo_root must be the absolute path the server is operating on")
+	// registered_current_project is the init+register side effect
+	// (RFC 2026-10-14 §2.6). On a fresh project the side effect
+	// auto-promotes the new project to current, so the field
+	// must equal the project's absolute path (cleaned).
+	assert.Equal(t, filepath.Clean(dir), filepath.Clean(r.RegisteredCurrentProject),
+		"registered_current_project must equal the new project root on fresh init")
 
 	info, err := os.Stat(filepath.Join(dir, ".kron"))
 	require.NoError(t, err)
 	assert.True(t, info.IsDir())
+}
+
+// TestInit_RegistersProjectInRegistry locks RFC 2026-10-14-§2.6
+// parity with the CLI path: kron_init must (a) append the project
+// to projects.json::projects[], (b) promote it to current_project,
+// and (c) return the post-write current_project in
+// InitOutput.RegisteredCurrentProject. The CLI path already does
+// (a)+(b) in cmd/kron/cli/init.go; this test is the MCP
+// counterpart.
+//
+// Isolation: newTestSession points KRON_PROJECTS_JSON_PATH at a
+// per-test temp path so the on-disk registry is empty before
+// kron_init runs.
+func TestInit_RegistersProjectInRegistry(t *testing.T) {
+	dir := t.TempDir()
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_init",
+		Arguments: map[string]any{},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	var r InitOutput
+	require.NoError(t, structuredInto(res, &r))
+	abs, err := filepath.Abs(dir)
+	require.NoError(t, err)
+
+	// (a) projects.json must exist (WriteProjectsJSON created it)
+	// and parse. (b) projects[] must contain exactly one entry
+	// for the new project. (c) current_project must equal the
+	// new project's absolute path.
+	reg, err := store.ReadProjectsJSON()
+	require.NoError(t, err)
+	require.Len(t, reg.Projects, 1, "fresh init must register exactly one project")
+	assert.Equal(t, filepath.Clean(abs), filepath.Clean(reg.Projects[0].Path))
+	assert.NotEmpty(t, reg.Projects[0].AddedAt, "added_at must be set on insert")
+	assert.Equal(t, filepath.Clean(abs), filepath.Clean(reg.CurrentProject),
+		"current_project must be promoted to the new project")
 }
 
 func TestInit_Idempotent(t *testing.T) {
@@ -183,6 +230,13 @@ func TestInit_Idempotent(t *testing.T) {
 	require.NoError(t, structuredInto(res, &r))
 	assert.True(t, r.OK)
 	assert.True(t, r.AlreadyInitialised, "second init must report already_initialised=true")
+	// registered_current_project is still the project (re-init is
+	// idempotent: the side effect re-promotes the same path, no
+	// duplicate entry is inserted). CLI parity.
+	abs, err := filepath.Abs(dir)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Clean(abs), filepath.Clean(r.RegisteredCurrentProject),
+		"re-init must keep current_project pointing at this project")
 }
 
 // --- kron_add --------------------------------------------------------
@@ -228,6 +282,43 @@ func TestAdd_InvalidSlug(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.True(t, res.IsError, "invalid slug must fail")
+}
+
+// TestAdd_RejectsEmptyRationale locks F7: kron_add must reject
+// assumptions[] entries with empty / whitespace-only rationale at
+// write time, mirroring lint.RuleAssumptionRationaleRequired. The
+// MCP path's resolveAssumptionsForIntent is the load-bearing check;
+// the lint rule stays as a backstop for edits that bypass the
+// helper (manual edits, future CLI update path).
+func TestAdd_RejectsEmptyRationale(t *testing.T) {
+	dir := initRepo(t)
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+
+	cases := []struct {
+		name      string
+		rationale string
+	}{
+		{"empty string", ""},
+		{"whitespace only", "   \t\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+				Name: "kron_add",
+				Arguments: map[string]any{
+					"slug": "auth/jwt-" + tc.name,
+					"assumptions": []map[string]any{{
+						"id":        "single-region",
+						"severity":  "hard",
+						"rationale": tc.rationale,
+					}},
+				},
+			})
+			require.NoError(t, err)
+			assert.True(t, res.IsError, "empty rationale must be rejected at write time")
+		})
+	}
 }
 
 // TestAdd_NodeKind covers RFC 2026-10-08-writer-readme-symmetry §3.5:

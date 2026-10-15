@@ -10,6 +10,7 @@ package servemcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -153,20 +154,9 @@ func handleIntentResourceRead(ctx context.Context, req *mcp.ReadResourceRequest)
 // bytes a human would see.
 
 // isIntentNotFound reports whether err is (or wraps) the
-// model.ErrIntentNotFound sentinel. We can't import errors.Is in a
-// tiny one-liner helper because the caller wants a bool, but the
-// behaviour is the standard "unwrap and compare" loop.
+// model.ErrIntentNotFound sentinel. Plain errors.Is, kept as a
+// one-liner for callers that prefer a bool over the (err, ok)
+// two-return shape of errors.Is.
 func isIntentNotFound(err error) bool {
-	for err != nil {
-		if err == model.ErrIntentNotFound {
-			return true
-		}
-		type unwrapper interface{ Unwrap() error }
-		u, ok := err.(unwrapper)
-		if !ok {
-			return false
-		}
-		err = u.Unwrap()
-	}
-	return false
+	return errors.Is(err, model.ErrIntentNotFound)
 }
