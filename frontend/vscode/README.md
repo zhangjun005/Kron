@@ -1,8 +1,8 @@
 # Kron VSCode extension
 
 This directory contains the VSCode extension client for Kron. It starts
-`kron serve-lsp` and `kron serve-mcp` as stdio child processes; it does not
-import Kron Go packages or call internal packages directly.
+`kron serve-lsp` as a stdio child process; it does not import Kron Go packages
+or call internal packages directly.
 
 ## Development
 
@@ -11,8 +11,9 @@ npm install
 npm run compile
 ```
 
-Press F5 in VSCode to start an Extension Development Host. The current
-extension activation uses `demo-server.js` to exercise the
-`vscode-languageclient` initialize/shutdown lifecycle. The demo is local and
-does not yet launch the Kron binary; real `kron serve-lsp` integration is the
-next milestone.
+Open a workspace in the Extension Development Host and ensure `kron` is on
+its PATH. Otherwise set `kron.serverPath` to the executable path in VSCode
+settings (for Windows, use the path to `kron.exe`). Activation launches
+`kron serve-lsp -CWD <workspace-root>` and performs the LanguageClient
+initialize handshake. Activation without a workspace shows a warning and
+does not start a process.

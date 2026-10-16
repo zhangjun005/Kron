@@ -1,12 +1,24 @@
 {
   "name": "kron-vscode",
   "displayName": "Kron",
-  "description": "Kron language client demo",
+  "description": "Kron language support",
   "version": "0.0.1",
   "private": true,
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Other"],
   "activationEvents": ["onLanguage:markdown"],
+  "contributes": {
+    "configuration": {
+      "title": "Kron",
+      "properties": {
+        "kron.serverPath": {
+          "type": "string",
+          "default": "kron",
+          "description": "Path to the Kron executable. Set an absolute path when kron is not on the extension host PATH."
+        }
+      }
+    }
+  },
   "main": "./out/extension.js",
   "scripts": {
     "compile": "tsc -p ./",

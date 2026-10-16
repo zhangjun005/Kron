@@ -17,6 +17,11 @@ VSCode extension
      └─ hover、definition、completion、diagnostics
 ```
 
+M1 已实现 LSP 子进程启动：扩展从 `kron.serverPath` 读取可执行文件路径（默认 `kron`），以
+`serve-lsp -CWD <workspace-root>` 启动 stdio server，并通过 `vscode-languageclient` 完成
+initialize。Windows 扩展宿主可将设置指向 `kron.exe` 的绝对路径。没有 workspace folder 时显示
+提示且不启动进程。MCP 客户端仍属后续实现范围。
+
 两条连接都由扩展启动、复用和停止，二者不能互相转发请求。扩展也不直接 import Go 的
 `internal/`，不手写 MCP 或 LSP 的 JSON-RPC。
 
