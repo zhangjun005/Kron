@@ -3,7 +3,7 @@
 > **负责人**：HomoFluctus
 > **模块范围**（你自己认领的）：文件存储 + LSP 访问层 + IDE 扩展 + CLI 软删除/恢复对外入口
 > **创建日期**：2026-10-13
-> **最后更新**：2026-10-16（store、CLI、VSCode M0–M2 已分步提交；待推送与 Extension Host 联调）
+> **最后更新**：2026-10-16（store、CLI、VSCode M0–M4 已分步提交；待推送与 Extension Host 联调）
 > **本文件性质**：个人进度追踪，**不**入 PR / **不**影响 CI；只服务 HomoFluctus 自己 + AI assistant。
 
 ---
@@ -51,16 +51,16 @@
 
 ---
 
-## 4. 模块 ③ IDE 扩展（`frontend/extensions/vscode/` 独立仓）
+## 4. 模块 ③ IDE 扩展（`frontend/vscode/`）
 
 | 任务 | 原理 |
 |---|---|
-| **③-M0** VSCode 扩展建仓 + 跑通 `vscode-languageclient` 最小 demo | 已建 `frontend/vscode/` 扩展骨架与本地 LSP demo；`npm run compile` 通过；Extension Host 尚未实跑 |
+| **③-M0** VSCode 扩展建仓 + 跑通 `vscode-languageclient` 最小 demo | 已建 `frontend/vscode/` 扩展骨架并通过 TypeScript 编译；Extension Host 尚未实跑 |
 | **③-M1** 加载 `kron serve-lsp` stdIO 子进程 + `initialize` 握手 | 已接入 `kron.serverPath`（默认 `kron`）和 workspace root 启动参数；无 workspace 时提示且不启动；需在 VSCode Extension Host 配置真实二进制完成手工联调 |
 | **③-M2** 在源码锚点行展示 hover 并支持 definition 跳转 | LSP 后端 hover/definition 已有实现；扩展已向 LSP 注册本地文件；VSCode Extension Host 端到端验证仍待完成 |
 | **③-M3** definition（go-to-definition）+ completion | definition 随 M2 已由 LSP 提供；completion 属 LSP v1.4+ 评估，不在当前范围 |
 | **③-M4** 侧边栏（kron intent 树） | 已用 VSCode 原生 Explorer TreeView + 官方 MCP SDK 调用 `kron_tree`，支持刷新；首 workspace only，暂无详情/编辑 UI |
-| **③-M5** 发布到 VSCode Marketplace | 走 `vsce publish`；**阻塞** = zhangjun005 批 publisher 账号 |
+| **③-M5** 发布到 VSCode Marketplace | 需确认 publisher ID 并使用其 Marketplace 凭据发布；当前未发布 |
 
 ---
 
@@ -87,6 +87,7 @@
 - ③-M0 建立了扩展骨架和本地 stdio LSP demo，依赖安装与 TypeScript 编译通过；VSCode Extension Host 手工启动尚未验证。
 - ③-M1 已切换为真实 `kron serve-lsp -CWD <workspace-root>` 子进程，`kron.serverPath` 支持配置；`npm run compile` 通过。Extension Host 联调和多 workspace 支持仍待完成。
 - ③-M4 增加只读意图树：独立启动 `serve-mcp` 子进程，通过 SDK 调用 `kron_tree`；`npm run compile` 通过。多 workspace、节点交互及 Extension Host 实测未完成。
+- 顺序提交：`5341b03` (Writer.Update 同实例串行化)、`0c8a564` (存储状态与路径验证日志)、`f882ae5` (VSCode M0)、`e6f292f` (M1)、`070fb6b` (M2)、`9894d28` (CLI RFC)、`6f051f5` (CLI trash/restore)、`b532069` (M4)。这些提交晚于 `6f0cc4c`，需一并推送。
 
 | 日期 | 任务 | commit | 备注 |
 |---|---|---|---|
