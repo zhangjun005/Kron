@@ -3,7 +3,7 @@
 > **负责人**：HomoFluctus
 > **模块范围**（你自己认领的）：文件存储 + LSP 访问层 + IDE 扩展 + CLI 软删除/恢复对外入口
 > **创建日期**：2026-10-13
-> **最后更新**：2026-10-16（store、CLI、VSCode M0–M4 已分步提交；待推送与 Extension Host 联调）
+> **最后更新**：2026-10-16（store、CLI、VSCode M0–M4 分步提交并推送至 `origin/feat/serve-lsp`；待 Extension Host 联调）
 > **本文件性质**：个人进度追踪，**不**入 PR / **不**影响 CI；只服务 HomoFluctus 自己 + AI assistant。
 
 ---
@@ -40,7 +40,7 @@
 | **②-A-1** 解 `docs/implementation/lsp.md` add/add 冲突 | 已在 `6f0cc4c` 整理冲突正文与约束，删除遗留标记 |
 | **②-A-2** 完成 merge | master 合并 commit `3ae6e1d` 已在分支历史；冲突文档已修复 |
 | **②-A-3** 跑 §4 红线 | `gofmt -l .`、`go vet ./...`、`go test ./...` 最近已通过；本轮提交后需重跑 |
-| **②-A-4** push `feat/serve-lsp` | `6f0cc4c` 已推送；本轮新增提交尚待推送 |
+| **②-A-4** push `feat/serve-lsp` | 已推送至 `50c85b3`；后续追踪日志提交也需推送 |
 | **②-A-5** 恢复 `.agents/` | 两个技能文件已纳入 `a42a05f`；内容与 stash blob 完全一致，stash 保留作备份 |
 | **②-A-6** PR review + 合并 feat/serve-lsp → master | 仍需维护者 review/merge；不可由本地测试替代 |
 | **②-B** LSP SDK 集成（`go.lsp.dev/protocol v1.0.1` + `jsonrpc2` + `uri`） | 已完成 `7c3c030` 10/15；RFC `2026-10-07-lsp-sdk.md` §3 拍板 + `2026-10-12-lsp-decisions.md` §1 知悉 LSP 3.18 vs 3.17 偏差；见 §8 |
@@ -87,7 +87,7 @@
 - ③-M0 建立了扩展骨架和本地 stdio LSP demo，依赖安装与 TypeScript 编译通过；VSCode Extension Host 手工启动尚未验证。
 - ③-M1 已切换为真实 `kron serve-lsp -CWD <workspace-root>` 子进程，`kron.serverPath` 支持配置；`npm run compile` 通过。Extension Host 联调和多 workspace 支持仍待完成。
 - ③-M4 增加只读意图树：独立启动 `serve-mcp` 子进程，通过 SDK 调用 `kron_tree`；`npm run compile` 通过。多 workspace、节点交互及 Extension Host 实测未完成。
-- 顺序提交：`5341b03` (Writer.Update 同实例串行化)、`0c8a564` (存储状态与路径验证日志)、`f882ae5` (VSCode M0)、`e6f292f` (M1)、`070fb6b` (M2)、`9894d28` (CLI RFC)、`6f051f5` (CLI trash/restore)、`b532069` (M4)。这些提交晚于 `6f0cc4c`，需一并推送。
+- 顺序提交：`5341b03` (Writer.Update 同实例串行化)、`0c8a564` (存储状态与路径验证日志)、`f882ae5` (VSCode M0)、`e6f292f` (M1)、`070fb6b` (M2)、`9894d28` (CLI RFC)、`6f051f5` (CLI trash/restore)、`b532069` (M4)、`50c85b3` (进度日志)。已推送至 `origin/feat/serve-lsp`。
 
 | 日期 | 任务 | commit | 备注 |
 |---|---|---|---|
