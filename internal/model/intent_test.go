@@ -113,9 +113,9 @@ func TestSeverity(t *testing.T) {
 
 func TestAssumption(t *testing.T) {
 	a := Assumption{
-		ID:        "single-region",
-		Severity:  SeverityHard,
-		ExpiresAt: "2026-12-31",
+		ID:         "single-region",
+		Severity:   SeverityHard,
+		ExpiresAt:  "2026-12-31",
 		VerifiedAt: "2026-09-22",
 		VerifiedBy: "@zhangjun005",
 	}

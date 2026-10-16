@@ -2,14 +2,20 @@ package servemcp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/xxx/kron/internal/store"
 )
 
 // Since v1.2 the MCP protocol layer is owned by the official
@@ -68,8 +74,16 @@ func decodeSingleResponse(t *testing.T, output string) singleResponse {
 // instead.
 func runServer(t *testing.T, input string) (string, string, error) {
 	t.Helper()
+	dir := t.TempDir()
+	// Pre-create .kron/ so resolveMCPRoot's project-root validation
+	// passes. In production, every supported MCP client (Claude
+	// Code, Cursor MCP runtime, VSCode extensions) spawns kron
+	// with cwd set to a directory that already has .kron/, so the
+	// validation is correct for the production path; this helper
+	// just mirrors that for the test path.
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".kron"), 0o755))
 	var out, errOut bytes.Buffer
-	err := Run([]string{"-CWD", t.TempDir()}, strings.NewReader(input), &out, &errOut)
+	err := Run([]string{"-CWD", dir}, strings.NewReader(input), &out, &errOut)
 	return out.String(), errOut.String(), err
 }
 
@@ -126,6 +140,251 @@ func TestServer_Notification_NoResponse(t *testing.T) {
 	}
 	_ = errOut
 	_ = time.Now
+}
+
+// TestRunWithCtx_CancelExitsCleanly is the in-process unit test for
+// the G-1 signal-cancellation path. Rather than spawning a real
+// process and sending os.Interrupt (which would race the test
+// framework's own signal handling), we drive runWithCtx directly
+// with a context we control. Cancelling it must make runWithCtx
+// return nil — the production "Ctrl+C → clean exit" contract.
+//
+// We use a fresh server (not the production one) so this test
+// exercises the "cancellable ctx drives server.Run" path
+// independently of Run's other setup steps. We don't send any
+// initialize frames: server.Run's select{} between ctx.Done and
+// ss.Wait() will pick the ctx branch as soon as cancel() fires,
+// even without an active session.
+func TestRunWithCtx_CancelExitsCleanly(t *testing.T) {
+	server := mcp.NewServer(&mcp.Implementation{Name: "kron-cancel-test", Version: "v1.2.0"}, nil)
+
+	// Pipe so the SDK's IOTransport reader blocks on a real
+	// io.Reader (not nil). The writer side is io.Discard wrapped
+	// to satisfy the WriteCloser contract; the package's
+	// nopWriteCloser (defined in serve_mcp.go) is exactly that.
+	pr, pw := io.Pipe()
+	defer pr.Close()
+	defer pw.Close()
+
+	transport := &mcp.IOTransport{Reader: pr, Writer: nopWriteCloser{io.Discard}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- runWithCtx(ctx, server, transport)
+	}()
+
+	// Give the SDK a tick to reach its select{}, then cancel.
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err, "ctx cancellation must surface as nil (clean exit)")
+	case <-time.After(2 * time.Second):
+		t.Fatal("runWithCtx did not return within 2s of ctx cancel")
+	}
+}
+
+// TestRunWithCtx_DeadlineExceededExitsCleanly is the sibling case
+// for context.DeadlineExceeded: a server that times out (e.g. an
+// operator-set shutdown deadline) is also a clean shutdown, not a
+// transport failure.
+func TestRunWithCtx_DeadlineExceededExitsCleanly(t *testing.T) {
+	server := mcp.NewServer(&mcp.Implementation{Name: "kron-deadline-test", Version: "v1.2.0"}, nil)
+
+	pr, pw := io.Pipe()
+	defer pr.Close()
+	defer pw.Close()
+
+	transport := &mcp.IOTransport{Reader: pr, Writer: nopWriteCloser{io.Discard}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- runWithCtx(ctx, server, transport)
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err, "ctx deadline must surface as nil (clean exit)")
+	case <-time.After(2 * time.Second):
+		t.Fatal("runWithCtx did not return within 2s of ctx deadline")
+	}
+}
+
+// TestRun_NoSignalLeakBetweenInvocations guards the runWithSignalCtx
+// contract: each Run() call must register a signal handler only for
+// its own lifetime, so consecutive invocations (in particular, the
+// many test invocations during `go test`) don't accumulate handlers
+// or interfere with each other. We invoke the full Run() entry point
+// three times with empty stdin (the SDK exits immediately on EOF
+// without entering the long-lived select), and assert every call
+// returns nil — which is only true if the second / third
+// invocations can register their own signal.NotifyContext without
+// conflicting with the first.
+func TestRun_NoSignalLeakBetweenInvocations(t *testing.T) {
+	for i := 0; i < 3; i++ {
+		dir := t.TempDir()
+		// Pre-create .kron/ so resolveMCPRoot's project-root validation
+		// passes. (See runServer for the rationale.)
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, ".kron"), 0o755))
+		var out, errOut bytes.Buffer
+		err := Run([]string{"-CWD", dir}, strings.NewReader(""), &out, &errOut)
+		require.NoErrorf(t, err, "iteration %d must succeed", i)
+		assert.Empty(t, out, "iteration %d: empty stdin must produce no protocol output", i)
+	}
+}
+
+// TestResolveMCPRoot_RejectsNonProject locks the contract added to
+// resolveMCPRoot: when a client (mis)configures -CWD or os.Getwd()
+// to a directory that doesn't have .kron/, the server must fail
+// fast with a clear, actionable error rather than letting the
+// first tool call blow up with a misleading "run kron_init
+// first" — the project isn't missing, the cwd is wrong.
+func TestResolveMCPRoot_RejectsNonProject(t *testing.T) {
+	dir := t.TempDir()
+	// No .kron/ here.
+	_, err := resolveMCPRoot([]string{"-CWD", dir})
+	require.Error(t, err, "must reject a directory without .kron/")
+	assert.Contains(t, err.Error(), "is not a Kron project",
+		"error must explicitly say it isn't a Kron project")
+	assert.Contains(t, err.Error(), dir,
+		"error must include the offending path so the user knows which cwd to fix")
+}
+
+// TestResolveMCPRoot_RejectsNonDirectoryDotKron locks the
+// sibling case: if .kron/ exists but is a regular file (not a
+// directory), the server must also reject — the project layout
+// is corrupted.
+func TestResolveMCPRoot_RejectsNonDirectoryDotKron(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kron"), []byte("not a dir"), 0o644))
+	_, err := resolveMCPRoot([]string{"-CWD", dir})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not a directory",
+		"error must explain .kron/ is the wrong file type")
+}
+
+// TestResolveMCPRoot_AcceptsValidProject locks the happy path:
+// a directory with a real .kron/ is accepted, and -CWD is
+// resolved to an absolute path even if the caller passed a
+// relative one.
+func TestResolveMCPRoot_AcceptsValidProject(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".kron"), 0o755))
+	got, err := resolveMCPRoot([]string{"-CWD", dir})
+	require.NoError(t, err)
+	// filepath.Abs may not equal dir on Windows if dir is a
+	// short path or has unusual casing; compare cleaned forms.
+	assert.Equal(t, filepath.Clean(got), filepath.Clean(dir))
+}
+
+// TestResolveMCPRoot_PrefersCurrentProjectOverGetwd locks RFC
+// docs/rfc/2026-10-13-multi-project-registry.md §2.8 priority 2:
+// when -CWD is absent AND the cwd does NOT contain .kron/, but
+// projects.json::current_project points at a valid Kron project,
+// the server should use current_project.
+//
+// This is the "user opened a new terminal at a non-Kron dir
+// but the GUI has Kron's current project set" case — common
+// when the user shells out from an editor that doesn't share
+// the working directory.
+func TestResolveMCPRoot_PrefersCurrentProjectOverGetwd(t *testing.T) {
+	// 1. The cwd is some unrelated directory (no .kron/).
+	notProject := t.TempDir()
+	t.Chdir(notProject)
+
+	// 2. The current_project points at a real Kron project.
+	goodProject := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(goodProject, ".kron"), 0o755))
+
+	// 3. Wire projects.json (test escape hatch) to point at goodProject.
+	registryPath := filepath.Join(t.TempDir(), "projects.json")
+	t.Setenv("KRON_PROJECTS_JSON_PATH", registryPath)
+	reg := &store.ProjectRegistry{CurrentProject: goodProject, Projects: []store.ProjectEntry{
+		{Path: goodProject, AddedAt: "2026-10-14T00:00:00Z"},
+	}}
+	require.NoError(t, store.WriteProjectsJSON(reg))
+
+	got, err := resolveMCPRoot(nil)
+	require.NoError(t, err, "must not fail when current_project is valid")
+	assert.Equal(t, filepath.Clean(goodProject), filepath.Clean(got),
+		"current_project should win over the unrelated cwd")
+}
+
+// TestResolveMCPRoot_CurrentProjectMissingDotKronFallsBackToGetwd:
+// when current_project points at a directory that no longer
+// has .kron/ (e.g. user removed it after registering), fall
+// through to os.Getwd() rather than erroring out. The current
+// registry entry is essentially stale; the server shouldn't
+// refuse to start just because the user's cleanup is in
+// progress.
+func TestResolveMCPRoot_CurrentProjectMissingDotKronFallsBackToGetwd(t *testing.T) {
+	// 1. The cwd IS a valid Kron project.
+	cwd := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(cwd, ".kron"), 0o755))
+	t.Chdir(cwd)
+
+	// 2. But current_project points at a directory with NO .kron/.
+	staleProject := t.TempDir() // no .kron/
+
+	registryPath := filepath.Join(t.TempDir(), "projects.json")
+	t.Setenv("KRON_PROJECTS_JSON_PATH", registryPath)
+	reg := &store.ProjectRegistry{CurrentProject: staleProject, Projects: []store.ProjectEntry{
+		{Path: staleProject, AddedAt: "2026-10-14T00:00:00Z"},
+	}}
+	require.NoError(t, store.WriteProjectsJSON(reg))
+
+	got, err := resolveMCPRoot(nil)
+	require.NoError(t, err, "stale current_project must not error; fall through to cwd")
+	assert.Equal(t, filepath.Clean(cwd), filepath.Clean(got),
+		"stale current_project must fall through to the valid cwd")
+}
+
+// TestResolveMCPRoot_NoRegistryFallsBackToGetwd: when
+// projects.json doesn't exist at all (first-run case), the
+// server must still work — fall through to os.Getwd(). This
+// matches the "user just installed kron and ran `kron serve-mcp`
+// without ever running `kron register` first" workflow.
+func TestResolveMCPRoot_NoRegistryFallsBackToGetwd(t *testing.T) {
+	cwd := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(cwd, ".kron"), 0o755))
+	t.Chdir(cwd)
+
+	// Point at a path that does not exist.
+	t.Setenv("KRON_PROJECTS_JSON_PATH", filepath.Join(t.TempDir(), "does-not-exist.json"))
+
+	got, err := resolveMCPRoot(nil)
+	require.NoError(t, err, "missing registry must not error; fall through to cwd")
+	assert.Equal(t, filepath.Clean(cwd), filepath.Clean(got))
+}
+
+// TestResolveMCPRoot_CWDWinsOverCurrentProject: -CWD is the
+// top-priority source (RFC §2.8 priority 1). Even when
+// current_project is set, an explicit -CWD overrides it.
+func TestResolveMCPRoot_CWDWinsOverCurrentProject(t *testing.T) {
+	// Set up current_project to point at project A.
+	projectA := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(projectA, ".kron"), 0o755))
+	registryPath := filepath.Join(t.TempDir(), "projects.json")
+	t.Setenv("KRON_PROJECTS_JSON_PATH", registryPath)
+	require.NoError(t, store.WriteProjectsJSON(&store.ProjectRegistry{
+		CurrentProject: projectA,
+		Projects:       []store.ProjectEntry{{Path: projectA, AddedAt: "2026-10-14T00:00:00Z"}},
+	}))
+
+	// But pass -CWD to project B.
+	projectB := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(projectB, ".kron"), 0o755))
+	got, err := resolveMCPRoot([]string{"-CWD", projectB})
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Clean(projectB), filepath.Clean(got),
+		"-CWD must win over current_project (RFC §2.8 priority 1)")
 }
 
 // os_getenv is a small wrapper so this test file does not have to

@@ -214,3 +214,14 @@ Direct struct construction (`&server{...}`) is used for tests that need a custom
 - **Client layer split**: [`docs/rfc/2026-10-08-lsp-client.md`](../rfc/2026-10-08-lsp-client.md) — VSCode extension (lives in `frontend/extensions/vscode/`) consumes `kron serve-lsp` and `kron serve-mcp` as stdio subprocesses. This server does not import any client-layer concern.
 - **caller-injection change**: [`docs/tracking/homofluctus.md`](../tracking/homofluctus.md) 10-12 决策点 §7 — new access layer code does not call `model.WithCaller`; `internal/` does not read ctx caller.
 - **Dep approval status**: `go.lsp.dev/protocol` and friends are listed in `go.mod` but flagged in [`docs/process/pending-decisions.md`](../process/pending-decisions.md) (P2-3) as awaiting explicit human approval per AGENTS.md §3 red line. Removal is NOT planned — the PR keeps the deps and the marker; reverting costs more than the marker.
+
+## 6 开发边界
+
+本文件说明 `cmd/kron/serve-lsp/` 的职责，不替代新增依赖和 `internal/` API 所需的审批流程。架构边界以 [`architecture.md`](../abstractDesign/architecture.md) 为准，锚点语法以 [`intent-structure.md`](../abstractDesign/intent-structure.md) 为准。
+
+- LSP 只读取 Kron 数据并返回编辑器协议结果；不创建或编辑 intent、assumption 或锚点，不维护项目索引，也不调用 `serve-mcp`。
+- 每个编辑器 workspace 启动一个 `kron serve-lsp -CWD <workspace-root>`；stdin/stdout 使用 LSP Content-Length JSON-RPC，编辑器退出即进程退出。
+- LSP 与 MCP 是兄弟访问层，不得互相 import、调用或通过内存共享状态连接。
+- LSP 只调用所需的 `internal/parser` 和 `internal/store` 能力；业务逻辑留在 `internal/`。
+- `context.Context` 只传递取消和 deadline；不得通过 caller 注入行为身份。
+- 新增 Go 顶层依赖仍须显式批准；不得手写协议帧来规避依赖审批。

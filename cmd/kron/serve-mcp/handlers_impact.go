@@ -64,7 +64,7 @@ func HandleImpact(ctx context.Context, _ *mcp.CallToolRequest, in ImpactInput) (
 	if err != nil {
 		return nil, ImpactOutput{}, err
 	}
-	all, err := r.LoadAll(ctx)
+	all, err := LoadAllCached(ctx, root)
 	if err != nil {
 		return nil, ImpactOutput{}, fmt.Errorf("kron_impact: load: %w", err)
 	}
@@ -93,7 +93,9 @@ func HandleImpact(ctx context.Context, _ *mcp.CallToolRequest, in ImpactInput) (
 	// The IsCode / IsMarkdown predicates collapse the empty-string
 	// zero value (hand-constructed literals) onto "code" so the
 	// wire value is never the empty string.
-	var incoming []AnchorRef
+	// C-6: build three slices — unified (legacy), code-only,
+	// markdown-only — so callers can use whichever suits them.
+	var incoming, incomingCode, incomingMarkdown []AnchorRef
 	anchors, err := parser.ScanAnchors(root)
 	if err != nil {
 		return nil, ImpactOutput{}, fmt.Errorf("kron_impact: scan anchors: %w", err)
@@ -107,6 +109,7 @@ func HandleImpact(ctx context.Context, _ *mcp.CallToolRequest, in ImpactInput) (
 	allAnchors := make([]model.Anchor, 0, len(anchors)+len(markdownAnchors))
 	allAnchors = append(allAnchors, anchors...)
 	allAnchors = append(allAnchors, markdownAnchors...)
+
 	for _, a := range allAnchors {
 		if a.Slug != in.Slug {
 			continue
@@ -115,14 +118,26 @@ func HandleImpact(ctx context.Context, _ *mcp.CallToolRequest, in ImpactInput) (
 		if a.Kind.IsMarkdown() {
 			kind = string(model.AnchorKindMarkdown)
 		}
-		incoming = append(incoming, AnchorRef{
+		ref := AnchorRef{
 			FilePath: a.FilePath,
 			Line:     a.LineNumber,
 			Kind:     kind,
-		})
+		}
+		incoming = append(incoming, ref)
+		if kind == string(model.AnchorKindCode) {
+			incomingCode = append(incomingCode, ref)
+		} else {
+			incomingMarkdown = append(incomingMarkdown, ref)
+		}
 	}
 	if incoming == nil {
 		incoming = []AnchorRef{}
+	}
+	if incomingCode == nil {
+		incomingCode = []AnchorRef{}
+	}
+	if incomingMarkdown == nil {
+		incomingMarkdown = []AnchorRef{}
 	}
 
 	// relativeFilePath trims the root prefix so the wire output is
@@ -132,23 +147,44 @@ func HandleImpact(ctx context.Context, _ *mcp.CallToolRequest, in ImpactInput) (
 			incoming[i].FilePath = rel
 		}
 	}
+	for i := range incomingCode {
+		if rel, err := filepath.Rel(root, incomingCode[i].FilePath); err == nil {
+			incomingCode[i].FilePath = rel
+		}
+	}
+	for i := range incomingMarkdown {
+		if rel, err := filepath.Rel(root, incomingMarkdown[i].FilePath); err == nil {
+			incomingMarkdown[i].FilePath = rel
+		}
+	}
 
 	// Stable order for downstream tests / agents: by (file_path,
 	// line). parser.ScanAnchors walks the repo in a directory-order
 	// traversal which is usually stable but not guaranteed by the
 	// stdlib — sort defensively so kron_impact output never
 	// depends on filepath.Walk internals.
-	sort.SliceStable(incoming, func(i, j int) bool {
-		if incoming[i].FilePath != incoming[j].FilePath {
-			return incoming[i].FilePath < incoming[j].FilePath
-		}
-		return incoming[i].Line < incoming[j].Line
-	})
+	sortAnchors(incoming)
+	sortAnchors(incomingCode)
+	sortAnchors(incomingMarkdown)
 
 	return nil, ImpactOutput{
-		Intent:          intentSummaryFromIntent(target, ar),
-		IncomingAnchors: incoming,
-		References:      references,
-		Prerequisites:   prerequisites,
+		Intent:                  intentSummaryFromIntent(target, ar),
+		IncomingAnchors:         incoming,
+		IncomingAnchorsCode:     incomingCode,
+		IncomingAnchorsMarkdown: incomingMarkdown,
+		References:              references,
+		Prerequisites:           prerequisites,
 	}, nil
+}
+
+// sortAnchors sorts refs by (file_path, line). Mirrors the sort block
+// that was inline in HandleImpact; extracted here to avoid triplication
+// now that there are three anchor slices (C-6).
+func sortAnchors(refs []AnchorRef) {
+	sort.SliceStable(refs, func(i, j int) bool {
+		if refs[i].FilePath != refs[j].FilePath {
+			return refs[i].FilePath < refs[j].FilePath
+		}
+		return refs[i].Line < refs[j].Line
+	})
 }

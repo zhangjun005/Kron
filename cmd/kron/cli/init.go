@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/xxx/kron/internal/model"
 	"github.com/xxx/kron/internal/store"
@@ -53,6 +54,35 @@ func runInit(args []string, out, errOut io.Writer) error {
 	if err := store.SaveConfig(context.Background(), root, cfg); err != nil {
 		fmt.Fprintln(errOut, "kron init:", err)
 		return err
+	}
+
+	// RFC docs/rfc/2026-10-14-projects-json-schema-extension.md
+	// §2.1 + §2.6: `kron init` also registers the project into
+	// the multi-project registry at <kron-bin>/projects.json and
+	// auto-promotes it to current_project. The two operations
+	// (init + register) are atomic from the user's perspective:
+	// "I just kron-init'd a project" should also mean "I just
+	// added it to my project list and made it active". Errors
+	// here are NOT fatal: the user already has a working .kron/
+	// skeleton, so we print a warning and continue with exit 0.
+	// (The user can re-run `kron register` later if they want
+	// the registry entry.)
+	reg, regErr := store.ReadProjectsJSON()
+	if regErr == nil {
+		if _, rerr := store.RegisterProject(reg, root, time.Now()); rerr == nil {
+			_, serr := store.SetCurrentProject(reg, root)
+			if serr == nil {
+				if werr := store.WriteProjectsJSON(reg); werr != nil {
+					fmt.Fprintf(errOut, "kron init: warning: register project failed: %v\n", werr)
+				}
+			} else {
+				fmt.Fprintf(errOut, "kron init: warning: set current_project failed: %v\n", serr)
+			}
+		} else {
+			fmt.Fprintf(errOut, "kron init: warning: register project failed: %v\n", rerr)
+		}
+	} else {
+		fmt.Fprintf(errOut, "kron init: warning: read projects.json failed: %v\n", regErr)
 	}
 
 	fmt.Fprintf(out, "kron: initialised %s\n", kronDir)

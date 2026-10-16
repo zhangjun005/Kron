@@ -119,7 +119,24 @@ func RunWith(ctx context.Context, root string, opts RunOptions) ([]Diag, error) 
 		return nil, fmt.Errorf("lint: %w", errEmptyRoot)
 	}
 
+	// C-5: backfill Suggestion from the per-Rule catalog at the
+	// RunWith boundary. We use a named return so a defer can
+	// populate Suggestion on the early-return paths (LoadAll
+	// failure, etc.) before the caller sees the result. Centralising
+	// it here keeps every rule site (lint.go / assumption_rules.go
+	// / tree_rules.go) free of per-Diag Suggestion plumbing — the
+	// rule functions describe "what is wrong" in Diag, the catalog
+	// describes "how to fix it". A Rule constant that is not in
+	// SuggestionFor yields Suggestion == "", which is the
+	// documented "no confident recommendation" case.
 	diags := make([]Diag, 0)
+	defer func() {
+		for i := range diags {
+			if diags[i].Suggestion == "" {
+				diags[i].Suggestion = SuggestionFor(diags[i].Rule)
+			}
+		}
+	}()
 
 	// A-class: scan every source file for code anchors; report each
 	// one that does not resolve to an existing intent.

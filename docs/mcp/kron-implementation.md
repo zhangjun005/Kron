@@ -23,6 +23,9 @@
 | `handlers_delete.go` | 75 | `kron_delete` |
 | `handlers_restore.go` | 50 | `kron_restore` |
 | `handlers_assume_check.go` | 135 | `kron_assume_check` |
+| `handlers_assumption.go` | 200 | `kron_assume_create` / `kron_assume_list` / `kron_assume_update` / `kron_assume_delete` / `kron_assume_get` (2026-10-14) |
+| `handlers_prompts.go` | 320 | `kron-implement` / `kron-drift-check` / `kron-review` 3 个 prompt 模板的 handler (2026-10-14) |
+| `prompts_register.go` | 60 | `registerPrompts` — `server.AddPrompt × 3` 注册入口 (2026-10-14) |
 | `handlers_impact.go` | 155 | `kron_impact` |
 | `handlers_density.go` | 160 | `kron_intent_density` + `scanOrphanFiles` / `countLines` |
 | `handlers_tree.go` | 85 | `kron_tree` + `treeNodeFromView` 投影 |
@@ -327,6 +330,26 @@ return nil, DeleteOutput{OK: true, TrashedPath: ..., Dependents: dependents}, ni
 
 ① **move 前算** dependents——避免 move 后 LoadAll 漏数据(并发安全)
 ② `dependents` **不阻塞** delete——v1 软警告(RFC `2026-10-03-frontmatter-references` §5.3)
+
+#### 4.3.7 `HandleAssumptionGet`(`kron_assume_get`)——[`handlers_assumption.go`](handlers_assumption.go) (2026-10-14 追加)
+
+走 `internal/assumption.Reader.Get(ctx, id)`(reader.go:65-100), 投影到 `AssumptionDetail`(含 `body` + `source_path`)。新 struct 而非扩展 `AssumptionSummary`——保持 list 响应最小。错误路径:`ErrAssumptionNotFound` / `ErrAssumptionFileIdMismatch`(均 → IsError=true);**不**静默回退 id-mismatched 文件(与 `List` 行为不同)。
+
+#### 4.3.8 `kronImplementPrompt`(`kron-implement`)——[`handlers_prompts.go`](handlers_prompts.go) (2026-10-14 追加)
+
+AI 接到新需求时: 走 `LoadAllCached` 拿全部 intent, `matchIntentsByKeyword` 按 slug / frontmatter.symbol / 第一行标题做朴素大小写不敏感子串匹配排序, 命中的 intent 各算 `relations.Prerequisites` 一起渲染进 user message。**`feature` 必填**, 缺 → 报错。0 匹配**不**报错, message 引导"kron_add a new one"。
+
+#### 4.3.9 `kronDriftCheckPrompt`(`kron-drift-check`)——[`handlers_prompts.go`](handlers_prompts.go) (2026-10-14 追加)
+
+走 `lint.ComputeStaleReport` 拿结构化视图(`SupersededCandidates` + `ExpiredAssumptions`), 渲染进 message。`days_threshold` 选填, 默认 90; 不可解析 → 默认值 (静默回退)。复用 `LoadAllCached` + `internal/lint`(不调 `kron_stale` tool, 避免 server 内部 RPC 自身)。
+
+#### 4.3.10 `kronReviewPrompt`(`kron-review`)——[`handlers_prompts.go`](handlers_prompts.go) (2026-10-14 追加)
+
+走 `lint.RunWith` 拿 `[]Diag` 全规则集, 按 `Rule` 字段分组 → 渲染"按规则分组 + 每个 in-scope intent 列表"。`status` 选填, 默认 "active"; 不可解析 → 默认值。
+
+#### 4.3.11 `registerPrompts`——[`prompts_register.go`](prompts_register.go) (2026-10-14 追加)
+
+3 个 `mcp.AddPrompt` 注册入口, SDK 自动推断 `prompts: { listChanged: true }` capability (与 Tools 同样路径)。`capabilities_test.go` 增 1 case 锁定 SDK 行为防止 regression。
 
 ---
 

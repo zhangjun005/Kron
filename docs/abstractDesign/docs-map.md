@@ -13,7 +13,7 @@
 | **B 架构真理** | B | Kron 的不可妥协边界；其他所有文件都不得与之矛盾 | 2 |
 | **C 数据格式真理** | C | `.kron/intents/*.md` 的文件 schema；跨工具一致 | 1 |
 | **D 业务边界** | D | Kron 对外提供哪些能力；决定 B 的适用范围 | 1 |
-| **F 实施建议** | F | 具体 API 签名、工具契约；B 的展开，不可与之矛盾 | 0 active (8 份已 2026-10-09 归档, 见下) |
+| **F 实施建议** | F | 具体 API 签名、工具契约；B 的展开，不可与之矛盾 | 3 active（客户端与 LSP 开发指南；旧 8 份见下） |
 | **G 实施流程** | G | 决策树与检查清单；触发时强制遵循 | 8 |
 | **H 哲学愿景** | H | 学术论文摘要与设计原则；D 的来源之一 | 2 |
 | **K 实景** | K | 真实代码 + 真实场景下的 Kron 行为示例；人类友好的入口 | 1 |
@@ -175,7 +175,9 @@ A (requirements.md)  ──►  D (business.md)  ──►  B (architecture.md)
 | **F** | `docs/implementation/ide-interaction.md` | B (→ **2026-10-09 归档**, serve-lsp 标"未实施"但能力混淆) |
 | **F** | `docs/implementation/mcp.md` | B (→ **2026-10-09 归档**, references 标 v1.2+ 但已在 v1 frontmatter) |
 | **F** | `docs/implementation/testing.md` | B (→ **2026-10-09 归档**, CI 表缺 go vet) |
-| **F** | `docs/implementation/lsp.md` | B (→ **2026-10-09 归档**; 重写触发: `cmd/kron/serve-lsp/` 实施时, 按 `docs/process/new-access-layer.md` §3 交付物 2 + 5) |
+| **F** | `docs/implementation/gui-client.md` | B, C (Wails 整体预览职责、MCP 边界) |
+| **F** | `docs/implementation/vscode-extension.md` | B, C (VSCode/Cursor `.vsix` 职责、编辑闭环) |
+| **F** | `docs/implementation/lsp.md` | B, C (LSP 职责、位置语义与交付契约) |
 | **G** | `docs/process/cli-flag.md` | B |
 | **G** | `docs/process/internal-pkg.md` | B |
 | **G** | `docs/process/lint-rule.md` | B |

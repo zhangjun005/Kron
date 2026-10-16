@@ -11,7 +11,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/xxx/kron/internal/parser"
-	"github.com/xxx/kron/internal/store"
 )
 
 // HandleIntentDensity returns the mcp.ToolHandlerFor binding for
@@ -39,11 +38,7 @@ func HandleIntentDensity(ctx context.Context, _ *mcp.CallToolRequest, _ IntentDe
 	}
 	root := repoRootFrom(ctx)
 
-	r, err := store.NewReader(root)
-	if err != nil {
-		return nil, IntentDensityOutput{}, fmt.Errorf("kron_intent_density: open store: %w", err)
-	}
-	all, err := r.LoadAll(ctx)
+	all, err := LoadAllCached(ctx, root)
 	if err != nil {
 		return nil, IntentDensityOutput{}, fmt.Errorf("kron_intent_density: load: %w", err)
 	}

@@ -125,15 +125,15 @@ const (
 	// legitimate when the rationale explains why.
 	RuleAssumptionSeverityMismatch Rule = "assumption-severity-mismatch"
 
-	// RuleAssumptionInline (Warning): an intent's assumptions[]
-	// block in frontmatter carries a "text:" key. Per B-3 the
-	// text lives in the registry (.kron/assumptions/<id>.md) and
-	// is the sole source of truth; an inline `text:` is the
-	// A-path leftover from the migration window. The parser
-	// silently drops the key (the registry is canonical) so the
-	// file still loads; this rule nudges the author to clean up
-	// the inline copy. Severity: warning (advisory; the file
-	// is correct, just stylistically outdated).
+	// RuleAssumptionInline (Error, permanent; was Warning under
+	// Option B1, upgraded to Error per RFC 2026-10-12 §2.2): an
+	// intent's assumptions[] block in frontmatter carries a "text:"
+	// key. Per B-3 the text lives in the registry
+	// (.kron/assumptions/<id>.md) and is the sole source of truth;
+	// an inline `text:` is a hard schema error — the file no longer
+	// loads cleanly. Detection: parser.HasInlineAssumptionText
+	// (raw-bytes pre-scan; the strict YAML decode also rejects
+	// unknown fields, so this is the redundancy layer).
 	RuleAssumptionInline Rule = "assumption-inline-text"
 
 	// T-class (RFC 2026-10-08-writer-readme-symmetry): tree-shape
@@ -162,3 +162,67 @@ const (
 	SeverityError   Severity = "error"
 	SeverityWarning Severity = "warning"
 )
+
+// SuggestionFor returns the human-readable fix hint for a Rule, or ""
+// when the engine has no confident recommendation. Wire-up of
+// Diag.Suggestion lives in the individual rule functions in
+// anchors.go / frontmatter.go / relations.go / staleness.go /
+// assumptions.go / tree.go; this is the catalog they read from so all
+// suggestions live in one place. Adding a new Rule constant without
+// updating this map yields an empty Suggestion (acceptable for
+// development; the per-rule site should still call SuggestionFor and
+// ignore the empty return).
+//
+// Format: imperative verb, no trailing punctuation. Keep it short —
+// one or two CLI invocations or one sentence of guidance. (C-5,
+// docs/mcp/missing-capabilities.md §C-5.)
+func SuggestionFor(r Rule) string {
+	switch r {
+	// C-class anchor / cross-reference rules.
+	case RuleAnchorDangling:
+		return "Create .kron/intents/<slug>.md or fix the slug in the anchor"
+	case RuleMarkdownAnchorDangling:
+		return "Create .kron/intents/<slug>.md or fix the slug in the markdown anchor"
+	case RuleFrontmatterInvalid:
+		return "Open the intent in an editor and repair the YAML; see the parser error"
+	case RuleLoadAllFailed:
+		return "Run: kron lint and read the frontmatter-invalid diag for the offending file"
+	case RuleDanglingReference:
+		return "Remove the reference or create .kron/intents/<slug>.md"
+	case RuleDanglingDependsOn:
+		return "Remove the depends_on entry or create .kron/intents/<slug>.md"
+	case RuleDependsOnCycle:
+		return "Break the cycle by removing one of the depends_on edges"
+	case RuleSelfReference:
+		return "Remove the intent's own slug from its references/depends_on"
+
+	// S-class staleness rules.
+	case RuleStaleSupersededCandidate:
+		return "Run: kron stale to see candidates, then either update or mark superseded"
+	case RuleExpiredHardAssumption:
+		return "Re-verify the assumption and update VerifiedAt, or remove the reference"
+
+	// B-3 assumption rules.
+	case RuleAssumptionRegistryIdMismatch:
+		return "Add .kron/assumptions/<id>.md with the referenced id, or fix the reference"
+	case RuleAssumptionOrphan:
+		return "Reference the assumption from an intent, or delete .kron/assumptions/<id>.md"
+	case RuleAssumptionMixedForm:
+		return "Move the inline text/rationale into the registry file and keep only the reference"
+	case RuleAssumptionFileIdMismatch:
+		return "Rename the file to match the frontmatter id (or vice versa)"
+	case RuleAssumptionRationaleRequired:
+		return "Add a rationale field explaining why the assumption applies to this intent"
+	case RuleAssumptionRationaleStale:
+		return "Re-read the registry text and update the rationale to match the current version"
+	case RuleAssumptionSeverityMismatch:
+		return "Either align the per-intent severity with the registry or document the override in rationale"
+	case RuleAssumptionInline:
+		return "Remove the inline text: key; the registry file is the source of truth"
+
+	// T-class tree-shape rules.
+	case RuleIntentOrphanUnderNoNode:
+		return "Create a parent README.md node intent at the parent directory, or move the leaf to a top-level slug"
+	}
+	return ""
+}

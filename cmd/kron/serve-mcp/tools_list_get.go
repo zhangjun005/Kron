@@ -3,6 +3,7 @@ package servemcp
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -33,11 +34,7 @@ func HandleList(ctx context.Context, _ *mcp.CallToolRequest, in ListInput) (
 	}
 	root := repoRootFrom(ctx)
 
-	r, err := store.NewReader(root)
-	if err != nil {
-		return nil, ListOutput{}, fmt.Errorf("kron_list: open store: %w", err)
-	}
-	all, err := r.LoadAll(ctx)
+	all, err := LoadAllCached(ctx, root)
 	if err != nil {
 		return nil, ListOutput{}, fmt.Errorf("kron_list: load: %w", err)
 	}
@@ -97,12 +94,10 @@ func HandleGet(ctx context.Context, _ *mcp.CallToolRequest, in GetInput) (
 	body := intentFromModel(intent, ar)
 	if in.IncludeRelations {
 		// Compute reverse-link + prerequisite views from a fresh
-		// LoadAll. We re-load (rather than caching) so the views
-		// are always consistent with the current on-disk state.
-		// For repos with O(100) intents this is sub-millisecond;
-		// a future cache layer (per docs/process/new-internal-api.md)
-		// can replace this if benchmarks warrant.
-		all, loadErr := r.LoadAll(ctx)
+		// LoadAll. We use LoadAllCached (singleflight + mtime
+		// invalidation) so the views are consistent with the current
+		// on-disk state while remaining fast for repeated calls.
+		all, loadErr := LoadAllCached(ctx, root)
 		if loadErr == nil {
 			refs, deps, syms := relations.ReverseLinks(all, in.Slug)
 			body.Relations = &GetRelations{
@@ -110,6 +105,14 @@ func HandleGet(ctx context.Context, _ *mcp.CallToolRequest, in GetInput) (
 				DependsOnDependents: deps,
 				SymbolInferred:      syms,
 				Prerequisites:       relations.Prerequisites(all, in.Slug),
+				// C-7: union of hard + symbol-inferred dependents,
+				// deduped + sorted. Mirrors kron_delete's
+				// `dependents` field (which is hard-only) but
+				// adds the inferred-soft half so GUI/IDE
+				// detail panels can render a single "who
+				// depends on me" list without client-side
+				// merging.
+				Dependents: mergeDependents(deps, syms),
 			}
 		}
 	}
@@ -131,6 +134,38 @@ func intentSummaryFromIntent(in *model.Intent, ar *assumption.Reader) IntentSumm
 		UpdatedAt: in.Frontmatter.UpdatedAt.Format(time.RFC3339),
 		Assumes:   assumesToWire(context.Background(), in.Frontmatter.Assumptions, ar),
 	}
+}
+
+// mergeDependents computes the union of hard dependents (depends_on)
+// and symbol-inferred dependents, deduplicated and sorted. Used by
+// C-7 to surface a single "who depends on me" view in kron_get's
+// relations block (matching kron_delete's top-level `dependents`
+// field, which is hard-only — this includes both forms).
+//
+// Nil/empty inputs are handled: returns nil if both inputs are empty
+// (matching the `omitempty` json tag on GetRelations.Dependents).
+func mergeDependents(hard, inferred []string) []string {
+	if len(hard) == 0 && len(inferred) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(hard)+len(inferred))
+	out := make([]string, 0, len(hard)+len(inferred))
+	for _, s := range hard {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	for _, s := range inferred {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func intentFromModel(in *model.Intent, ar *assumption.Reader) IntentBody {

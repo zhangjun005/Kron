@@ -21,12 +21,15 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/xxx/kron/internal/model"
+	"github.com/xxx/kron/internal/store"
 )
 
 // ErrNotImplemented is the v1 sentinel kept for backwards compatibility
@@ -72,14 +75,59 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 		return err
 	}
 
-	// Route logs to errOut (typically os.Stderr). stdio transport
-	// writes only JSON-RPC messages to stdout; server.Run() will
-	// ignore anything written to stderr.
+	// C-3: Route stdlib log and slog output through the MCP Logging
+	// capability (kronLoggingHandler) when a session is active; fall
+	// back to errOut when no session is established yet (e.g. during
+	// the initialize handshake) or after disconnect. This replaces
+	// the previous log.SetOutput(errOut) approach.
+	//
+	// The stdlib log package and slog both use their respective
+	// default loggers. We set both so handlers that use log.Print*
+	// (stdlib) are also captured. In practice, the main producer of
+	// structured logs is the SDK itself (via slog.Logger.Info in
+	// server.go); the stdlib log fallback covers any legacy log.*
+	// calls in the handler layer.
+	// C-3: Route slog output through the MCP Logging capability
+	// (shimHandler) when a session is active. This replaces the
+	// previous log.SetOutput(errOut) approach for slog-based logging.
+	//
+	// In production, server.Run() creates the ServerSession internally
+	// and doesn't expose it to us, so SetActiveSession is not called
+	// from Run. The shimHandler drops records when no session is
+	// active (acceptable: pre-init/post-disconnect messages are not
+	// the ones users care about). Tests that use newTestSession DO
+	// call SetActiveSessionOnClose, so MCP logging works in tests.
+	//
+	// Stdlib log.* calls: keep log.SetOutput(errOut) for now.
+	// There is no way to redirect stdlib log to slog in Go, and
+	// we don't use log.* in hot paths anyway.
+	shim := &shimHandler{}
 	log.SetOutput(errOut)
+	slog.SetDefault(slog.New(shim))
 
-	// Create the SDK server. Capabilities are auto-inferred from
-	// the registered tools (we register 12 below), so we do not
-	// pass an explicit Capabilities struct.
+	// Create the SDK server with explicit ServerOptions so the
+	// contract with MCP clients is clear (G-4):
+	//   - Tools: auto-inferred from registerTools() below
+	//     (SDK sets Tools: {ListChanged: true} when any tool is
+	//     registered).
+	//   - Resources, Prompts: SDK leaves them nil because we
+	//     never call AddResource / AddPrompt. We do NOT set
+	//     HasResources / HasPrompts in ServerOptions, so the
+	//     wire contract is "I do not advertise these" — clients
+	//     won't issue resources/list or prompts/list against us.
+	//   - Logging: SDK defaults Logging to &LoggingCapabilities{}
+	//     regardless of whether we register a handler. The C-3
+	//     shimHandler wires the actual logging dispatch:
+	//     activeSession.Log() is called when a session exists;
+	//     if the client never calls logging/setLevel, the SDK
+	//     silently drops the message (per MCP spec).
+	//
+	// G-4 (docs/mcp/backlog.md §G-4 + docs/mcp/missing-capabilities.md §G-4).
+	//
+	// SDK note: go-sdk v1.1.0 does not expose a Capabilities field
+	// in ServerOptions; the only control points are HasResources /
+	// HasPrompts / HasTools. We keep them all at zero (the default)
+	// to preserve "Tools auto-on, Resources / Prompts off" semantics.
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    serverName,
 		Version: serverVersion,
@@ -94,9 +142,33 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 	// for ping / initialize) it falls back to bare "mcp".
 	server.AddReceivingMiddleware(callerInjectMiddleware(root))
 
+	// Coerce the well-known Cursor-bridge type-encoding bugs
+	// (B1 boolean, B2 array, B3 integer) on tools/call arguments
+	// before the SDK unmarshals them into the typed handler Input
+	// struct. RFC docs/rfc/2026-10-15-mcp-coerce-middleware.md.
+	// The middleware is conservative (only flips values that
+	// match a small whitelist of "client obviously meant the
+	// schema type" patterns) and a strict no-op for already-correct
+	// inputs, so raw stdio / Go SDK / Claude Code clients see no
+	// difference. The schema itself is unchanged.
+	server.AddReceivingMiddleware(coerceMiddleware())
+
 	// Register the 12 kron_* tools. Done after middleware so
 	// handlers see the injected caller on their ctx.
 	registerTools(server)
+
+	// C-1: register the kron://intents/{slug} resource template.
+	// One template covers every intent (no per-intent static
+	// AddResource calls); the per-read handler does the lookup.
+	// docs/mcp/missing-capabilities.md §C-1.
+	registerResources(server)
+
+	// RFC docs/rfc/2026-10-14-mcp-prompts.md: register 3 prompt
+	// templates (kron-implement / kron-drift-check / kron-review).
+	// The SDK auto-infers the prompts capability from AddPrompt
+	// calls (same path as AddTool/AddResourceTemplate); the
+	// capabilities_test.go suite asserts this stays true.
+	registerPrompts(server)
 
 	// Run blocks until the client closes stdin or the transport
 	// errors out. Returning a non-nil error here means
@@ -115,7 +187,61 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err := server.Run(context.Background(), transport); err != nil {
+	return runWithSignalCtx(server, transport)
+}
+
+// runWithSignalCtx is Run's stdio-entry implementation with a
+// context that cancels on os.Interrupt. The split from Run() lets
+// tests drive the cancellation path via runWithCtx (no real
+// signal required) while production keeps the clean
+// signal.NotifyContext integration.
+//
+// We register ONLY os.Interrupt:
+//   - Windows doesn't deliver SIGTERM to console processes, so
+//     adding it would be dead code on the platform Kron
+//     development happens on.
+//   - The stdio MCP server's primary exit path is "client closes
+//     stdin" (EOF on os.Stdin) — the SDK's transport.Run goroutine
+//     returns from ss.Wait() when the stdin reader hits EOF.
+//     Signal-based termination is a fallback for the case where
+//     the user (or a parent process) wants to kill the server
+//     while the client is still attached (or hung).
+//   - stop() unregisters the signal handler when the function
+//     returns, so multiple Run() invocations from tests don't
+//     leak handlers.
+func runWithSignalCtx(server *mcp.Server, transport mcp.Transport) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	return runWithCtx(ctx, server, transport)
+}
+
+// runWithCtx is the innermost Run implementation: it owns no
+// process-level state and can be driven with any context.Context
+// the caller supplies. Tests pass a context they control (and
+// cancel); the production path supplies a signal.NotifyContext.
+// The two layers (signal vs. plain context) are intentionally
+// separate so the "production vs. test" choice happens at the
+// boundary, not deep inside Run.
+//
+// context.Canceled is the expected outcome of a signal-triggered
+// shutdown. We swallow it so main.go's exitFromErr maps the run
+// to exit 0 (clean shutdown) rather than 1 (transport failure).
+// Other ctx-derived errors (DeadlineExceeded) are surfaced the
+// same way: a server that times out is shutting down on the
+// operator's behalf, not failing.
+func runWithCtx(ctx context.Context, server *mcp.Server, transport mcp.Transport) error {
+	// C-3: The shimHandler routes log records to the MCP Logging
+	// capability when a session is active. In production, server.Run()
+	// creates the session internally and doesn't expose it to us, so
+	// we cannot call SetActiveSession. The shimHandler's fallback
+	// (which uses a no-op logger) handles the "no session" case.
+	// Tests that use newTestSession (testkit.go) DO call
+	// SetActiveSessionOnClose after server.Connect, so MCP logging
+	// works for tests.
+	if err := server.Run(ctx, transport); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil
+		}
 		return fmt.Errorf("kron serve-mcp: %w", err)
 	}
 	return nil
@@ -157,14 +283,106 @@ func (nopWriteCloser) Close() error { return nil }
 // resolveMCPRoot parses the optional "-CWD <root>" flag pair. Keeping
 // it stdlib-only (no cobra) is intentional — this layer is
 // independently testable and shouldn't drag in CLI argument conventions.
+//
+// Fallback priority (RFC docs/rfc/2026-10-13-multi-project-registry.md
+// §2.8 + docs/rfc/2026-10-14-projects-json-schema-extension.md §2.1):
+//
+//  1. -CWD <root> flag   — explicit override, wins
+//  2. projects.json::current_project — GUI-maintained active project
+//  3. os.Getwd()         — stdio default
+//
+// After resolving the path, we validate that <root>/.kron/ exists.
+// MCP clients (Claude Code, Cursor MCP runtime, VSCode extensions)
+// typically spawn the kron subprocess with cwd set to the project
+// root, so os.Getwd() is correct in the common case. But there is
+// no protocol-level guarantee: a misconfigured client can spawn
+// kron in $HOME or some other directory, in which case the SDK
+// hands us a perfectly valid path that just isn't a Kron project.
+// Validating up front lets us fail with a clear, actionable error
+// ("pass -CWD <repo-root>") instead of waiting for the first
+// tool call to surface ".kron/ not found; run kron_init first"
+// — which is misleading because the project isn't missing, the
+// cwd is.
 func resolveMCPRoot(args []string) (string, error) {
-	if len(args) == 0 {
-		return os.Getwd()
+	switch {
+	case len(args) == 2 && args[0] == "-CWD":
+		abs, err := filepath.Abs(args[1])
+		if err != nil {
+			return "", fmt.Errorf("kron serve-mcp: cannot resolve -CWD path %q: %w", args[1], err)
+		}
+		return validateIsKronProject(abs)
+
+	case len(args) == 0:
+		// Try current_project from projects.json before falling
+		// back to os.Getwd(). Per RFC §2.8 priority 2. A missing
+		// or unparseable registry is NOT an error here — we
+		// silently fall through to os.Getwd() because the stdio
+		// spawn may legitimately happen before any kron
+		// register/init has ever run (e.g. first-time setup).
+		if cp, err := readCurrentProjectFromRegistry(); err == nil && cp != "" {
+			if abs, err := filepath.Abs(cp); err == nil {
+				if _, statErr := os.Stat(filepath.Join(abs, ".kron")); statErr == nil {
+					return abs, nil
+				}
+				// current_project points at a non-Kron path
+				// (e.g. user removed .kron/ since registering).
+				// Fall through to os.Getwd() rather than
+				// failing — the user may have multiple
+				// checkouts and this one simply isn't
+				// current anymore.
+			}
+		}
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("kron serve-mcp: cannot determine working directory: %w", err)
+		}
+		return validateIsKronProject(wd)
+
+	default:
+		return "", fmt.Errorf("kron serve-mcp: unexpected arguments %v (only -CWD <root> is supported)", args)
 	}
-	if len(args) == 2 && args[0] == "-CWD" {
-		return filepath.Abs(args[1])
+}
+
+// readCurrentProjectFromRegistry reads the multi-project
+// registry and returns its current_project field, or "" +
+// non-nil error if anything goes wrong (missing file, parse
+// error, empty current_project). The non-nil error lets the
+// caller distinguish "no registry" from "registry without
+// current_project" — both are valid fallback states.
+func readCurrentProjectFromRegistry() (string, error) {
+	reg, err := store.ReadProjectsJSON()
+	if err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("kron serve-mcp: unexpected arguments %v (only -CWD <root> is supported)", args)
+	if reg == nil || reg.CurrentProject == "" {
+		return "", fmt.Errorf("no current_project set")
+	}
+	return reg.CurrentProject, nil
+}
+
+// validateIsKronProject checks that path contains a .kron/
+// directory and returns a clear error if not. Used by
+// resolveMCPRoot after picking a root from -CWD or os.Getwd().
+func validateIsKronProject(path string) (string, error) {
+	kronDir := filepath.Join(path, ".kron")
+	info, err := os.Stat(kronDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf(
+				"kron serve-mcp: %s is not a Kron project (.kron/ not found). "+
+					"Pass -CWD <repo-root> to point at the directory that contains .kron/",
+				path,
+			)
+		}
+		return "", fmt.Errorf("kron serve-mcp: cannot stat %s: %w", kronDir, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf(
+			"kron serve-mcp: %s exists but is not a directory (.kron/ must be a directory)",
+			kronDir,
+		)
+	}
+	return path, nil
 }
 
 // callerInjectMiddleware returns a server.AddReceivingMiddleware
@@ -235,7 +453,7 @@ func repoRootFrom(ctx context.Context) string {
 // the Session interface itself does not expose a typed ClientInfo
 // accessor at this version; we fall back to "" and rely on the
 // future SDK to add the typed accessor. See
-// docs/process/rfc-2026-10-04-mcp-sdk-adoption.md §C for the
+// docs/rfc/2026-10-04-mcp-sdk-adoption.md §C for the
 // follow-up that wires ClientInfo-based attribution once the SDK
 // stabilises.
 func clientNameFromReq(req mcp.Request) string {

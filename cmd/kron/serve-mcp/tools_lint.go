@@ -62,10 +62,11 @@ func lintOutputFromDiags(diags []lint.Diag) LintOutput {
 			sev = "error"
 		}
 		out.Errors = append(out.Errors, LintDiag{
-			Rule:     string(d.Rule),
-			Where:    d.Where,
-			Severity: sev,
-			Detail:   d.Detail,
+			Rule:       string(d.Rule),
+			Where:      d.Where,
+			Severity:   sev,
+			Detail:     d.Detail,
+			Suggestion: d.Suggestion,
 		})
 		switch sev {
 		case "error":

@@ -2,6 +2,7 @@ package servemcp
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -39,15 +40,37 @@ type testSession struct {
 //
 // The returned cleanup closes the client session and the server.
 // The test should defer cleanup() right after the call.
+//
+// KRON_PROJECTS_JSON_PATH isolation: kron_init's RFC 2026-10-14-§2.6
+// side effect (register project + set current_project) writes to
+// the multi-project registry at <kron-bin>/projects.json. Without
+// isolation every test would race on the same on-disk file. We
+// honour the project's documented test escape hatch (see
+// internal/store/project_registry.go: ProjectsJSONPath reads
+// KRON_PROJECTS_JSON_PATH first) and set it to a per-test temp path.
+// t.Setenv auto-cleans on test end.
 func newTestSession(t *testing.T, root string) *testSession {
 	t.Helper()
+	registryPath := filepath.Join(t.TempDir(), "projects.json")
+	t.Setenv("KRON_PROJECTS_JSON_PATH", registryPath)
+
 	server := mcp.NewServer(&mcp.Implementation{Name: "kron-test", Version: "v1.2.0"}, nil)
 
 	// Inject the repo root on the ctx so handlers read .kron/intents/
 	// from the test's temp dir, not from os.Getwd().
 	server.AddReceivingMiddleware(callerInjectMiddleware(root))
+	server.AddReceivingMiddleware(coerceMiddleware())
 
 	registerTools(server)
+	// C-1: register the kron://intents/{slug} resource template
+	// so test clients can exercise resources/list + resources/read
+	// against the same handler the production server uses.
+	registerResources(server)
+	// RFC 2026-10-14-mcp-prompts.md: register the 3 prompt
+	// templates so test clients can exercise prompts/list +
+	// prompts/get against the same handlers the production server
+	// uses.
+	registerPrompts(server)
 
 	st, ct := mcp.NewInMemoryTransports()
 
@@ -69,6 +92,11 @@ func newTestSession(t *testing.T, root string) *testSession {
 	cleanup := func() {
 		_ = cs.Close()
 		_ = ss.Close()
+		ClearActiveSession(ss)
 	}
+	// C-3: wire active session for MCP logging so tests can also
+	// exercise the logging path (even though tests don't verify it yet).
+	clearSession := SetActiveSessionOnClose(ss)
+	t.Cleanup(clearSession)
 	return &testSession{Server: server, Session: cs, Cleanup: cleanup}
 }

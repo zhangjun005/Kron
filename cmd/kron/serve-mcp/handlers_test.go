@@ -12,6 +12,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/xxx/kron/internal/store"
 )
 
 // These tests cover the 12 v1.1+ handlers (kron_init / add / update /
@@ -157,10 +159,62 @@ func TestInit_HappyPath(t *testing.T) {
 	assert.True(t, r.OK)
 	assert.Equal(t, ".kron/intents", r.IntentsDir)
 	assert.False(t, r.AlreadyInitialised)
+	// repo_root must echo back the absolute path the server is
+	// operating on (the test's temp dir, cleaned to handle
+	// short-path / casing normalisation on Windows). This is the
+	// "AI knows which directory the server thinks it's in" hook
+	// — see HandleInit for the rationale.
+	assert.Equal(t, filepath.Clean(dir), filepath.Clean(r.RepoRoot),
+		"repo_root must be the absolute path the server is operating on")
+	// registered_current_project is the init+register side effect
+	// (RFC 2026-10-14 §2.6). On a fresh project the side effect
+	// auto-promotes the new project to current, so the field
+	// must equal the project's absolute path (cleaned).
+	assert.Equal(t, filepath.Clean(dir), filepath.Clean(r.RegisteredCurrentProject),
+		"registered_current_project must equal the new project root on fresh init")
 
 	info, err := os.Stat(filepath.Join(dir, ".kron"))
 	require.NoError(t, err)
 	assert.True(t, info.IsDir())
+}
+
+// TestInit_RegistersProjectInRegistry locks RFC 2026-10-14-§2.6
+// parity with the CLI path: kron_init must (a) append the project
+// to projects.json::projects[], (b) promote it to current_project,
+// and (c) return the post-write current_project in
+// InitOutput.RegisteredCurrentProject. The CLI path already does
+// (a)+(b) in cmd/kron/cli/init.go; this test is the MCP
+// counterpart.
+//
+// Isolation: newTestSession points KRON_PROJECTS_JSON_PATH at a
+// per-test temp path so the on-disk registry is empty before
+// kron_init runs.
+func TestInit_RegistersProjectInRegistry(t *testing.T) {
+	dir := t.TempDir()
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_init",
+		Arguments: map[string]any{},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	var r InitOutput
+	require.NoError(t, structuredInto(res, &r))
+	abs, err := filepath.Abs(dir)
+	require.NoError(t, err)
+
+	// (a) projects.json must exist (WriteProjectsJSON created it)
+	// and parse. (b) projects[] must contain exactly one entry
+	// for the new project. (c) current_project must equal the
+	// new project's absolute path.
+	reg, err := store.ReadProjectsJSON()
+	require.NoError(t, err)
+	require.Len(t, reg.Projects, 1, "fresh init must register exactly one project")
+	assert.Equal(t, filepath.Clean(abs), filepath.Clean(reg.Projects[0].Path))
+	assert.NotEmpty(t, reg.Projects[0].AddedAt, "added_at must be set on insert")
+	assert.Equal(t, filepath.Clean(abs), filepath.Clean(reg.CurrentProject),
+		"current_project must be promoted to the new project")
 }
 
 func TestInit_Idempotent(t *testing.T) {
@@ -176,6 +230,13 @@ func TestInit_Idempotent(t *testing.T) {
 	require.NoError(t, structuredInto(res, &r))
 	assert.True(t, r.OK)
 	assert.True(t, r.AlreadyInitialised, "second init must report already_initialised=true")
+	// registered_current_project is still the project (re-init is
+	// idempotent: the side effect re-promotes the same path, no
+	// duplicate entry is inserted). CLI parity.
+	abs, err := filepath.Abs(dir)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Clean(abs), filepath.Clean(r.RegisteredCurrentProject),
+		"re-init must keep current_project pointing at this project")
 }
 
 // --- kron_add --------------------------------------------------------
@@ -221,6 +282,43 @@ func TestAdd_InvalidSlug(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.True(t, res.IsError, "invalid slug must fail")
+}
+
+// TestAdd_RejectsEmptyRationale locks F7: kron_add must reject
+// assumptions[] entries with empty / whitespace-only rationale at
+// write time, mirroring lint.RuleAssumptionRationaleRequired. The
+// MCP path's resolveAssumptionsForIntent is the load-bearing check;
+// the lint rule stays as a backstop for edits that bypass the
+// helper (manual edits, future CLI update path).
+func TestAdd_RejectsEmptyRationale(t *testing.T) {
+	dir := initRepo(t)
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+
+	cases := []struct {
+		name      string
+		rationale string
+	}{
+		{"empty string", ""},
+		{"whitespace only", "   \t\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+				Name: "kron_add",
+				Arguments: map[string]any{
+					"slug": "auth/jwt-" + tc.name,
+					"assumptions": []map[string]any{{
+						"id":        "single-region",
+						"severity":  "hard",
+						"rationale": tc.rationale,
+					}},
+				},
+			})
+			require.NoError(t, err)
+			assert.True(t, res.IsError, "empty rationale must be rejected at write time")
+		})
+	}
 }
 
 // TestAdd_NodeKind covers RFC 2026-10-08-writer-readme-symmetry §3.5:
@@ -620,6 +718,72 @@ func TestImpact_MarkdownAnchorKind(t *testing.T) {
 	assert.Equal(t, "markdown", r.IncomingAnchors[0].Kind)
 }
 
+// TestImpact_C6_SplitFields verifies C-6: the incoming_anchors_code
+// and incoming_anchors_markdown split fields are populated correctly
+// while the unified incoming_anchors remains for backward compatibility.
+func TestImpact_C6_SplitFields(t *testing.T) {
+	dir := initRepo(t)
+	addIntent(t, dir, "api/rest", "", "")
+
+	// Source file with anchor (code kind).
+	src := "// @kron:intent api/rest\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "server.go"), []byte(src), 0o644))
+
+	// Markdown files with anchors (markdown kind). HTML comment syntax
+	// per RFC 2026-10-08-md-anchors.md §1.
+	md := "<!-- @kron:intent api/rest -->\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte(md), 0o644))
+
+	// Create docs/ subdirectory for the second markdown file.
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "docs"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "docs", "api.md"), []byte(md), 0o644))
+
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_impact",
+		Arguments: map[string]any{"slug": "api/rest"},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+
+	var r ImpactOutput
+	require.NoError(t, structuredInto(res, &r))
+
+	// Unified field (legacy): all 3 anchors.
+	require.Len(t, r.IncomingAnchors, 3)
+
+	// Code split: exactly 1 (server.go).
+	require.Len(t, r.IncomingAnchorsCode, 1)
+	assert.Equal(t, "server.go", r.IncomingAnchorsCode[0].FilePath)
+	assert.Equal(t, "code", r.IncomingAnchorsCode[0].Kind)
+
+	// Markdown split: exactly 2 (README.md, docs/api.md), sorted by file path.
+	// Scanner returns forward slashes per RFC 2026-10-08-path-conventions.md.
+	require.Len(t, r.IncomingAnchorsMarkdown, 2)
+	assert.Equal(t, "README.md", r.IncomingAnchorsMarkdown[0].FilePath)
+	assert.Equal(t, "docs/api.md", r.IncomingAnchorsMarkdown[1].FilePath)
+	assert.Equal(t, "markdown", r.IncomingAnchorsMarkdown[0].Kind)
+	assert.Equal(t, "markdown", r.IncomingAnchorsMarkdown[1].Kind)
+
+	// The split fields are subsets of the unified field.
+	codePaths := make(map[string]bool)
+	for _, a := range r.IncomingAnchorsCode {
+		codePaths[a.FilePath] = true
+	}
+	mdPaths := make(map[string]bool)
+	for _, a := range r.IncomingAnchorsMarkdown {
+		mdPaths[a.FilePath] = true
+	}
+	for _, a := range r.IncomingAnchors {
+		if a.Kind == "code" {
+			assert.True(t, codePaths[a.FilePath], "code anchor %v not in incoming_anchors_code", a.FilePath)
+		} else {
+			assert.True(t, mdPaths[a.FilePath], "markdown anchor %v not in incoming_anchors_markdown", a.FilePath)
+		}
+	}
+}
+
 // --- kron_intent_density --------------------------------------------
 
 func TestIntentDensity_EmptyRepo(t *testing.T) {
@@ -811,6 +975,47 @@ func TestGet_NoRelationsByDefault(t *testing.T) {
 	assert.Nil(t, r.Intent.Relations, "default kron_get must not populate relations")
 }
 
+// TestCursorBridgeShapesAreCoerced verifies the live SDK dispatch path accepts
+// the three argument shapes emitted by Cursor's MCP bridge.
+func TestCursorBridgeShapesAreCoerced(t *testing.T) {
+	dir := initRepo(t)
+	addIntent(t, dir, "auth/jwt", "AuthService", "# JWT\n")
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+
+	// why: JSON-RPC arguments are intentionally untyped at the protocol boundary
+	// so this test can reproduce Cursor's malformed JSON shapes.
+	getResult, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "kron_get",
+		Arguments: map[string]any{
+			"slug":              "auth/jwt",
+			"include_relations": "true",
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, getResult.IsError)
+	var get GetOutput
+	require.NoError(t, structuredInto(getResult, &get))
+	require.NotNil(t, get.Intent.Relations, "string true must be coerced to boolean true")
+
+	updateResult, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "kron_update",
+		Arguments: map[string]any{
+			"slug":      "auth/jwt",
+			"reviewers": map[string]any{"item": "@cursor"},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, updateResult.IsError)
+
+	staleResult, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_stale",
+		Arguments: map[string]any{"days_threshold": "0"},
+	})
+	require.NoError(t, err)
+	require.False(t, staleResult.IsError)
+}
+
 // --- kron_tree -----------------------------------------------------
 
 // TestTree_Empty verifies an empty repo returns a synthetic root
@@ -923,18 +1128,25 @@ func TestServer_AllToolsRegistered(t *testing.T) {
 		"kron_stale":          nil,
 		"kron_tree":           nil,
 		// Required-param tools: provide minimal valid values.
-		"kron_get":          {"slug": "does-not-exist"},
-		"kron_add":          {"slug": "smoke-test-add"},
-		"kron_update":       {"slug": "smoke-test-ux", "body": "x"},
-		"kron_delete":       {"slug": "smoke-test-delete"},
-		"kron_restore":      {"slug": "smoke-test-delete"},
-		"kron_assume_check": {"file_path": ""}, // empty is valid; SDK schema allows ""
-		"kron_impact":       {"slug": "does-not-exist"},
+		"kron_get":           {"slug": "does-not-exist"},
+		"kron_add":           {"slug": "smoke-test-add"},
+		"kron_update":        {"slug": "smoke-test-ux", "body": "x"},
+		"kron_delete":        {"slug": "smoke-test-delete"},
+		"kron_restore":       {"slug": "smoke-test-delete"},
+		"kron_assume_check":  {"file_path": ""}, // empty is valid; SDK schema allows ""
+		"kron_impact":        {"slug": "does-not-exist"},
+		"kron_assume_create": {"id": "smoke-assumption", "text": "smoke test text", "default_severity": "soft"},
+		"kron_assume_update": {"id": "smoke-assumption-ux"},
+		"kron_assume_delete": {"id": "smoke-assumption-delete"},
+		"kron_assume_get":    {"id": "smoke-assumption-get"},
+		"kron_assume_list":   {},
 	}
 	for _, name := range []string{
 		"kron_lint", "kron_list", "kron_get",
 		"kron_init", "kron_add", "kron_update", "kron_delete", "kron_restore",
-		"kron_assume_check", "kron_impact", "kron_intent_density", "kron_stale",
+		"kron_assume_check", "kron_assume_create", "kron_assume_update",
+		"kron_assume_delete", "kron_assume_get", "kron_assume_list",
+		"kron_impact", "kron_intent_density", "kron_stale",
 		"kron_tree",
 	} {
 		t.Run(name, func(t *testing.T) {
