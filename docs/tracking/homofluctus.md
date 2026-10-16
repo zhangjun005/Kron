@@ -100,7 +100,7 @@
 | 2026-10-15 | `git push origin feat/serve-lsp` | `7c3c030` (push) | 推送到 `origin/feat/serve-lsp`；本地 7c3c030 = 远端 7c3c030 一致 |
 | 2026-10-15 | ②-B LSP SDK 集成 | `7c3c030` (依赖入 `go.mod`) | RFC `2026-10-07-lsp-sdk.md` §3 拍板 + `2026-10-12-lsp-decisions.md` §1 explicit approval 知悉 LSP 3.18 vs 3.17 偏差 |
 | 2026-10-16 | tracking 文档重构 | `5815ad7` | 只列任务 + 原理；砍掉状态列 / 工作量列 / 上游动态 / 纪律 / 长期愿景 / AI 自动化协议 |
-| 2026-10-16 | ③-M5 VSIX 本地打包 | 待提交 | 加入 publisher/repository 元数据、vsce 打包脚本与 `.vscodeignore`；VSIX 已生成，未发布 |
+| 2026-10-16 | ③-M5 VSIX 本地打包 | `4c995d4` | 加入 publisher/repository 元数据、vsce 打包脚本与 `.vscodeignore`；VSIX 已生成，未发布 |
 
 ---
 
