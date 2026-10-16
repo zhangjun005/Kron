@@ -1,9 +1,13 @@
 {
   "name": "kron-vscode",
   "displayName": "Kron",
+  "publisher": "homofluctus",
   "description": "Kron language support",
   "version": "0.0.1",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zhangjun005/Kron.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -52,7 +56,8 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "vscode:prepublish": "npm run compile"
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package --dependencies"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
@@ -62,6 +67,7 @@
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^4.0.0",
     "typescript": "^5.3.3"
   }
 }

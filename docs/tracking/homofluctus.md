@@ -60,7 +60,7 @@
 | **③-M2** 在源码锚点行展示 hover 并支持 definition 跳转 | LSP 后端 hover/definition 已有实现；扩展已向 LSP 注册本地文件；VSCode Extension Host 端到端验证仍待完成 |
 | **③-M3** definition（go-to-definition）+ completion | definition 随 M2 已由 LSP 提供；completion 属 LSP v1.4+ 评估，不在当前范围 |
 | **③-M4** 侧边栏（kron intent 树） | 已用 VSCode 原生 Explorer TreeView + 官方 MCP SDK 调用 `kron_tree`，支持刷新；首 workspace only，暂无详情/编辑 UI |
-| **③-M5** 发布到 VSCode Marketplace | 需确认 publisher ID 并使用其 Marketplace 凭据发布；当前未发布 |
+| **③-M5** 发布到 VSCode Marketplace | 已用 publisher ID `homofluctus` 生成 `frontend/vscode/kron-vscode-0.0.1.vsix`；未上传 Marketplace。vsce 提示仓库缺 LICENSE 文件，公开发布前需确认项目许可证 |
 
 ---
 
@@ -87,6 +87,7 @@
 - ③-M0 建立了扩展骨架和本地 stdio LSP demo，依赖安装与 TypeScript 编译通过；VSCode Extension Host 手工启动尚未验证。
 - ③-M1 已切换为真实 `kron serve-lsp -CWD <workspace-root>` 子进程，`kron.serverPath` 支持配置；`npm run compile` 通过。Extension Host 联调和多 workspace 支持仍待完成。
 - ③-M4 增加只读意图树：独立启动 `serve-mcp` 子进程，通过 SDK 调用 `kron_tree`；`npm run compile` 通过。多 workspace、节点交互及 Extension Host 实测未完成。
+- ③-M5 按 HomoFluctus 要求只生成、不发布 VSIX：publisher 为 `homofluctus`，`npm run compile` 与 `npm run package` 通过；产物 `frontend/vscode/kron-vscode-0.0.1.vsix`（4.39 MB）。vsce 提示仓库没有 LICENSE 文件；上传 Marketplace 前需确认许可证及 publisher 账号归属。
 - 顺序提交：`5341b03` (Writer.Update 同实例串行化)、`0c8a564` (存储状态与路径验证日志)、`f882ae5` (VSCode M0)、`e6f292f` (M1)、`070fb6b` (M2)、`9894d28` (CLI RFC)、`6f051f5` (CLI trash/restore)、`b532069` (M4)、`50c85b3` (进度日志)。已推送至 `origin/feat/serve-lsp`。
 
 | 日期 | 任务 | commit | 备注 |
@@ -99,6 +100,7 @@
 | 2026-10-15 | `git push origin feat/serve-lsp` | `7c3c030` (push) | 推送到 `origin/feat/serve-lsp`；本地 7c3c030 = 远端 7c3c030 一致 |
 | 2026-10-15 | ②-B LSP SDK 集成 | `7c3c030` (依赖入 `go.mod`) | RFC `2026-10-07-lsp-sdk.md` §3 拍板 + `2026-10-12-lsp-decisions.md` §1 explicit approval 知悉 LSP 3.18 vs 3.17 偏差 |
 | 2026-10-16 | tracking 文档重构 | `5815ad7` | 只列任务 + 原理；砍掉状态列 / 工作量列 / 上游动态 / 纪律 / 长期愿景 / AI 自动化协议 |
+| 2026-10-16 | ③-M5 VSIX 本地打包 | 待提交 | 加入 publisher/repository 元数据、vsce 打包脚本与 `.vscodeignore`；VSIX 已生成，未发布 |
 
 ---
 
