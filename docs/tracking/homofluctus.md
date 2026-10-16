@@ -57,7 +57,7 @@
 |---|---|
 | **③-M0** VSCode 扩展建仓 + 跑通 `vscode-languageclient` 最小 demo | 已建 `frontend/vscode/` 扩展骨架与本地 LSP demo；`npm run compile` 通过；Extension Host 尚未实跑 |
 | **③-M1** 加载 `kron serve-lsp` stdIO 子进程 + `initialize` 握手 | 已接入 `kron.serverPath`（默认 `kron`）和 workspace root 启动参数；无 workspace 时提示且不启动；需在 VSCode Extension Host 配置真实二进制完成手工联调 |
-| **③-M2** 打开 `.kron/intents/*.md` → hover 出 `[[anchor]]` 解析 | 端到端首次 demo；**阻塞** = M1 + LSP 实现 |
+| **③-M2** 在源码锚点行展示 hover 并支持 definition 跳转 | LSP 后端 hover/definition 已有实现；扩展已向 LSP 注册本地文件；VSCode Extension Host 端到端验证仍待完成 |
 | **③-M3** definition（go-to-definition）+ completion | **阻塞** = ②-C 完成（v1.4+ 不在 v1.3 范围） |
 | **③-M4** 侧边栏（kron intent 树） | 用 shadcn/ui（zhangjun005 §7.3 拍板）+ VSCode webview |
 | **③-M5** 发布到 VSCode Marketplace | 走 `vsce publish`；**阻塞** = zhangjun005 批 publisher 账号 |

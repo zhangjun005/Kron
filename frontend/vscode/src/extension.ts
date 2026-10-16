@@ -15,7 +15,7 @@ async function activate(context: vscode.ExtensionContext): Promise<void> {
     run: { command: configuredPath, args: ['serve-lsp', '-CWD', workspace.uri.fsPath] },
     debug: { command: configuredPath, args: ['serve-lsp', '-CWD', workspace.uri.fsPath] },
   }
-  const clientOptions = { documentSelector: [{ scheme: 'file', language: 'markdown' }] }
+  const clientOptions = { documentSelector: [{ scheme: 'file' }] }
   languageClient = new client.LanguageClient('kron', 'Kron', serverOptions, clientOptions)
   await languageClient.start()
 }
