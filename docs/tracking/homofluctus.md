@@ -24,10 +24,10 @@
 | 任务 | 原理 |
 |---|---|
 | **①-A** `Writer.Update` 边界测试（5 个 case：损坏 frontmatter / kind 保持 / 连续 trash→restore 链 / 并发无 panic） | 已完成 `50dfc20` 10/13；给 LSP e2e 提供"损坏 frontmatter"fixture；见 §8 |
-| **①-B** MoveToTrash + RestoreFromTrash 双向幂等测试 | 现状：单步测试有，**连续 trash→restore→trash→restore 链路无**（§2.2 原文） |
+| **①-B** MoveToTrash + RestoreFromTrash 双向幂等测试 | 已有 `TestWriter_TrashRestore_IdempotentChain` 覆盖连续 trash→restore→trash→restore 四步和内容完整性（先前追踪状态已过期） |
 | **①-C** GC（hard-delete 过期软删项）RFC 拍板 | 架构 §7 标"v1.4+ 不做"——拍板不与实施混谈；实施仍被 §7.2 纪律"不写 GC"拦着 |
 | **①-D** store 包 benchmark | **放弃**（10/15 查实 `internal/store/` 0 个 `func Benchmark`；同类工作已被 MCP 侧 `143c860` 覆盖一部分）；按"未完成项不滚到下周"纪律**永久放弃** |
-| **①-E** 写并发安全审查（`Writer.Update` 多协程同时改同一 slug） | `writeFileAtomic` 单写安全，**多写需加锁？**——潜在数据竞争 / 顺序未定义 |
+| **①-E** 写并发安全审查（`Writer.Update` 多协程同时改同一 slug） | 已对单个 `Writer` 的 Update 读改写加互斥锁；`go test -race ./internal/store` 通过。不同 Writer 实例/进程间仍无协调，仍可能 last-write-wins |
 | **①-F** 跨平台路径测试（Windows / macOS / Linux） | `paths_test.go` 当前可能仅 Linux 验证；你正在 Windows 上工作，是真风险点 |
 | **①-G** 多根仓库支持 | 架构 §0 暗示单 root——必须先开 RFC 拍板需求；纯实施工作 2 周，**RFC 拍板优先** |
 
@@ -82,7 +82,8 @@
 - 恢复的 `.agents/skills/go-style/SKILL.md` 与 `ts-style/SKILL.md` 和 stash 中版本逐字节一致；工作区文件已保留。
 - `gofmt -l .`、`go vet ./...`、`go test ./...` 均通过。全仓格式化检查原先发现的 Go 文件已格式化。提交 `a42a05f` 已创建；两次推送均因 GitHub HTTPS 连接失败，`origin/feat/serve-lsp` 尚未更新。
 - 本次整合含 MCP、CLI、store、lint、parser、项目注册及文档变更。项目注册的 `projects.json` 读改写仅保证原子文件替换，不提供并发写入串行化；多进程并发注册仍可能丢失更新。
-- 保留未完成范围：IDE 扩展 demo / LSP 子进程集成 / UI / Marketplace；completion、diagnostics、workspace/symbol（文档明确不属于当前 LSP v1.3 范围）；CLI 软删/恢复入口后续工作。①-B、①-E、①-F 需继续核对或补齐。
+- 保留未完成范围：IDE 扩展 demo / LSP 子进程集成 / UI / Marketplace；completion、diagnostics、workspace/symbol（文档明确不属于当前 LSP v1.3 范围）；CLI 软删/恢复入口后续工作。
+- ①-B 经代码核对已完成；①-E 对同一 Writer 实例已加锁并通过 race 测试，跨实例/进程并发仍未解决；①-F 仍需跨平台验证。
 
 | 日期 | 任务 | commit | 备注 |
 |---|---|---|---|

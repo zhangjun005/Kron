@@ -17,6 +17,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/xxx/kron/internal/model"
@@ -29,7 +30,8 @@ import (
 // Keep the two structs in sync if more path helpers are added.
 type Writer struct {
 	// Root is the absolute path to the repository root containing .kron/.
-	Root string
+	Root     string
+	updateMu sync.Mutex
 }
 
 // NewWriter returns a Writer rooted at root. Same validation as NewReader.
@@ -330,8 +332,11 @@ func WithAllowCreatorChange() UpdateOption {
 // Note: Update cannot rename an intent. To rename, use MoveToTrash +
 // Write (preserves history through the trash dir).
 //
-// TODO(v1.4+): last-write-wins on concurrent updates. Consider etag.
+// Updates through the same Writer are serialized. Separate Writer instances
+// targeting the same root are not coordinated; last-write-wins remains possible.
 func (w *Writer) Update(ctx context.Context, slug string, p UpdatePatch, opts ...UpdateOption) error {
+	w.updateMu.Lock()
+	defer w.updateMu.Unlock()
 	_ = ctx
 	if err := parser.ValidateSlug(slug); err != nil {
 		return fmt.Errorf("%w: %s", model.ErrSlugInvalid, slug)
