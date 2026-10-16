@@ -3,7 +3,7 @@
 > **负责人**：HomoFluctus
 > **模块范围**（你自己认领的）：文件存储 + LSP 访问层 + IDE 扩展 + CLI 软删除/恢复对外入口
 > **创建日期**：2026-10-13
-> **最后更新**：2026-10-16（完成工作区整合、格式检查与测试；推送受网络阻断）
+> **最后更新**：2026-10-16（store、CLI、VSCode M0–M2 已分步提交；待推送与 Extension Host 联调）
 > **本文件性质**：个人进度追踪，**不**入 PR / **不**影响 CI；只服务 HomoFluctus 自己 + AI assistant。
 
 ---
@@ -12,10 +12,10 @@
 
 | 交付物 | 任务清单入口 | 当前主任务 |
 |---|---|---|
-| ① 文件存储包 | [§2](#2-模块-①-文件存储包) | ①-B / ①-E / ①-F（未启动） |
-| ② LSP 访问层 | [§3](#3-模块-②-lsp-访问层) | ②-A（merge 冲突解 + push） |
-| ③ IDE 扩展 | [§4](#4-模块-③-ide-扩展) | ③-M0（建仓 + demo） |
-| ④ CLI 软删/恢复 | [§5](#5-模块-④-cli-软删除恢复) | ④-A（开 RFC 草案） |
+| ① 文件存储包 | [§2](#2-模块-①-文件存储包) | ①-F 跨 OS 实跑；①-E 跨 Writer/进程协调 |
+| ② LSP 访问层 | [§3](#3-模块-②-lsp-访问层) | ②-A-6 PR review / merge |
+| ③ IDE 扩展 | [§4](#4-模块-③-ide-扩展) | M3 completion 范围外；M4 树；M5 发布 |
+| ④ CLI 软删/恢复 | [§5](#5-模块-④-cli-软删除恢复) | 已实现并测试 |
 
 ---
 
@@ -37,12 +37,12 @@
 
 | 任务 | 原理 |
 |---|---|
-| **②-A-1** 解 `docs/implementation/lsp.md` add/add 冲突（feat 217 行 vs master 53 行） | 昨天 10/15 21:30 触发的 `git merge origin/master` 在该文件卡住——不解决 → merge commit 写不出来 → 后续 push / 测试都跑不起来 |
-| **②-A-2** 完成 merge（`git add` + `git commit`） | merge 冲突解了不算完成，必须 commit 才把 merge 结果落到 `feat/serve-lsp` HEAD |
-| **②-A-3** 跑 §4 红线（`go vet ./...` + `gofmt -l .` + `go test ./...`） | AGENTS.md §4 "提交前必跑"——把 master 合进来后必须重跑，避免引入上游回退 |
-| **②-A-4** push `feat/serve-lsp` | HEAD 包含 5815ad7（你的 tracking 文档）+ merge commit，**未 push**；不推会让 origin/feat/serve-lsp 落后本地 |
-| **②-A-5** 恢复 `.agents/`（`git stash pop`，`stash@{0}`） | merge 前 stash 装的 `.agents/` 2 个 untracked（go-style + ts-style skills），不 pop 会丢 |
-| **②-A-6** PR review + 合并 feat/serve-lsp → master | 合并时机 = 10/19 一次性合并（昨天 plan §7.1）；gh CLI 未装走浏览器 PR 流程；阻塞 = zhangjun005 review |
+| **②-A-1** 解 `docs/implementation/lsp.md` add/add 冲突 | 已在 `6f0cc4c` 整理冲突正文与约束，删除遗留标记 |
+| **②-A-2** 完成 merge | master 合并 commit `3ae6e1d` 已在分支历史；冲突文档已修复 |
+| **②-A-3** 跑 §4 红线 | `gofmt -l .`、`go vet ./...`、`go test ./...` 最近已通过；本轮提交后需重跑 |
+| **②-A-4** push `feat/serve-lsp` | `6f0cc4c` 已推送；本轮新增提交尚待推送 |
+| **②-A-5** 恢复 `.agents/` | 两个技能文件已纳入 `a42a05f`；内容与 stash blob 完全一致，stash 保留作备份 |
+| **②-A-6** PR review + 合并 feat/serve-lsp → master | 仍需维护者 review/merge；不可由本地测试替代 |
 | **②-B** LSP SDK 集成（`go.lsp.dev/protocol v1.0.1` + `jsonrpc2` + `uri`） | 已完成 `7c3c030` 10/15；RFC `2026-10-07-lsp-sdk.md` §3 拍板 + `2026-10-12-lsp-decisions.md` §1 知悉 LSP 3.18 vs 3.17 偏差；见 §8 |
 | **②-C** 扩展 LSP 方法：`textDocument/completion` | RFC `2026-10-07-lsp-sdk.md` §5 + impl §1.1 明确**不在 v1.3 范围**；v1.4+ 与 lint 引擎协同评估；需 `internal/parser.ValidateSlug` 缓存前置 |
 | **②-D** 扩展 LSP 方法：`textDocument/publishDiagnostics` | 同上不在 v1.3 范围；依赖 zhangjun005 主线的 `lint` 引擎 |
@@ -58,8 +58,8 @@
 | **③-M0** VSCode 扩展建仓 + 跑通 `vscode-languageclient` 最小 demo | 已建 `frontend/vscode/` 扩展骨架与本地 LSP demo；`npm run compile` 通过；Extension Host 尚未实跑 |
 | **③-M1** 加载 `kron serve-lsp` stdIO 子进程 + `initialize` 握手 | 已接入 `kron.serverPath`（默认 `kron`）和 workspace root 启动参数；无 workspace 时提示且不启动；需在 VSCode Extension Host 配置真实二进制完成手工联调 |
 | **③-M2** 在源码锚点行展示 hover 并支持 definition 跳转 | LSP 后端 hover/definition 已有实现；扩展已向 LSP 注册本地文件；VSCode Extension Host 端到端验证仍待完成 |
-| **③-M3** definition（go-to-definition）+ completion | **阻塞** = ②-C 完成（v1.4+ 不在 v1.3 范围） |
-| **③-M4** 侧边栏（kron intent 树） | 用 shadcn/ui（zhangjun005 §7.3 拍板）+ VSCode webview |
+| **③-M3** definition（go-to-definition）+ completion | definition 随 M2 已由 LSP 提供；completion 属 LSP v1.4+ 评估，不在当前范围 |
+| **③-M4** 侧边栏（kron intent 树） | 已用 VSCode 原生 Explorer TreeView + 官方 MCP SDK 调用 `kron_tree`，支持刷新；首 workspace only，暂无详情/编辑 UI |
 | **③-M5** 发布到 VSCode Marketplace | 走 `vsce publish`；**阻塞** = zhangjun005 批 publisher 账号 |
 
 ---
@@ -86,6 +86,7 @@
 - ①-B 经代码核对已完成；①-E 对同一 Writer 实例已加锁并通过 race 测试，跨实例/进程并发仍未解决；①-F 在 Windows 实跑并对 macOS/Linux 交叉编译，仍需对应 OS 实跑。
 - ③-M0 建立了扩展骨架和本地 stdio LSP demo，依赖安装与 TypeScript 编译通过；VSCode Extension Host 手工启动尚未验证。
 - ③-M1 已切换为真实 `kron serve-lsp -CWD <workspace-root>` 子进程，`kron.serverPath` 支持配置；`npm run compile` 通过。Extension Host 联调和多 workspace 支持仍待完成。
+- ③-M4 增加只读意图树：独立启动 `serve-mcp` 子进程，通过 SDK 调用 `kron_tree`；`npm run compile` 通过。多 workspace、节点交互及 Extension Host 实测未完成。
 
 | 日期 | 任务 | commit | 备注 |
 |---|---|---|---|

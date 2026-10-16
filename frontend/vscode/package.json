@@ -4,10 +4,39 @@
   "description": "Kron language support",
   "version": "0.0.1",
   "private": true,
-  "engines": { "vscode": "^1.85.0" },
-  "categories": ["Other"],
-  "activationEvents": ["onLanguage:markdown"],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
+    "commands": [
+      {
+        "command": "kron.refreshIntents",
+        "title": "Kron: Refresh Intents"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "kron.refreshIntents",
+          "when": "view == kron.intents",
+          "group": "navigation"
+        }
+      ]
+    },
+    "views": {
+      "explorer": [
+        {
+          "id": "kron.intents",
+          "name": "Kron Intents"
+        }
+      ]
+    },
     "configuration": {
       "title": "Kron",
       "properties": {
@@ -26,7 +55,9 @@
     "vscode:prepublish": "npm run compile"
   },
   "dependencies": {
-    "vscode-languageclient": "^9.0.1"
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "vscode-languageclient": "^9.0.1",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

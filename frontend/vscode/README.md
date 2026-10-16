@@ -19,3 +19,7 @@ initialize handshake. Activation without a workspace shows a warning and
 does not start a process. The client registers all local files so LSP hover
 and definition can inspect source anchors of the form
 `// @kron:intent <slug>`.
+
+The Explorer contains a read-only **Kron Intents** tree. It starts a separate
+`kron serve-mcp -CWD <workspace-root>` process and loads `kron_tree` through
+the official MCP TypeScript SDK. Use **Kron: Refresh Intents** to reload it.
