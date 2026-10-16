@@ -28,7 +28,7 @@
 | **①-C** GC（hard-delete 过期软删项）RFC 拍板 | 架构 §7 标"v1.4+ 不做"——拍板不与实施混谈；实施仍被 §7.2 纪律"不写 GC"拦着 |
 | **①-D** store 包 benchmark | **放弃**（10/15 查实 `internal/store/` 0 个 `func Benchmark`；同类工作已被 MCP 侧 `143c860` 覆盖一部分）；按"未完成项不滚到下周"纪律**永久放弃** |
 | **①-E** 写并发安全审查（`Writer.Update` 多协程同时改同一 slug） | 已通过稳定 `.kron/.lock/<slug-hash>.flock` 锁住同 slug 的 Write / Update / trash / restore；覆盖不同 Writer 和进程；Windows `go test -race ./internal/store` 通过。`projects.json` 并发改写按 RFC 明确不处理 |
-| **①-F** 跨平台路径测试（Windows / macOS / Linux） | Windows 实跑通过；Linux/macOS 仅交叉编译通过，仍待对应 OS 实跑 |
+| **①-F** 跨平台路径测试（Windows / macOS / Linux） | Windows 本机实跑通过；已加 GitHub Actions 三平台 `internal/store` 测试矩阵，待远端运行结果 |
 | **①-G** 多根仓库支持 | RFC `2026-10-13-multi-project-registry.md` 与 schema 扩展 RFC 已提交；registry、CLI register 和测试已落地。`projects.json` 的文件锁/竞态处理由 RFC 明确排除，不作为当前待办 |
 
 ---
@@ -40,7 +40,7 @@
 | **②-A-1** 解 `docs/implementation/lsp.md` add/add 冲突 | 已在 `6f0cc4c` 整理冲突正文与约束，删除遗留标记 |
 | **②-A-2** 完成 merge | master 合并 commit `3ae6e1d` 已在分支历史；冲突文档已修复 |
 | **②-A-3** 跑 §4 红线 | 最新 store 锁变更后 `gofmt -l .`、`go vet ./...`、`go test ./...` 均通过 |
-| **②-A-4** push `feat/serve-lsp` | 已推送至 `8d50a0c`；本轮新提交仍需推送 |
+| **②-A-4** push `feat/serve-lsp` | 已推送至 `5f8abb2`；本轮 CI 提交待推送 |
 | **②-A-5** 恢复 `.agents/` | 两个技能文件已纳入 `a42a05f`；内容与 stash blob 完全一致，stash 保留作备份 |
 | **②-A-6** PR review + 合并 feat/serve-lsp → master | 仍需维护者 review/merge；不可由本地测试替代 |
 | **②-B** LSP SDK 集成（`go.lsp.dev/protocol v1.0.1` + `jsonrpc2` + `uri`） | 已完成 `7c3c030` 10/15；RFC `2026-10-07-lsp-sdk.md` §3 拍板 + `2026-10-12-lsp-decisions.md` §1 知悉 LSP 3.18 vs 3.17 偏差；见 §8 |
@@ -90,6 +90,8 @@
 - ③-M5 按 HomoFluctus 要求只生成、不发布 VSIX：publisher 为 `homofluctus`，`npm run compile` 与 `npm run package` 通过；产物 `frontend/vscode/kron-vscode-0.0.1.vsix`（4.39 MB）。vsce 提示仓库没有 LICENSE 文件；上传 Marketplace 前需确认许可证及 publisher 账号归属。
 - 顺序提交：`5341b03` (Writer.Update 同实例串行化)、`0c8a564` (存储状态与路径验证日志)、`f882ae5` (VSCode M0)、`e6f292f` (M1)、`070fb6b` (M2)、`9894d28` (CLI RFC)、`6f051f5` (CLI trash/restore)、`b532069` (M4)、`50c85b3` (进度日志)。已推送至 `origin/feat/serve-lsp`。
 - ①-E 按 RFC `2026-10-08-mcp-lifecycle.md` 实现稳定 per-intent OS sidecar lock，覆盖 `Write` / `Update` / `MoveToTrash` / `RestoreFromTrash`。测试覆盖不同 Writer 并发保留互补 patch、子进程等待锁；Windows race test、全仓 Go 测试和 vet 通过。`projects.json` 并发按专属 RFC 明确不做。
+- ①-F Windows 本机测试已通过；为覆盖缺少本机 runtime 的 Linux/macOS，新增 `store-platform.yml` 三平台 GitHub Actions 测试，等待推送后的远端结果。
+- ③ IDE 扩展宿主 smoke：VS Code 1.142 Extension Host 日志确认扩展激活、LSP/MCP 子进程启动、刷新命令注册及 `kron_tree` 初始刷新完成；尚未验证 hover、F12 和刷新后的树节点交互。
 
 | 日期 | 任务 | commit | 备注 |
 |---|---|---|---|
@@ -103,7 +105,8 @@
 | 2026-10-16 | tracking 文档重构 | `5815ad7` | 只列任务 + 原理；砍掉状态列 / 工作量列 / 上游动态 / 纪律 / 长期愿景 / AI 自动化协议 |
 | 2026-10-16 | ③-M5 VSIX 本地打包 | `4c995d4` | 加入 publisher/repository 元数据、vsce 打包脚本与 `.vscodeignore`；VSIX 已生成，未发布 |
 | 2026-10-16 | 修正 MCP intent 锁方案 | `2798717` | 说明 atomic rename 下必须锁稳定 sidecar 文件 |
-| 2026-10-16 | ①-E per-intent 跨进程锁 | 待提交 | Writer 四种 mutation 均按 slug 加锁；新增跨 Writer 与子进程锁测试 |
+| 2026-10-16 | ①-E per-intent 跨进程锁 | `5f8abb2` | Writer 四种 mutation 均按 slug 加锁；新增跨 Writer 与子进程锁测试 |
+| 2026-10-16 | ①-F 三平台 store 测试 CI | 待提交 | Windows/macOS/Linux 上实际运行 `go test ./internal/store` |
 
 ---
 

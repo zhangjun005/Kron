@@ -14,6 +14,7 @@
 | Go tests | `go test ./...` | 0 failures | `.github/workflows/ci.yml` |
 | Import boundary | `grep -r "internal/cli" cmd/` | 0 matches | 手动或 CI script |
 | Import boundary | `grep -r "cmd/kron/" internal/` | 0 matches | 手动或 CI script |
+| Store platform tests | `go test ./internal/store` | Windows / macOS / Linux 均通过 | `.github/workflows/store-platform.yml` |
 
 ---
 
