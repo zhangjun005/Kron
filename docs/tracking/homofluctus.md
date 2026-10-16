@@ -68,9 +68,9 @@
 
 | 任务 | 原理 |
 |---|---|
-| **④-A** 开 RFC 拍板 CLI↔MCP 桥接 | 本周聚焦；候选 3 方案：子进程 stdIO / unix socket / 库内 import；列权衡后拍板；工作量 1 天 |
-| **④-B** CLI 入口骨架（flag 解析 + stub 实现） | **可提前写**——MCP 工具未就绪前可先写 + go test 通过；预期位置 `cmd/kron/cli/intent_soft_delete.go` + `intent_restore.go` |
-| **④-C** 实装：调 MCP 真实工具 | **阻塞** = ④-A 拍板 + zhangjun005 MCP 工具集（A1/A5）就绪 |
+| **④-A** RFC 拍板 CLI↔MCP 桥接 | 已由 RFC `2026-10-16-cli-soft-delete.md` 决策：不做访问层桥接，CLI 和 MCP 各自直接调用 `internal/store` |
+| **④-B** CLI 入口骨架（参数解析 + 实现） | `kron trash <slug>` / `kron restore <slug>` 已实现，包含参数检查和文件状态测试 |
+| **④-C** 实装软删/恢复 | 已直连 `internal/store.Writer`；MCP 继续独立使用相同 store API，不经 CLI 调用 |
 
 ---
 
