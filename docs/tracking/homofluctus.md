@@ -3,7 +3,7 @@
 > **负责人**：HomoFluctus
 > **模块范围**（你自己认领的）：文件存储 + LSP 访问层 + IDE 扩展 + CLI 软删除/恢复对外入口
 > **创建日期**：2026-10-13
-> **最后更新**：2026-10-16（VSIX 已生成并提交；Writer per-intent 跨实例/进程锁完成；待跨平台实跑、Extension Host 联调与 PR review/merge）
+> **最后更新**：2026-10-16（Writer 跨进程锁和三平台测试工作流已推送；待远端矩阵结果、扩展交互验证与 PR review/merge）
 > **本文件性质**：个人进度追踪，**不**入 PR / **不**影响 CI；只服务 HomoFluctus 自己 + AI assistant。
 
 ---
@@ -40,7 +40,7 @@
 | **②-A-1** 解 `docs/implementation/lsp.md` add/add 冲突 | 已在 `6f0cc4c` 整理冲突正文与约束，删除遗留标记 |
 | **②-A-2** 完成 merge | master 合并 commit `3ae6e1d` 已在分支历史；冲突文档已修复 |
 | **②-A-3** 跑 §4 红线 | 最新 store 锁变更后 `gofmt -l .`、`go vet ./...`、`go test ./...` 均通过 |
-| **②-A-4** push `feat/serve-lsp` | 已推送至 `5f8abb2`；本轮 CI 提交待推送 |
+| **②-A-4** push `feat/serve-lsp` | 已推送至 `215e334` |
 | **②-A-5** 恢复 `.agents/` | 两个技能文件已纳入 `a42a05f`；内容与 stash blob 完全一致，stash 保留作备份 |
 | **②-A-6** PR review + 合并 feat/serve-lsp → master | 仍需维护者 review/merge；不可由本地测试替代 |
 | **②-B** LSP SDK 集成（`go.lsp.dev/protocol v1.0.1` + `jsonrpc2` + `uri`） | 已完成 `7c3c030` 10/15；RFC `2026-10-07-lsp-sdk.md` §3 拍板 + `2026-10-12-lsp-decisions.md` §1 知悉 LSP 3.18 vs 3.17 偏差；见 §8 |
@@ -106,7 +106,7 @@
 | 2026-10-16 | ③-M5 VSIX 本地打包 | `4c995d4` | 加入 publisher/repository 元数据、vsce 打包脚本与 `.vscodeignore`；VSIX 已生成，未发布 |
 | 2026-10-16 | 修正 MCP intent 锁方案 | `2798717` | 说明 atomic rename 下必须锁稳定 sidecar 文件 |
 | 2026-10-16 | ①-E per-intent 跨进程锁 | `5f8abb2` | Writer 四种 mutation 均按 slug 加锁；新增跨 Writer 与子进程锁测试 |
-| 2026-10-16 | ①-F 三平台 store 测试 CI | 待提交 | Windows/macOS/Linux 上实际运行 `go test ./internal/store` |
+| 2026-10-16 | ①-F 三平台 store 测试 CI | `215e334` | Windows/macOS/Linux 上实际运行 `go test ./internal/store`；待远端结果 |
 
 ---
 
