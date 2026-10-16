@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -661,4 +663,123 @@ func TestWriter_Update_Concurrent_NoPanic(t *testing.T) {
 		got.Frontmatter.Status == model.StatusSuperseded ||
 		got.Frontmatter.Status == model.StatusDraft,
 		"final status must be a valid enum value, got %v", got.Frontmatter.Status)
+}
+
+func TestWriter_Update_ConcurrentSeparateWritersPreservePatches(t *testing.T) {
+	dir := t.TempDir()
+	firstWriter, err := NewWriter(dir)
+	require.NoError(t, err)
+	secondWriter, err := NewWriter(dir)
+	require.NoError(t, err)
+	require.NoError(t, firstWriter.Write(context.Background(), newTestIntent("auth-jwt", "@alice")))
+
+	status := model.StatusSuperseded
+	reviewers := []string{"@reviewer"}
+	start := make(chan struct{})
+	errCh := make(chan error, 2)
+	go func() {
+		<-start
+		errCh <- firstWriter.Update(context.Background(), "auth-jwt", UpdatePatch{Status: &status, Actor: "@alice"})
+	}()
+	go func() {
+		<-start
+		errCh <- secondWriter.Update(context.Background(), "auth-jwt", UpdatePatch{Reviewers: &reviewers, Actor: "@bob"})
+	}()
+	close(start)
+	require.NoError(t, <-errCh)
+	require.NoError(t, <-errCh)
+
+	reader, err := NewReader(dir)
+	require.NoError(t, err)
+	got, err := reader.Load(context.Background(), "auth-jwt")
+	require.NoError(t, err)
+	assert.Equal(t, model.StatusSuperseded, got.Frontmatter.Status)
+	assert.Equal(t, reviewers, got.Frontmatter.Reviewers)
+}
+
+func TestIntentLock_ProcessHelper(t *testing.T) {
+	if os.Getenv("KRON_INTENT_LOCK_HELPER") != "1" {
+		return
+	}
+	w, err := NewWriter(os.Getenv("KRON_INTENT_LOCK_ROOT"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(os.Getenv("KRON_INTENT_LOCK_STARTED"), []byte("started"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := w.lockIntent("auth-jwt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := unlock(); err != nil {
+			t.Errorf("unlock intent: %v", err)
+		}
+	}()
+	if err := os.WriteFile(os.Getenv("KRON_INTENT_LOCK_ACQUIRED"), []byte("acquired"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(os.Getenv("KRON_INTENT_LOCK_RELEASE")); err == nil {
+			return
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("stat release signal: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for release signal")
+}
+
+func TestIntentLock_CoordinatesAcrossProcesses(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	require.NoError(t, err)
+	unlock, err := w.lockIntent("auth-jwt")
+	require.NoError(t, err)
+
+	started := filepath.Join(dir, "child-started")
+	acquired := filepath.Join(dir, "child-acquired")
+	release := filepath.Join(dir, "child-release")
+	command := exec.Command(os.Args[0], "-test.run=^TestIntentLock_ProcessHelper$")
+	command.Env = append(os.Environ(),
+		"KRON_INTENT_LOCK_HELPER=1",
+		"KRON_INTENT_LOCK_ROOT="+dir,
+		"KRON_INTENT_LOCK_STARTED="+started,
+		"KRON_INTENT_LOCK_ACQUIRED="+acquired,
+		"KRON_INTENT_LOCK_RELEASE="+release,
+	)
+	if err := command.Start(); err != nil {
+		require.NoError(t, unlock())
+		require.NoError(t, err)
+	}
+	childFinished := false
+	t.Cleanup(func() {
+		if !childFinished && command.Process != nil {
+			_ = command.Process.Kill()
+			_ = command.Wait()
+		}
+	})
+	waitForFile := func(path string) error {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, err := os.Stat(path); err == nil {
+				return nil
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		return fmt.Errorf("timed out waiting for %s", path)
+	}
+	require.NoError(t, waitForFile(started))
+	time.Sleep(100 * time.Millisecond)
+	_, acquiredErr := os.Stat(acquired)
+	assert.ErrorIs(t, acquiredErr, os.ErrNotExist, "child must wait while parent holds the per-intent lock")
+	require.NoError(t, unlock())
+	require.NoError(t, waitForFile(acquired))
+	require.NoError(t, os.WriteFile(release, []byte("release"), 0o600))
+	require.NoError(t, command.Wait())
+	childFinished = true
 }

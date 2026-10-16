@@ -154,12 +154,12 @@ sidecar 文件在进程退出后保留，只释放 OS 锁，不删除文件；�
 
 ### 3.2 Phase 2 (v1.1 实施, 1-2 周)
 
-- [ ] `internal/store` 加 stable per-intent sidecar lock (覆盖 Write / Update / MoveToTrash / RestoreFromTrash), 不改公开 API
+- [x] `internal/store` 加 stable per-intent sidecar lock (覆盖 Write / Update / MoveToTrash / RestoreFromTrash), 不改公开 API
 - [x] 不新增 `ErrConcurrentWrite`：同 slug 写入等待锁；仅锁系统错误返回普通包装错误
-- [ ] `internal/store/writer_test.go` 增跨 Writer 与跨进程锁测试 (`go test -race`)
-- [ ] `docs/implementation/error-catalog.md` 增 `ErrConcurrentWrite` 描述 (若新增)
-- [ ] `cmd/kron/serve-mcp/` OS 锁系统错误仍映射为 JSON-RPC `internal_error`（沿用一般错误映射）
-- [ ] `_ = ctx` 行保持不变（锁等待不承诺 context 取消；本任务不改变公开 API）
+- [x] `internal/store/writer_test.go` 增跨 Writer 与跨进程锁测试 (`go test -race`)
+- [x] 不增加 `ErrConcurrentWrite`，因此不修改 error catalog
+- [x] 锁错误沿用 `serve-mcp` 的一般内部错误映射
+- [x] `_ = ctx` 行保持不变（锁等待不承诺 context 取消；本任务不改变公开 API）
 
 ### 3.3 Phase 3 (v1.2+ 优化, 可选)
 

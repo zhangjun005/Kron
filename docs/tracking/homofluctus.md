@@ -3,7 +3,7 @@
 > **负责人**：HomoFluctus
 > **模块范围**（你自己认领的）：文件存储 + LSP 访问层 + IDE 扩展 + CLI 软删除/恢复对外入口
 > **创建日期**：2026-10-13
-> **最后更新**：2026-10-16（store、CLI、VSCode M0–M4 分步提交并推送至 `origin/feat/serve-lsp`；待 Extension Host 联调）
+> **最后更新**：2026-10-16（VSIX 已生成并提交；Writer per-intent 跨实例/进程锁完成；待跨平台实跑、Extension Host 联调与 PR review/merge）
 > **本文件性质**：个人进度追踪，**不**入 PR / **不**影响 CI；只服务 HomoFluctus 自己 + AI assistant。
 
 ---
@@ -12,9 +12,9 @@
 
 | 交付物 | 任务清单入口 | 当前主任务 |
 |---|---|---|
-| ① 文件存储包 | [§2](#2-模块-①-文件存储包) | ①-F 跨 OS 实跑；①-E 跨 Writer/进程协调 |
+| ① 文件存储包 | [§2](#2-模块-①-文件存储包) | ①-F macOS/Linux 实跑 |
 | ② LSP 访问层 | [§3](#3-模块-②-lsp-访问层) | ②-A-6 PR review / merge |
-| ③ IDE 扩展 | [§4](#4-模块-③-ide-扩展) | M3 completion 范围外；M4 树；M5 发布 |
+| ③ IDE 扩展 | [§4](#4-模块-③-ide-扩展) | VSCode Extension Host 联调 |
 | ④ CLI 软删/恢复 | [§5](#5-模块-④-cli-软删除恢复) | 已实现并测试 |
 
 ---
@@ -27,9 +27,9 @@
 | **①-B** MoveToTrash + RestoreFromTrash 双向幂等测试 | 已有 `TestWriter_TrashRestore_IdempotentChain` 覆盖连续 trash→restore→trash→restore 四步及内容完整性；不代表重复 trash/restore 请求为 no-op |
 | **①-C** GC（hard-delete 过期软删项）RFC 拍板 | 架构 §7 标"v1.4+ 不做"——拍板不与实施混谈；实施仍被 §7.2 纪律"不写 GC"拦着 |
 | **①-D** store 包 benchmark | **放弃**（10/15 查实 `internal/store/` 0 个 `func Benchmark`；同类工作已被 MCP 侧 `143c860` 覆盖一部分）；按"未完成项不滚到下周"纪律**永久放弃** |
-| **①-E** 写并发安全审查（`Writer.Update` 多协程同时改同一 slug） | 已对单个 `Writer` 的 Update 读改写加互斥锁；`go test -race ./internal/store` 通过。不同 Writer 实例/进程间仍无协调，仍可能 last-write-wins |
-| **①-F** 跨平台路径测试（Windows / macOS / Linux） | Windows `go test ./internal/store` 通过；macOS / Linux 测试二进制交叉编译通过，未在对应 OS 实际运行 |
-| **①-G** 多根仓库支持 | RFC `2026-10-13-multi-project-registry.md` 与 schema 扩展 RFC 已提交；registry、CLI register 和测试已落地，本机并发写仍无进程间锁 |
+| **①-E** 写并发安全审查（`Writer.Update` 多协程同时改同一 slug） | 已通过稳定 `.kron/.lock/<slug-hash>.flock` 锁住同 slug 的 Write / Update / trash / restore；覆盖不同 Writer 和进程；Windows `go test -race ./internal/store` 通过。`projects.json` 并发改写按 RFC 明确不处理 |
+| **①-F** 跨平台路径测试（Windows / macOS / Linux） | Windows 实跑通过；Linux/macOS 仅交叉编译通过，仍待对应 OS 实跑 |
+| **①-G** 多根仓库支持 | RFC `2026-10-13-multi-project-registry.md` 与 schema 扩展 RFC 已提交；registry、CLI register 和测试已落地。`projects.json` 的文件锁/竞态处理由 RFC 明确排除，不作为当前待办 |
 
 ---
 
@@ -39,8 +39,8 @@
 |---|---|
 | **②-A-1** 解 `docs/implementation/lsp.md` add/add 冲突 | 已在 `6f0cc4c` 整理冲突正文与约束，删除遗留标记 |
 | **②-A-2** 完成 merge | master 合并 commit `3ae6e1d` 已在分支历史；冲突文档已修复 |
-| **②-A-3** 跑 §4 红线 | `gofmt -l .`、`go vet ./...`、`go test ./...` 最近已通过；本轮提交后需重跑 |
-| **②-A-4** push `feat/serve-lsp` | 已推送至 `50c85b3`；后续追踪日志提交也需推送 |
+| **②-A-3** 跑 §4 红线 | 最新 store 锁变更后 `gofmt -l .`、`go vet ./...`、`go test ./...` 均通过 |
+| **②-A-4** push `feat/serve-lsp` | 已推送至 `8d50a0c`；本轮新提交仍需推送 |
 | **②-A-5** 恢复 `.agents/` | 两个技能文件已纳入 `a42a05f`；内容与 stash blob 完全一致，stash 保留作备份 |
 | **②-A-6** PR review + 合并 feat/serve-lsp → master | 仍需维护者 review/merge；不可由本地测试替代 |
 | **②-B** LSP SDK 集成（`go.lsp.dev/protocol v1.0.1` + `jsonrpc2` + `uri`） | 已完成 `7c3c030` 10/15；RFC `2026-10-07-lsp-sdk.md` §3 拍板 + `2026-10-12-lsp-decisions.md` §1 知悉 LSP 3.18 vs 3.17 偏差；见 §8 |
@@ -60,7 +60,7 @@
 | **③-M2** 在源码锚点行展示 hover 并支持 definition 跳转 | LSP 后端 hover/definition 已有实现；扩展已向 LSP 注册本地文件；VSCode Extension Host 端到端验证仍待完成 |
 | **③-M3** definition（go-to-definition）+ completion | definition 随 M2 已由 LSP 提供；completion 属 LSP v1.4+ 评估，不在当前范围 |
 | **③-M4** 侧边栏（kron intent 树） | 已用 VSCode 原生 Explorer TreeView + 官方 MCP SDK 调用 `kron_tree`，支持刷新；首 workspace only，暂无详情/编辑 UI |
-| **③-M5** 发布到 VSCode Marketplace | 已用 publisher ID `homofluctus` 生成 `frontend/vscode/kron-vscode-0.0.1.vsix`；未上传 Marketplace。vsce 提示仓库缺 LICENSE 文件，公开发布前需确认项目许可证 |
+| **③-M5** 发布到 VSCode Marketplace | 按负责人决定只生成 VSIX，不发布；`frontend/vscode/kron-vscode-0.0.1.vsix` 已提交。Marketplace 发布不属于当前目标 |
 
 ---
 
@@ -89,6 +89,7 @@
 - ③-M4 增加只读意图树：独立启动 `serve-mcp` 子进程，通过 SDK 调用 `kron_tree`；`npm run compile` 通过。多 workspace、节点交互及 Extension Host 实测未完成。
 - ③-M5 按 HomoFluctus 要求只生成、不发布 VSIX：publisher 为 `homofluctus`，`npm run compile` 与 `npm run package` 通过；产物 `frontend/vscode/kron-vscode-0.0.1.vsix`（4.39 MB）。vsce 提示仓库没有 LICENSE 文件；上传 Marketplace 前需确认许可证及 publisher 账号归属。
 - 顺序提交：`5341b03` (Writer.Update 同实例串行化)、`0c8a564` (存储状态与路径验证日志)、`f882ae5` (VSCode M0)、`e6f292f` (M1)、`070fb6b` (M2)、`9894d28` (CLI RFC)、`6f051f5` (CLI trash/restore)、`b532069` (M4)、`50c85b3` (进度日志)。已推送至 `origin/feat/serve-lsp`。
+- ①-E 按 RFC `2026-10-08-mcp-lifecycle.md` 实现稳定 per-intent OS sidecar lock，覆盖 `Write` / `Update` / `MoveToTrash` / `RestoreFromTrash`。测试覆盖不同 Writer 并发保留互补 patch、子进程等待锁；Windows race test、全仓 Go 测试和 vet 通过。`projects.json` 并发按专属 RFC 明确不做。
 
 | 日期 | 任务 | commit | 备注 |
 |---|---|---|---|
@@ -101,6 +102,8 @@
 | 2026-10-15 | ②-B LSP SDK 集成 | `7c3c030` (依赖入 `go.mod`) | RFC `2026-10-07-lsp-sdk.md` §3 拍板 + `2026-10-12-lsp-decisions.md` §1 explicit approval 知悉 LSP 3.18 vs 3.17 偏差 |
 | 2026-10-16 | tracking 文档重构 | `5815ad7` | 只列任务 + 原理；砍掉状态列 / 工作量列 / 上游动态 / 纪律 / 长期愿景 / AI 自动化协议 |
 | 2026-10-16 | ③-M5 VSIX 本地打包 | `4c995d4` | 加入 publisher/repository 元数据、vsce 打包脚本与 `.vscodeignore`；VSIX 已生成，未发布 |
+| 2026-10-16 | 修正 MCP intent 锁方案 | `2798717` | 说明 atomic rename 下必须锁稳定 sidecar 文件 |
+| 2026-10-16 | ①-E per-intent 跨进程锁 | 待提交 | Writer 四种 mutation 均按 slug 加锁；新增跨 Writer 与子进程锁测试 |
 
 ---
 

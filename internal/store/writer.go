@@ -17,7 +17,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/xxx/kron/internal/model"
@@ -30,8 +29,7 @@ import (
 // Keep the two structs in sync if more path helpers are added.
 type Writer struct {
 	// Root is the absolute path to the repository root containing .kron/.
-	Root     string
-	updateMu sync.Mutex
+	Root string
 }
 
 // NewWriter returns a Writer rooted at root. Same validation as NewReader.
@@ -135,7 +133,13 @@ func (w *Writer) Write(ctx context.Context, intent *model.Intent) error {
 	if err := parser.ValidateSlug(intent.Slug); err != nil {
 		return fmt.Errorf("%w: %s", model.ErrSlugInvalid, intent.Slug)
 	}
+	return w.withIntentLock(intent.Slug, func() error {
+		return w.writeLocked(intent)
+	})
+}
 
+// writeLocked writes intent after the logical slug lock is held.
+func (w *Writer) writeLocked(intent *model.Intent) error {
 	path, err := w.writePath(intent.Kind, intent.Slug)
 	if err != nil {
 		return err
@@ -181,6 +185,12 @@ func (w *Writer) Write(ctx context.Context, intent *model.Intent) error {
 // a phantom path.
 func (w *Writer) MoveToTrash(ctx context.Context, slug string) error {
 	_ = ctx
+	return w.withIntentLock(slug, func() error {
+		return w.moveToTrashLocked(slug)
+	})
+}
+
+func (w *Writer) moveToTrashLocked(slug string) error {
 	src, err := resolveReadPath(w.Root, slug)
 	if err != nil {
 		return err
@@ -224,6 +234,12 @@ func (w *Writer) MoveToTrash(ctx context.Context, slug string) error {
 // clobber the live version).
 func (w *Writer) RestoreFromTrash(ctx context.Context, slug string) error {
 	_ = ctx
+	return w.withIntentLock(slug, func() error {
+		return w.restoreFromTrashLocked(slug)
+	})
+}
+
+func (w *Writer) restoreFromTrashLocked(slug string) error {
 	src := w.TrashPath(slug)
 	if _, err := os.Stat(src); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -332,15 +348,19 @@ func WithAllowCreatorChange() UpdateOption {
 // Note: Update cannot rename an intent. To rename, use MoveToTrash +
 // Write (preserves history through the trash dir).
 //
-// Updates through the same Writer are serialized. Separate Writer instances
-// targeting the same root are not coordinated; last-write-wins remains possible.
+// Mutations to the same slug are serialized across Writer instances and
+// processes using a stable OS-locked sidecar file.
 func (w *Writer) Update(ctx context.Context, slug string, p UpdatePatch, opts ...UpdateOption) error {
-	w.updateMu.Lock()
-	defer w.updateMu.Unlock()
-	_ = ctx
 	if err := parser.ValidateSlug(slug); err != nil {
 		return fmt.Errorf("%w: %s", model.ErrSlugInvalid, slug)
 	}
+	return w.withIntentLock(slug, func() error {
+		return w.updateLocked(ctx, slug, p, opts...)
+	})
+}
+
+func (w *Writer) updateLocked(ctx context.Context, slug string, p UpdatePatch, opts ...UpdateOption) error {
+	_ = ctx
 	if p.Actor == "" {
 		return errors.New("store: update requires actor")
 	}
