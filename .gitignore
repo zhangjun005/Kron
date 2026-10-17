@@ -9,6 +9,10 @@
 *.test
 *.out
 
+# Personal dev log (per-user, never commit)
+# Lives at D:\cursor\kron-dev-log\, NOT in any project subdir
+kron-dev-log/
+
 # Go workspace
 go.work
 go.work.sum
