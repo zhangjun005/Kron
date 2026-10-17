@@ -27,6 +27,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -46,6 +47,21 @@ type App struct {
 	mcpCmd    *exec.Cmd
 	mcpStdin  io.WriteCloser
 	mcpStdout *bufio.Reader
+	// mcpInitialized tracks whether handshakeLocked has completed the
+	// initialize / notifications/initialized / tools/list trio for
+	// the current subprocess. The MCP spec requires initialize to be
+	// called exactly once per session; re-calling it on a
+	// already-initialised server typically yields an error. We use
+	// this flag to make handshakeLocked idempotent so that both
+	// ListMCPToolsLive (work 1.4.b) and CallMCPTool (work 1.4.c) can
+	// share the same live subprocess without races.
+	mcpInitialized bool
+	// mcpServerInfo + mcpTools are the cached results of the first
+	// handshake so handshakeLocked can return them on subsequent
+	// calls without re-issuing the initialize / tools/list
+	// round-trip. Cleared by killLocked.
+	mcpServerInfo LiveServerInfo
+	mcpTools      []LiveMCPTool
 }
 
 // NewApp creates a new App application struct.
@@ -77,6 +93,9 @@ func (a *App) killLocked() {
 	if a.mcpCmd == nil || a.mcpCmd.Process == nil {
 		a.mcpStdin = nil
 		a.mcpStdout = nil
+		a.mcpInitialized = false
+		a.mcpServerInfo = LiveServerInfo{}
+		a.mcpTools = nil
 		return
 	}
 	_ = a.mcpCmd.Process.Kill()
@@ -84,6 +103,9 @@ func (a *App) killLocked() {
 	a.mcpCmd = nil
 	a.mcpStdin = nil
 	a.mcpStdout = nil
+	a.mcpInitialized = false
+	a.mcpServerInfo = LiveServerInfo{}
+	a.mcpTools = nil
 }
 
 // KronInfo is the static metadata payload returned by GetKronInfo.
@@ -221,12 +243,36 @@ func (a *App) ListMCPToolsLive() (ListMCPToolsLiveResult, error) {
 //  2. ./build/bin/kron.exe relative to the process CWD. This is the
 //     standard `wails dev` artifact location; `wails dev` rebuilds it
 //     whenever the Wails Go side changes.
-//  3. ./build/bin/kron relative to the executable's own directory (for
+//  3. ./build/bin/kron-dev.exe — the headless CLI build that `wails dev`
+//     drops alongside kron.exe so the GUI can spawn a non-GUI kron to
+//     serve MCP without the WebView2 driver attaching. Preferring
+//     kron-dev.exe over kron.exe would normally be wrong (kron.exe is
+//     the version-paired GUI build) but `wails dev` keeps both in sync
+//     from the same source tree, so they have identical code. We only
+//     fall back to kron-dev when kron.exe itself is the Wails GUI
+//     wrapper and would deadlock on a serve-mcp subcommand — we detect
+//     that by probing for a `serve-mcp` invocation that exits 0 within
+//     a short window.
+//  4. ./build/bin/kron-cli.exe — a hand-built or CI-built CLI binary
+//     (e.g. `go build -o build/bin/kron-cli.exe ./cmd/kron`). Useful
+//     for testing without the full Wails dev round-trip.
+//  5. ./build/bin/kron relative to the executable's own directory (for
 //     future `wails build` deployments — Phase 1.5).
 //
 // We deliberately do not search PATH: the Wails GUI and the serve-mcp
 // binary are version-paired and we want to fail loud if the dev artifact
 // is missing rather than accidentally spawn an unrelated `kron` on PATH.
+//
+// Discovered in work 1.4.c: when `wails dev` builds, it produces both
+// `kron.exe` (the Wails GUI itself) and `kron-dev.exe` (a CLI-only
+// build from the same source). The original 1.4.b code only knew
+// about kron.exe and would deadlock in a WebView2 environment when
+// serve-mcp was invoked. The detection-via-`exec.LookPath` step below
+// is intentionally avoided: we cannot ask the OS whether a binary is
+// "GUI or CLI", and `exec.Cmd` doesn't expose that either. The
+// 2-second probe is cheap (it just runs `kron.exe serve-mcp -CWD
+// <empty>` and inspects the exit code) and gives us a definitive
+// answer without a config flag.
 func resolveServeMCPExecutable() (string, error) {
 	if override := os.Getenv(serveMCPPathEnvOverride); override != "" {
 		if _, err := os.Stat(override); err == nil {
@@ -239,14 +285,21 @@ func resolveServeMCPExecutable() (string, error) {
 	// is the standard artifact location.
 	cwd, err := os.Getwd()
 	if err == nil {
-		candidate := filepath.Join(cwd, "build", "bin", "kron.exe")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
+		// First try kron.exe — if it is the Wails GUI wrapper
+		// (the common case in `wails dev`), the probe below
+		// will detect that and we move on to kron-dev.exe.
+		if exe, ok := tryServeMCPCandidate(filepath.Join(cwd, "build", "bin", "kron.exe")); ok {
+			return exe, nil
+		}
+		if exe, ok := tryServeMCPCandidate(filepath.Join(cwd, "build", "bin", "kron-dev.exe")); ok {
+			return exe, nil
+		}
+		if exe, ok := tryServeMCPCandidate(filepath.Join(cwd, "build", "bin", "kron-cli.exe")); ok {
+			return exe, nil
 		}
 		// POSIX / wails build fallback alongside the GUI binary.
-		candidate2 := filepath.Join(cwd, "build", "bin", "kron")
-		if _, err := os.Stat(candidate2); err == nil {
-			return candidate2, nil
+		if exe, ok := tryServeMCPCandidate(filepath.Join(cwd, "build", "bin", "kron")); ok {
+			return exe, nil
 		}
 	}
 
@@ -262,6 +315,45 @@ func resolveServeMCPExecutable() (string, error) {
 		"wails: cannot find kron serve-mcp executable. " +
 			"Run `wails dev` first (it builds ./build/bin/kron.exe), " +
 			"or set $" + serveMCPPathEnvOverride + " to an absolute path.")
+}
+
+// tryServeMCPCandidate returns (path, true) if path exists AND looks
+// like a working `kron serve-mcp` binary. The probe runs the binary
+// with `-CWD <tempdir>` against an empty stdin and checks that the
+// process exits within 2 seconds (the SDK treats empty stdin as a
+// clean disconnect and returns no error). A Wails GUI wrapper would
+// try to spin up WebView2 and either hang past 2s or fail noisily —
+// either way, we move on to the next candidate.
+//
+// The probe is best-effort: if exec fails for any reason we treat
+// the candidate as "not usable" and return (path, false) so the
+// caller can keep searching. We do not surface probe errors because
+// they are environmental, not actionable.
+func tryServeMCPCandidate(path string) (string, bool) {
+	if _, err := os.Stat(path); err != nil {
+		return "", false
+	}
+	// A 0-byte file or a binary that exits immediately on a bad
+	// flag is "usable" for our purposes — it does not hang on
+	// stdin the way a Wails GUI does. We accept any exit within
+	// 2 seconds as a positive signal.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "serve-mcp", "-CWD", os.TempDir())
+	cmd.Stdin = strings.NewReader("")
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	_ = cmd.Run()
+	// cmd.Run returns nil on exit 0, *exec.ExitError on non-zero
+	// exit, and a context.DeadlineExceeded error if the 2s
+	// budget elapsed. We treat "exited (any code) within 2s" as
+	// the "usable" signal. context.DeadlineExceeded means it
+	// hung — which is exactly the Wails-GUI behaviour we are
+	// trying to detect.
+	if ctx.Err() == context.DeadlineExceeded {
+		return "", false
+	}
+	return path, true
 }
 
 // spawnLocked starts the kron serve-mcp subprocess. The caller MUST
@@ -290,13 +382,29 @@ func (a *App) spawnLocked(executable string) error {
 	a.mcpCmd = cmd
 	a.mcpStdin = stdin
 	a.mcpStdout = bufio.NewReader(stdout)
+	a.mcpInitialized = false
 	return nil
 }
 
 // handshakeLocked performs the three-message MCP handshake. The caller
 // MUST hold mcpMu and must have a live subprocess. Returns the parsed
 // serverInfo and the tool name list.
+//
+// Idempotency: if the subprocess has already been initialised
+// (mcpInitialized is true), the method is a no-op and returns the
+// cached serverInfo + tool list captured at the first handshake. This
+// lets CallMCPTool (work 1.4.c) safely call handshakeLocked on every
+// invocation: the first call pays the handshake cost, every call
+// after reuses the session. The MCP spec requires initialize to be
+// called exactly once per session; re-calling it on a live server
+// returns an error from the SDK. Work 1.4.b originally assumed the
+// handshake was a one-shot at first ListMCPToolsLive; work 1.4.c
+// needs to share the session so we make this idempotent.
 func (a *App) handshakeLocked() (LiveServerInfo, []LiveMCPTool, error) {
+	if a.mcpInitialized {
+		return a.mcpServerInfo, a.mcpTools, nil
+	}
+
 	// 1) initialize (id=1)
 	if err := a.writeMessage(jsonrpcRequest{
 		JSONRPC: "2.0",
@@ -363,6 +471,11 @@ func (a *App) handshakeLocked() (LiveServerInfo, []LiveMCPTool, error) {
 	for _, t := range listResult.Tools {
 		tools = append(tools, LiveMCPTool{Name: t.Name})
 	}
+
+	// Cache for future idempotent calls (see handshakeLocked doc).
+	a.mcpServerInfo = serverInfo
+	a.mcpTools = tools
+	a.mcpInitialized = true
 	return serverInfo, tools, nil
 }
 
@@ -487,4 +600,140 @@ type toolsListResult struct {
 // String returns a human-readable summary, useful for debugging.
 func (k KronInfo) String() string {
 	return fmt.Sprintf("%s v%s (%s/%s, Go %s)", k.Name, k.Version, k.OS, k.Arch, k.GoVersion)
+}
+
+// ---- tools/call bridge (work 1.4.c) -------------------------------------
+//
+// CallMCPTool is a generic bridge for invoking any `kron_*` tool on the
+// already-spawned serve-mcp subprocess. It runs the three-message
+// handshake lazily on the first call (same as ListMCPToolsLive) and
+// then issues one `tools/call` JSON-RPC request. The response payload
+// is the raw text content of the tool's first content block
+// (MCP `result.content[0].text` per the official SDK), returned as a
+// string. The React side parses it according to the per-tool schema
+// declared in cmd/kron/serve-mcp/tools_schema.go.
+//
+// Why generic instead of one method per tool: 1.4.c only needs
+// `kron_tree` today, but 1.4.d will need `kron_list`, and later
+// milestones need `kron_get` / `kron_impact` / etc. A single
+// (name, args) entrypoint keeps the Go bridge surface stable while
+// the React side adds more call sites. Per-tool marshalling lives
+// in TypeScript (where the per-tool schemas are already declared as
+// typed structs in wailsjs/go/models.ts).
+//
+// Iron-rule notes (architecture.md §〇 铁律 #9 + #10):
+//   - This method does NOT import internal/*.
+//   - The subprocess IS the access layer; the GUI only orchestrates
+//     the JSON-RPC exchange.
+//   - The first call pays the handshake cost (~1 cold start of the
+//     subprocess + initialize + notifications/initialized + tools/list)
+//     so subsequent calls reuse the live session.
+//
+// argsJSON is the tool's `arguments` object encoded as JSON. Pass "{}"
+// for tools that take no parameters (e.g. kron_tree today, kron_list
+// when no prefix is supplied). The Go side does NOT validate the JSON
+// shape against the tool's input schema — validation is the
+// subprocess's job, and a validation error surfaces as a non-nil
+// error returned to React (the same path as any other tools/call
+// failure).
+func (a *App) CallMCPTool(name string, argsJSON string) (string, error) {
+	if name == "" {
+		return "", errors.New("wails: CallMCPTool: tool name is required")
+	}
+	// Default empty args to {} so callers can pass "" for tools that
+	// take no parameters without thinking about the JSON layer.
+	if argsJSON == "" {
+		argsJSON = "{}"
+	}
+	// Validate argsJSON is a JSON object (per the MCP spec, arguments
+	// MUST be an object). This catches the common React-side bug of
+	// passing a bare scalar before we serialise it onto the wire.
+	var probe map[string]any
+	if err := json.Unmarshal([]byte(argsJSON), &probe); err != nil {
+		return "", fmt.Errorf("wails: CallMCPTool(%s): args must be a JSON object: %w", name, err)
+	}
+
+	executable, err := resolveServeMCPExecutable()
+	if err != nil {
+		return "", err
+	}
+
+	a.mcpMu.Lock()
+	defer a.mcpMu.Unlock()
+
+	// First call spawns + handshakes; subsequent calls reuse.
+	if a.mcpCmd == nil {
+		if err := a.spawnLocked(executable); err != nil {
+			return "", err
+		}
+	}
+	if _, _, err := a.handshakeLocked(); err != nil {
+		// Handshake failed: kill the subprocess so the next call
+		// gets a clean retry from a fresh spawn.
+		a.killLocked()
+		return "", err
+	}
+
+	return a.callToolLocked(name, []byte(argsJSON))
+}
+
+// callToolLocked issues one `tools/call` JSON-RPC request and returns
+// the raw text content of the first content block in the result. The
+// caller MUST hold mcpMu and must have a successfully-initialised
+// subprocess.
+func (a *App) callToolLocked(name string, argsJSON []byte) (string, error) {
+	// We use a fresh request id space per call (starting at 3, after
+	// the handshake's 1+2). Concurrent calls are not supported by
+	// this bridge today (mcpMu serialises them anyway), so a
+	// monotonic counter is unnecessary — a constant id is fine.
+	const callID = 3
+	if err := a.writeMessage(jsonrpcRequest{
+		JSONRPC: "2.0",
+		ID:      callID,
+		Method:  "tools/call",
+		Params: map[string]any{
+			"name":      name,
+			"arguments": json.RawMessage(argsJSON),
+		},
+	}); err != nil {
+		return "", fmt.Errorf("wails: CallMCPTool(%s): sending tools/call: %w", name, err)
+	}
+
+	var resp jsonrpcResponse
+	if err := a.readMessage(&resp); err != nil {
+		return "", fmt.Errorf("wails: CallMCPTool(%s): reading tools/call response: %w", name, err)
+	}
+	if resp.Error != nil {
+		return "", fmt.Errorf("wails: CallMCPTool(%s): server returned error: %s", name, resp.Error.Message)
+	}
+
+	// tools/call result shape (MCP spec):
+	//   { "content": [ { "type": "text", "text": "..." }, ... ],
+	//     "isError": false }
+	// We return the text of the first content block. For kron_*
+	// handlers this is the JSON-marshalled output struct (see
+	// tools_schema.go and the handler bodies).
+	var callRes struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		IsError bool `json:"isError"`
+	}
+	if err := json.Unmarshal(resp.Result, &callRes); err != nil {
+		return "", fmt.Errorf("wails: CallMCPTool(%s): parsing tools/call result: %w (raw=%s)", name, err, truncate(string(resp.Result), 200))
+	}
+	if callRes.IsError {
+		// The server flagged the call as a tool-level error. Surface
+		// the first content block's text (it is the human-readable
+		// error message) so the React side can render it.
+		if len(callRes.Content) > 0 {
+			return "", fmt.Errorf("wails: CallMCPTool(%s) tool error: %s", name, callRes.Content[0].Text)
+		}
+		return "", fmt.Errorf("wails: CallMCPTool(%s) tool error (no content)", name)
+	}
+	if len(callRes.Content) == 0 {
+		return "", fmt.Errorf("wails: CallMCPTool(%s): empty content array", name)
+	}
+	return callRes.Content[0].Text, nil
 }

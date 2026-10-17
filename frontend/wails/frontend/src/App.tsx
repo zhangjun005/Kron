@@ -29,7 +29,7 @@ import {
 import {ScrollArea} from '@/components/ui/scroll-area';
 import {Separator} from '@/components/ui/separator';
 import {Progress} from '@/components/ui/progress';
-import {GetKronInfo, ListMCPTools, ListMCPToolsLive} from '../wailsjs/go/main/App';
+import {GetKronInfo, ListMCPTools, ListMCPToolsLive, CallMCPTool} from '../wailsjs/go/main/App';
 import {
     type KronInfo,
     type IntentNode,
@@ -39,6 +39,7 @@ import {
 } from '@/lib/mock';
 import {BootAnimation} from '@/components/boot-animation';
 import {IntentTree} from '@/components/intent-tree';
+import {kronTreeToIntentNodes} from '@/lib/real-tree';
 
 // DataSource: how the MCP tools panel is populated. 'mock' is the
 // 1.3-era hard-coded list returned by ListMCPTools(); 'live' asks the
@@ -67,7 +68,28 @@ function App() {
     const [liveSource, setLiveSource] = useState<string>('');
     const [liveError, setLiveError] = useState<string | null>(null);
     const [liveLoading, setLiveLoading] = useState<boolean>(false);
+    // 1.4.c: live intent tree state. liveTree holds the
+    // kron_tree-derived IntentNode[]; it replaces the mock
+    // whenever the user is in 'live' mode AND the fetch has
+    // succeeded. liveTreeError surfaces a friendly message in
+    // place of the tree on failure. liveTreeLoading controls a
+    // subtle skeleton in the main pane (re-using the existing
+    // "Connecting…" / "Refreshing…" pattern from liveTools).
+    const [liveTree, setLiveTree] = useState<IntentNode[] | null>(null);
+    const [liveTreeError, setLiveTreeError] = useState<string | null>(null);
+    const [liveTreeLoading, setLiveTreeLoading] = useState<boolean>(false);
     const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+
+    // dataSource-aware tree: in 'mock' mode we always render the
+    // hard-coded mockIntentTree; in 'live' mode we render liveTree
+    // when available, and fall back to mockIntentTree on the first
+    // render before the fetch lands (or on error). Resetting the
+    // data source back to 'mock' discards the live tree so the
+    // user sees the canonical demo data again.
+    const displayTree: IntentNode[] =
+        dataSource === 'live' && liveTree !== null ? liveTree : mockIntentTree;
+    const showLiveTreeSkeleton: boolean =
+        dataSource === 'live' && liveTree === null && liveTreeError === null;
 
     const refreshLive = useCallback(async (): Promise<void> => {
         setLiveLoading(true);
@@ -86,6 +108,32 @@ function App() {
             // overwrites them.
         } finally {
             setLiveLoading(false);
+        }
+    }, []);
+
+    // 1.4.c: refresh the live intent tree by calling kron_tree
+    // (one JSON-RPC round-trip) and then kron_get once per leaf
+    // (N round-trips, parallelised via Promise.all in
+    // kronTreeToIntentNodes). Failures are surfaced via
+    // liveTreeError; the main pane falls back to the mock tree
+    // when liveTree === null so the page stays usable.
+    const refreshLiveTree = useCallback(async (): Promise<void> => {
+        setLiveTreeLoading(true);
+        setLiveTreeError(null);
+        try {
+            const treeText = await CallMCPTool('kron_tree', '{}');
+            const treeJson = JSON.parse(treeText) as {
+                root: import('@/lib/mcp-types').TreeNode;
+            };
+            const converted = await kronTreeToIntentNodes(treeJson);
+            setLiveTree(converted);
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            setLiveTreeError(msg);
+            // Keep the previous liveTree on a failed refresh so the
+            // UI does not flicker empty.
+        } finally {
+            setLiveTreeLoading(false);
         }
     }, []);
 
@@ -116,11 +164,19 @@ function App() {
     // the toggle to 'live'. Switching back to 'mock' does not call
     // the bridge — the subprocess stays alive in the background
     // and is reaped by the Wails OnShutdown hook (Go side).
+    //
+    // 1.4.c: when dataSource is 'live' we ALSO refresh the intent
+    // tree. Both refreshes are independent; a slow kron_tree
+    // fetch does not block the tools panel (and vice versa). We
+    // do not await them sequentially because the Go bridge
+    // serialises tool calls under mcpMu anyway, and parallel
+    // React state updates compose into a single render.
     useEffect(() => {
         if (dataSource === 'live') {
             void refreshLive();
+            void refreshLiveTree();
         }
-    }, [dataSource, refreshLive]);
+    }, [dataSource, refreshLive, refreshLiveTree]);
 
     return (
         <>
@@ -154,15 +210,58 @@ function App() {
                 />
                 <main className="flex-1 flex flex-col min-w-0">
                     <TopBar
-                        tree={tree}
+                        tree={displayTree}
                         filter={filter}
                         onFilterChange={setFilter}
                         onTreeChange={setTree}
+                        dataSource={dataSource}
+                        liveTreeLoading={liveTreeLoading}
+                        liveTreeError={liveTreeError}
+                        onRefreshLiveTree={(): void => {
+                            void refreshLiveTree();
+                        }}
                     />
                     <Separator/>
                     <div className="flex-1 overflow-hidden">
-                        <IntentTree data={tree} filter={filter}/>
+                        <IntentTree data={displayTree} filter={filter}/>
                     </div>
+                    {/* 1.4.c: live-tree status footer. Shows a
+                        subtle hint under the tree when we are
+                        loading the live tree, or a destructive
+                        error card when the fetch failed. Hidden
+                        in mock mode. */}
+                    {dataSource === 'live' && liveTreeError !== null && (
+                        <div className="px-5 pb-3">
+                            <Card className="border-destructive/50 bg-destructive/10">
+                                <CardContent className="p-2.5 flex items-start gap-2">
+                                    <pre className="text-[10px] text-destructive/90 whitespace-pre-wrap break-all flex-1">
+                                        {liveTreeError}
+                                    </pre>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-6 text-[10px] shrink-0"
+                                        onClick={(): void => {
+                                            void refreshLiveTree();
+                                        }}
+                                    >
+                                        Retry
+                                    </Button>
+                                </CardContent>
+                            </Card>
+                        </div>
+                    )}
+                    {dataSource === 'live' &&
+                        liveTreeError === null &&
+                        showLiveTreeSkeleton && (
+                            <div className="px-5 pb-3 text-[10px] text-muted-foreground">
+                                Loading live intent tree from
+                                <code className="font-mono ml-1">
+                                    kron serve-mcp
+                                </code>
+                                …
+                            </div>
+                        )}
                 </main>
             </div>
         </>
@@ -753,15 +852,31 @@ function TopBar(props: {
     filter: string;
     onFilterChange: (v: string) => void;
     onTreeChange: (t: IntentNode[]) => void;
+    dataSource: DataSource;
+    liveTreeLoading: boolean;
+    liveTreeError: string | null;
+    onRefreshLiveTree: () => void;
 }): JSX.Element {
-    const {tree, filter, onFilterChange, onTreeChange} = props;
+    const {
+        tree,
+        filter,
+        onFilterChange,
+        onTreeChange,
+        dataSource,
+        liveTreeLoading,
+        liveTreeError,
+        onRefreshLiveTree,
+    } = props;
+    const isLive = dataSource === 'live';
     return (
         <div className="flex items-center gap-3 px-5 h-14 shrink-0">
             <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
                 <History className="h-4 w-4 shrink-0"/>
                 <span className="truncate">Intent tree</span>
                 <ChevronRight className="h-3.5 w-3.5 shrink-0"/>
-                <span className="text-foreground font-medium truncate">workspace</span>
+                <span className="text-foreground font-medium truncate">
+                    {isLive ? 'kron serve-mcp' : 'workspace'}
+                </span>
             </div>
 
             <div className="flex-1 max-w-md ml-4 relative">
@@ -775,15 +890,35 @@ function TopBar(props: {
             </div>
 
             <div className="ml-auto flex items-center gap-2">
+                {/* 1.4.c: in live mode, "Reset" + "New intent" are
+                    mutations of the mock data and have no meaning
+                    against a real serve-mcp session. They stay
+                    visible (so the user can see the affordance is
+                    not lost — a future 1.4.d will re-wire them to
+                    kron_add / refresh), but are disabled. The
+                    primary action becomes "Refresh tree", which
+                    re-fetches kron_tree. */}
                 <Button
                     variant="outline"
                     size="sm"
+                    disabled={isLive}
+                    title={
+                        isLive
+                            ? 'Switch to Mock data to edit the demo tree'
+                            : 'Reset the demo tree to its initial state'
+                    }
                     onClick={(): void => onTreeChange(mockIntentTree)}
                 >
                     Reset
                 </Button>
                 <Button
                     size="sm"
+                    disabled={isLive}
+                    title={
+                        isLive
+                            ? 'Switch to Mock data to add a demo intent'
+                            : 'Add a synthetic intent to the demo tree'
+                    }
                     onClick={(): void => {
                         // Demo: add a synthetic intent at root.
                         const next: IntentNode[] = [
@@ -802,6 +937,25 @@ function TopBar(props: {
                 >
                     New intent
                 </Button>
+                {isLive && (
+                    <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={liveTreeLoading}
+                        onClick={onRefreshLiveTree}
+                        title={
+                            liveTreeError !== null
+                                ? 'Retry the kron_tree fetch'
+                                : 'Re-fetch kron_tree from the live server'
+                        }
+                    >
+                        {liveTreeLoading
+                            ? 'Refreshing…'
+                            : liveTreeError !== null
+                                ? 'Retry'
+                                : 'Refresh tree'}
+                    </Button>
+                )}
             </div>
         </div>
     );
