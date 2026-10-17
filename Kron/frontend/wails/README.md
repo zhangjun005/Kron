@@ -41,12 +41,12 @@ through `kron serve-mcp` over stdio JSON-RPC.
 
 ## Work status
 
-This is the **work 1.3 skeleton** — the Wails build pipeline is wired up, the Go ↔ TS bridge is verified to
-return static metadata, and the React overview page renders. Later work items add:
+This is the **work 1.3 / 1.4.b / 1.4.c skeleton** — the Wails build pipeline is wired up, the Go ↔ TS
+bridge exposes a live `kron serve-mcp` subprocess (1.4.b), and the React overview page renders the
+real intent tree on the `kron_tree` + `kron_get` MCP responses (1.4.c). Later work items add:
 
-- `wails dev` live window verification (work 1.4)
 - `wails build` cross-platform artefact (work 1.5)
-- shadcn/ui + real `kron serve-mcp` plumbing (2.x)
+- shadcn/ui full coverage + the rest of the kron_* tools (2.x)
 
 ## Running
 
@@ -57,6 +57,26 @@ wails build        # production cross-platform binary
 ```
 
 `wails dev` requires the Wails CLI (Go 1.20+, `go install github.com/wailsapp/wails/v2/cmd/wails@latest`).
+
+### Building the `kron serve-mcp` binary (1.4.b / 1.4.c dev workflow)
+
+The Wails GUI's Go bridge spawns `kron serve-mcp` as a stdio JSON-RPC subprocess. Wails' default
+build target is the **Wails GUI** itself (`build/bin/kron.exe`), which is not a CLI binary and
+will hang when invoked with `serve-mcp` (it spins up WebView2 instead of processing the
+subcommand). To run the live GUI in development you therefore need a separate **CLI binary** at
+one of the well-known paths the bridge probes (in order: `kron.exe`, `kron-dev.exe`,
+`kron-cli.exe`):
+
+```bash
+# from the repo root
+go build -o frontend/wails/build/bin/kron-cli.exe ./cmd/kron
+```
+
+Then `wails dev` picks up `kron-cli.exe` automatically. Alternatively, set
+`$KRON_WAILS_SERVE_MCP_EXE` to an absolute path of any `kron` CLI build to skip the probe.
+
+The CLI binary only needs to be rebuilt when you change the `cmd/kron/serve-mcp/` source tree;
+`wails dev` does not pick up `cmd/kron/` changes automatically (it watches `frontend/wails/`).
 
 ## Layout
 
