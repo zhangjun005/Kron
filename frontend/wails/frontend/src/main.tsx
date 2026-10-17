@@ -1,7 +1,10 @@
 import React from 'react'
 import {createRoot} from 'react-dom/client'
-import './style.css'
+import './index.css'
 import App from './App'
+
+// Force dark mode — Kron GUI uses a dark surface.
+document.documentElement.classList.add('dark')
 
 const container = document.getElementById('root')
 if (container === null) {
