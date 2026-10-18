@@ -21,3 +21,7 @@ export function ListMCPToolsLive() {
 export function ListProjectsLive() {
   return window['go']['main']['App']['ListProjectsLive']();
 }
+
+export function OpenInIDE(arg1) {
+  return window['go']['main']['App']['OpenInIDE'](arg1);
+}

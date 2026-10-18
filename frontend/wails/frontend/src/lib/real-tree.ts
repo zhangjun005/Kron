@@ -171,12 +171,22 @@ function convertNode(
     // We only enrich leaves (is_dir === false); directories get
     // updatedAt = epoch (they don't carry one on the wire today
     // either — see RFC TODO for kron_tree group metadata).
+    //
+    // Work 1.4.e: also surface the absolute .md path so the GUI
+    // can offer "click row → open in IDE". The wire field is
+    // `source_path` on the IntentBody (see tools_schema.go::IntentBody
+    // + the matching mcp-types.ts::IntentBody projection). Synthetic
+    // groups (is_dir === true) intentionally have no path: they do
+    // not correspond to a single file on disk.
     const enriched = node.is_dir ? undefined : enrichment.get(fullSlug);
     const updatedAt: string =
         enriched?.intent.frontmatter.updated_at ?? new Date(0).toISOString();
     const summary: string | undefined = node.is_dir
         ? undefined
         : summaryFromBody(enriched?.intent.body);
+    const path: string | undefined = node.is_dir
+        ? undefined
+        : enriched?.intent.source_path;
 
     const children: IntentNode[] = (node.children ?? []).map((child) =>
         convertNode(child, enrichment, fullSlug),
@@ -194,6 +204,7 @@ function convertNode(
         // via conditional spread so the resulting object matches
         // the IntentNode interface exactly.
         ...(summary !== undefined ? {summary} : {}),
+        ...(path !== undefined ? {path} : {}),
         children,
     };
 }

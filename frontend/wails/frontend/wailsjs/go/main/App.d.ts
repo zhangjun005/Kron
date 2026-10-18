@@ -11,3 +11,5 @@ export function ListMCPTools():Promise<Array<string>>;
 export function ListMCPToolsLive():Promise<main.ListMCPToolsLiveResult>;
 
 export function ListProjectsLive():Promise<main.ListProjectsLiveResult>;
+
+export function OpenInIDE(arg1:string):Promise<main.OpenIDEResult>;
