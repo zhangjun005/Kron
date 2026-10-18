@@ -9,6 +9,7 @@ import {
     CircleAlert,
     CircleCheck,
     CircleDashed,
+    ExternalLink,
     FileText,
     Folder,
     GitPullRequestArrow,
@@ -21,6 +22,7 @@ import {Button} from '@/components/ui/button';
 import {ScrollArea} from '@/components/ui/scroll-area';
 import {Card} from '@/components/ui/card';
 import {Separator} from '@/components/ui/separator';
+import {OpenInIDE} from '../../wailsjs/go/main/App';
 import type {IntentKind, IntentNode, IntentStatus} from '@/lib/mock';
 
 interface IntentTreeProps {
@@ -73,7 +75,7 @@ export function IntentTree(props: IntentTreeProps): JSX.Element {
                             </Badge>
                         </div>
                         <span className="text-[11px] text-muted-foreground">
-                            Click a row to expand
+                            Click a row to expand or open in IDE
                         </span>
                     </div>
                     <Separator/>
@@ -101,10 +103,57 @@ interface TreeRowProps {
 
 function TreeRow({node, depth}: TreeRowProps): JSX.Element {
     const [open, setOpen] = useState<boolean>(true);
+    // Work 1.4.e: per-row IDE-open error state. Cleared on next
+    // successful open. Rendered as a tiny destructive line under the
+    // row so the failure is visible without a toast. Empty string
+    // means "no error" (kept as a string rather than `string | null`
+    // so useState's initialiser is symmetric and the conditional
+    // render stays terse).
+    const [openErr, setOpenErr] = useState<string>('');
     const hasChildren = node.children.length > 0;
     const isGroup = node.kind === 'spec' && hasChildren;
     const status = statusBadge[node.status];
     const indent = 12 + depth * 18;
+
+    // Work 1.4.e: leaves that carry an absolute .md path are
+    // clickable targets for the "open in IDE" bridge. Directories
+    // (isGroup) keep their expand/collapse behaviour. Leaves WITHOUT
+    // a path (mock-mode demo data, or a kron_get that did not
+    // surface source_path) stay non-clickable for IDE opens but
+    // still get a subtle "live only" hint in the title attribute.
+    const nodePath: string | undefined = node.path;
+    const canOpenInIDE: boolean = !isGroup && nodePath !== undefined && nodePath !== '';
+
+    // Work 1.4.e: single click handler that branches on the row
+    // shape. We keep the row itself as the click target (no
+    // separate button) because RFC §3.1 specifies "调 code <file>
+    // 跳到 IDE 编辑" as the primary affordance — adding a separate
+    // icon button would dilute that. The chevron + ExternalLink
+    // indicators hint at the click outcome.
+    const handleClick = (): void => {
+        if (canOpenInIDE) {
+            // OpenInIDE is fire-and-forget: we optimistically clear
+            // the previous error and surface a new one if the bridge
+            // returns ok=false. We deliberately do NOT preventDefault
+            // / stopPropagation because the row is a plain div.
+            setOpenErr('');
+            void (async (): Promise<void> => {
+                try {
+                    const result = await OpenInIDE(nodePath!);
+                    if (!result.ok) {
+                        setOpenErr(result.err || 'failed to open in IDE');
+                    }
+                } catch (err: unknown) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    setOpenErr(msg);
+                }
+            })();
+            return;
+        }
+        if (hasChildren) {
+            setOpen(!open);
+        }
+    };
 
     return (
         <div>
@@ -115,9 +164,7 @@ function TreeRow({node, depth}: TreeRowProps): JSX.Element {
                     'cursor-pointer select-none',
                 )}
                 style={{paddingLeft: indent}}
-                onClick={(): void => {
-                    if (hasChildren) setOpen(!open);
-                }}
+                onClick={handleClick}
                 data-testid={`intent-row-${node.id}`}
             >
                 <span className="w-4 h-4 flex items-center justify-center text-muted-foreground shrink-0">
@@ -139,7 +186,13 @@ function TreeRow({node, depth}: TreeRowProps): JSX.Element {
                         'truncate',
                         isGroup ? 'text-sm font-medium' : 'text-sm',
                     )}
-                    title={node.title}
+                    title={
+                        canOpenInIDE
+                            ? `Open ${nodePath} in your IDE`
+                            : !isGroup && !canOpenInIDE
+                                ? 'Open in IDE available in live mode (switch in Settings)'
+                                : node.title
+                    }
                 >
                     {node.title}
                 </span>
@@ -151,6 +204,18 @@ function TreeRow({node, depth}: TreeRowProps): JSX.Element {
                 )}
 
                 <span className="ml-auto flex items-center gap-2 shrink-0">
+                    {/* Work 1.4.e: ExternalLink affordance for leaves
+                        that have a path. Rendered after the status
+                        badge so it does not steal the click target
+                        on the row itself. The icon is purely
+                        decorative — clicking it does nothing extra;
+                        the whole row is the click target. */}
+                    {canOpenInIDE && (
+                        <ExternalLink
+                            className="h-3 w-3 text-muted-foreground/70"
+                            aria-label="Open in IDE"
+                        />
+                    )}
                     <span className="hidden md:flex items-center gap-1 text-[11px] text-muted-foreground">
                         {statusDot[node.status]}
                         {relativeDate(node.updatedAt)}
@@ -160,6 +225,21 @@ function TreeRow({node, depth}: TreeRowProps): JSX.Element {
                     </Badge>
                 </span>
             </div>
+
+            {/* Work 1.4.e: surface IDE-open failures as a tiny
+                destructive line under the row. Hidden by default
+                (openErr === ''). Same indent as the row body so it
+                visually belongs to the same node. Cleared by the
+                next successful click. */}
+            {openErr !== '' && (
+                <div
+                    className="pb-1.5 text-[10px] text-destructive"
+                    style={{paddingLeft: indent + 24}}
+                    role="alert"
+                >
+                    {openErr}
+                </div>
+            )}
 
             {hasChildren && open && (
                 <div>

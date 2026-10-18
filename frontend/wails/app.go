@@ -29,6 +29,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -835,4 +836,130 @@ func (a *App) ListProjectsLive() (ListProjectsLiveResult, error) {
 	}
 	out.Source = fmt.Sprintf("stdio: kron_list_projects (%d projects)", len(out.Projects))
 	return out, nil
+}
+
+// ---- open-in-IDE bridge (work 1.4.e: edit-jump-IDE) -------------------
+//
+// OpenInIDE is the GUI bridge for RFC §3.1's "edit intent" half-support:
+// the GUI does NOT embed a markdown editor; instead it shells out to
+// an external IDE binary (`code` / `cursor`) with the .md file as the
+// argument, so the user lands in their existing editor with the cursor
+// on the file. Fallback chain when neither `code` nor `cursor` is on
+// PATH: the OS file-association handler (`rundll32` / `open` /
+// `xdg-open`).
+//
+// Iron-rule notes (architecture.md §〇 铁律 #9):
+//   - This method does NOT import internal/*.
+//   - The path passed in is whatever kron_get surfaced as
+//     `intent.source_path` (absolute, on-disk path). We re-absolutise
+//     defensively so a relative path from a stale kron_get cache still
+//     resolves correctly relative to the GUI process CWD.
+//   - We deliberately do NOT shell out via cmd / powershell / wscript
+//     on Windows because the user's intent is to land in a CODE EDITOR,
+//     not in Notepad. If neither `code` nor `cursor` is on PATH the
+//     user gets a structured error and can install one; we do not
+//     silently fall through to the OS file-association unless EVERY
+//     editor probe fails (last-resort, never silent).
+//
+// OpenIDEResult is what the React side receives from OpenInIDE.
+// The structured result (rather than just (string, error)) lets the
+// UI surface a friendly toast on success ("Opened in VS Code") and a
+// helpful diagnostic on failure ("`code` not found on PATH; install
+// the 'Shell Command: Install code in PATH' command from VS Code").
+type OpenIDEResult struct {
+	OK   bool   `json:"ok"`
+	IDE  string `json:"ide"`           // "code" / "cursor" / "os-default" / ""
+	PID  int    `json:"pid,omitempty"` // PID of the spawned editor (best-effort, 0 if detached)
+	Err  string `json:"err,omitempty"` // human-readable error when OK is false
+	Path string `json:"path"`          // absolute path that was opened (echo for diagnostics)
+}
+
+func (a *App) OpenInIDE(path string) (OpenIDEResult, error) {
+	if path == "" {
+		return OpenIDEResult{OK: false, Err: "empty path", Path: path}, nil
+	}
+
+	// Re-absolutise so a stale relative path from a cached kron_get
+	// still resolves against the GUI process CWD (which in `wails dev`
+	// is frontend/wails/).
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return OpenIDEResult{OK: false, Err: fmt.Sprintf("resolve abs path: %v", err), Path: path}, nil
+	}
+	if _, err := os.Stat(abs); err != nil {
+		return OpenIDEResult{OK: false, Err: fmt.Sprintf("file not found: %s", abs), Path: abs}, nil
+	}
+
+	// Probe `code` first (most common), then `cursor`. For each, try
+	// `exec.LookPath` (resolves PATH + PATHEXT on Windows) and on hit
+	// spawn with the file as the single arg. We do NOT wait: the
+	// editor is a long-lived GUI process and the React promise
+	// resolves the moment the spawn succeeds.
+	for _, ide := range []string{"code", "cursor"} {
+		bin, lookErr := exec.LookPath(ide)
+		if lookErr != nil {
+			continue
+		}
+		cmd := exec.Command(bin, abs)
+		cmd.Stdin = nil
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
+		// Detach on Windows: CREATE_NEW_PROCESS_GROUP so closing the
+		// Wails window does not kill the editor. On POSIX the Setpgid
+		// equivalent is the default; the editor outlives the GUI on
+		// its own.
+		if runtime.GOOS == "windows" {
+			cmd.SysProcAttr = &syscall.SysProcAttr{
+				CreationFlags: 0x00000200, // CREATE_NEW_PROCESS_GROUP
+			}
+		}
+		if startErr := cmd.Start(); startErr != nil {
+			// Spawn failed for this candidate; try the next one.
+			// We do not return early so the user still gets
+			// the `cursor` / OS-default fallback paths.
+			continue
+		}
+		pid := 0
+		if cmd.Process != nil {
+			pid = cmd.Process.Pid
+			// Release so the Wails GUI does not hold a wait handle
+			// to the editor. The editor continues independently.
+			_ = cmd.Process.Release()
+		}
+		return OpenIDEResult{OK: true, IDE: ide, PID: pid, Path: abs}, nil
+	}
+
+	// All IDE probes failed: fall back to the OS file-association
+	// handler. This is genuinely last-resort (Notepad / TextEdit /
+	// xdg-open generic handler) and is labelled as such in the
+	// result so the UI can warn the user.
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		// rundll32 url.dll,FileProtocolHandler opens a file in the
+		// user's default application. We do not pass `cmd.exe /c
+		// start` because the legacy `start` builtin can race the
+		// Wails process on rapid close.
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", abs)
+	case "darwin":
+		cmd = exec.Command("open", abs)
+	default:
+		cmd = exec.Command("xdg-open", abs)
+	}
+	cmd.Stdin = nil
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if startErr := cmd.Start(); startErr != nil {
+		return OpenIDEResult{
+			OK:   false,
+			Err:  fmt.Sprintf("no editor on PATH (`code` / `cursor`) and OS default failed: %v", startErr),
+			Path: abs,
+		}, nil
+	}
+	pid := 0
+	if cmd.Process != nil {
+		pid = cmd.Process.Pid
+		_ = cmd.Process.Release()
+	}
+	return OpenIDEResult{OK: true, IDE: "os-default", PID: pid, Path: abs}, nil
 }

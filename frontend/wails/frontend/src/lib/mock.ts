@@ -11,6 +11,14 @@ export interface IntentNode {
     status: IntentStatus;
     updatedAt: string;
     summary?: string;
+    // Work 1.4.e: absolute on-disk path of the .md file. Present
+    // for leaves in live mode (populated from kron_get.source_path
+    // by real-tree.ts); undefined for synthetic groups (kind='spec'
+    // + has children) and for every node in mock mode. The
+    // IntentTree component uses this to decide whether clicking the
+    // row opens the file in the user's IDE (work 1.4.e "edit-jump-IDE"
+    // component, RFC §3.1).
+    path?: string;
     children: IntentNode[];
 }
 
