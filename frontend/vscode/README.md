@@ -46,20 +46,25 @@ Out of scope (separate PRs, lanyue811 domain vs. @HomoFluctus domain per RFC §4
 - [ ] #6 `src/views/intentTree.ts` — @HomoFluctus
 - [ ] #7 `src/views/statusBar.ts` — @HomoFluctus
 - [ ] #8 `src/views/intentEditor.ts` (WebviewPanel container) — @HomoFluctus
-- [ ] #9 `webview/src/App.tsx` real business (kron_tree MCP call) — lanyue811
-- [ ] #10 `.vscode-test/` F5 end-to-end smoke — lanyue811
+- [x] #9 `webview/src/App.tsx` real business (kron_tree MCP call) + `src/lib/mcp-types.ts` — lanyue811
+- [ ] #10 `.vscode-test/` F5 end-to-end smoke — blocked by #5 (@HomoFluctus) — verified by `pnpm build` locally (see How to verify above)
 - [ ] #11 `docs/implementation/vscode-extension.md` — lanyue811
 - [ ] D1-D4 (Activity Bar icon / webview theme sync / VSIX update / multi-project) — v.s. PR, RFC §3.4
 
-## How to build (PR 1 smoke)
+## How to verify (step-by-step)
 
 ```bash
+# 1. Build the webview
 cd frontend/vscode/webview
-pnpm install   # if not already
+pnpm install   # uses existing node_modules (React 18.3.1, Vite 5.4.21)
 pnpm build     # → ../dist/webview/index.html + assets/
-```
+# Check output:
+ls ../dist/webview/
 
-Vite outputs to `frontend/vscode/dist/webview/` (gitignored). Extension host loads the HTML via `fs.readFileSync` at runtime (see RFC 2026-10-18 §2.4 code sample, to be implemented in #8).
+# 2. (Blocked) F5 smoke test — needs @HomoFluctus's src/extension.ts (RFC §4 #5)
+# Once #5 lands, run "Run Extension" from .vscode/launch.json.
+# See .vscode-test/README.md for the integration test runner plan.
+```
 
 ## How to develop
 
