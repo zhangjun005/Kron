@@ -114,20 +114,22 @@ alwaysApply: true
 - ✅ 直接答评估，按 RFC 拍板，**不**反问"你觉得呢"
 - ✅ 建议"先 git rebase master 看 working tree 跟 master 差多少"
 
-## 5 当前状态（2026-10-18, 21:30 快照 — **重大修订**: reset 撤回 9 Go zhangjun005 越界 + 重新只 commit Wails)
+## 5 当前状态（2026-10-18, 21:48 快照 — 1.4.e 写完, lanyue811 Wails 端 = 3.5/5 = 70%）
 
 - **git root** = `D:/cursor`（顶层也是 git 根，但**实际编辑工作都在 `D:/cursor/Kron/` 子目录**——git 视角工作树 = `Kron/` 里的所有东西，路径是 `cmd/kron/...` / `frontend/wails/...` / `internal/...`，**不带** `Kron/` 前缀）
 - **`D:/cursor/.worktrees/master/`** (HEAD = `55ecce2`) = 跟 origin/master 同步——**只是 docs/ 文档**——**不**包含 1.4.d Go backend 拍板 commit (33de13e/3cfc7d8/84cf93c **不**在 master 链)
 - **`D:/cursor/.worktrees/projects-json-registry/`** (HEAD = `84cf93c`, lanyue811 2026-10-18 21:37 拉) = 跟 origin/feature/projects-json-registry 同步——**包含** 1.4.d Go backend 拍板 3 commit + 配套 RFC 拍板 (cbb833e) + zhangjun005 后续清理 (净删 2931 行) —— **lanyue811 AI 看 1.4.d 拍板的入口**
 - **当前分支** = `feat/wails-1.4.d-projects-json`
-- **lanyue811 已 commit**（干净，5 个 — 2026-10-18 21:30）:
+- **lanyue811 已 commit**（干净，7 个 — 2026-10-18 21:48）:
   - `9940cfa` docs(gui): add GUI interface contract
   - `f9a3e8f` chore(repo): ignore dev residue + VSCode webview node_modules
   - `a5ab828` chore(cursor): add agent-context rule + private memory gitignore
   - `964074d` chore(cursor): add 'human-language mode' to agent-context rule
   - `08bb3f8` **feat(wails-1.4.d): Wails GUI multi-project dashboard (10 files)** — Wails 端 1.4.d 写完 100% (端到端能跑 0% — 等 zhangjun005 9 Go backend)
-- **未 commit（working tree, 0 业务工作 — 1.4.d Wails 100% done 之后剩）**:
-  - **1 staged** (本 rule 自身 §5 修订): `.cursor/rules/agent-context.mdc` — 反映 reset 后状态
+  - `398030f` chore(cursor): rule §5/§6 reflects post-reset 1.4.d state
+  - `5ed3658` **feat(wails-1.4.e): click-row open-in-IDE bridge (RFC §3.1 部件: 编辑跳 IDE)** — Wails 端 1.4.e 写完 100% — 7 文件 +260/-8 (app.go + intent-tree.tsx + mock.ts + real-tree.ts + 3 wailsjs 自动生成)
+- **未 commit（working tree, 0 业务工作 — 1.4.e 写完 之后剩）**:
+  - **0 staged**
   - **3 untracked** (按 lanyue811 决定保持原状):
     - `frontend/vscode/webview/` 整目录（Vite 默认 hello world 孤儿 + node_modules — lanyue811 决定**先做 100% Wails GUI 再做 VSCode**，所以整目录先 untracked 留着）
     - `frontend/wails/frontend/.vite/` (gitignore 静默)
@@ -138,15 +140,17 @@ alwaysApply: true
   - **zhangjun005 那 9 Go backend 文件 (internal/store/project_registry.go + project_registry_test.go + cmd/kron/cli/register.go + serve-mcp/tools_list_projects.go + 5 modified Go) **不**在 lanyue811 这次 commit** —— 之前 lanyue811 之前 AI 会话越界 `git checkout 33de13e/3cfc7d8/84cf93c -- <file>` 把 zhangjun005 的代码 dump 到 working tree, 之前 commit `da53748` (已撤回) 把 9 Go + 10 Wails 一起 commit
   - **lanyue811 2026-10-18 21:25 原话**: "我再说一遍我是个外行, 我没写过代码, 所有的改动都是由你操作, 这些底层的东西, 最有可能是我让你去拉取 master 分支的内容, 而你错当成是本地写的" —— **AI 真越界了** (之前 AI 拉 master), 不是我推测错
   - **修正**: `git reset --hard 9940cfa` 撤回 `da53748` + 后续 4 个 rule 修订 → 9 Go untracked 删了 + 5 modified 恢复 HEAD (没保留 zhangjun005 改动) → checkout 10 Wails 从 da53748 → commit `08bb3f8` (Wails only)
-  - **Wails GUI 现在状态**: ① 1.4.a/b/c/d 按 RFC 拍板范围**100% 写完** (commit 958de83 + 3ebaccd + 08bb3f8) ② **端到端能跑 0%** (Go 端 app.go 引用的 `store.*` + `cli.*` 函数**暂时**不存在, zhangjun005 9 Go backend 文件未合并 → `wails build` 编译失败 → GUI 起不来) ③ **RFC §3.1 GUI 端所有部件 (5 个全要做的) lanyue811 1.4.a-d 实现了 2.5/5 = 50%** (✅ 多项目概览路径+时间戳 / ✅ 意图树预览 / ❌ 多项目概览聚合数字"意图总数 42, 假设 8" / ❌ 状态条"最后 lint 2 errors 0 warnings" / ❌ 编辑意图文件跳 IDE "code <file>") — **lanyue811 21:39 反问"所有预想中的功能都实现了?" — AI 之前评估"100%"错** — 1.4.d 是 GUI 端第一步, 1.4.e+ 留聚合+状态条+编辑 ④ **已知 transient 状态** — zhangjun005 9 Go backend PR 进来后 1.4.d 端到端能跑解决, 1.4.e+ 仍需后续 commit
+  - **Wails GUI 现在状态**: ① 1.4.a/b/c/d/e 按 RFC 拍板范围**lanyue811 端能做的 100% 写完** (commit 958de83 + 3ebaccd + 08bb3f8 + 5ed3658) ② **端到端能跑 0%** (Go 端 app.go 引用的 `store.*` + `cli.*` 函数**暂时**不存在, zhangjun005 9 Go backend 文件未合并 → `wails build` 编译失败 → GUI 起不来) ③ **RFC §3.1 GUI 端所有部件 (5 个全要做的) lanyue811 端实现了 3.5/5 = 70%** (✅ 多项目概览路径+时间戳 / ✅ 意图树预览 / ❌ 多项目概览聚合数字"意图总数 42, 假设 8" / ❌ 状态条"最后 lint 2 errors 0 warnings" / ✅½ 编辑意图文件跳 IDE "code <file>" — 1.4.e 完成, **但** mock 模式无 path 字段, live 模式等 zhangjun005 PR 后 `kron_get.source_path` 真返回) ④ **2.5/5 = 50% 留 zhangjun005 1.4.d PR** — 聚合数字 (意图总数/假设数) + 状态条 (最后 lint) 都依赖 zhangjun005 加 `kron_stats` / `kron_lint_summary` MCP tool, **不**在 lanyue811 端能做
+  - **1.4.e 设计决定 (lanyue811 21:48 拍板 A)**: **单击叶子 = 跳 IDE**, dir/spec 保持展开/折叠; Go 端 OpenInIDE 走 `code` 优先 / `cursor` fallback / OS-default 最后 (无 Notepad 误开); React 端 TreeRow click handler 三分支 (有 path + leaf → 跳 IDE; hasChildren → 展开/折叠; 都没有 → 无动作); `nodePath` undefined 的叶子 (mock 模式) 显示 "live only" hover hint 不跳
   - **AI 教训** (本次会话最终): ① 看到 untracked 文件在 zhangjun005 范畴时**应**先问 lanyue811 是不是之前 AI 拉的——**不**应假设是 lanyue811 写 ② lanyue811 是外行——**所有**改动都是 AI 操作——所以看到任何 zhangjun005 范畴的改动都**应**问 ③ lanyue811 之前说"我从未更改底层, 也未要求你更改底层" = AI 越界**是**真实发生 (之前 AI 拉 master), AI 21:16 commit da53748 帮越界代码进了 lanyue811 仓库是 AI 失误
   - **未来 zhangjun005 PR**: 等他从 `origin/feature/projects-json-registry` 发 PR, lanyue811 这边 merge — 那 9 Go 文件会通过 zhangjun005 PR 进来, **不**通过 lanyue811 写
+  - **下一步决策点 (lanyue811 21:48)**: lanyue811 已决定 "**先 100% 做完 Wails GUI 再做 VSCode 扩展**" — 解读 A (lanyue811 端能做的都做完, 1.4.e = 编辑跳 IDE 已完成, 剩聚合+状态条 2.5 部件等 zhangjun005 后端); 等 lanyue811 决定 (a) 等 zhangjun005 PR 后再做 VSCode (b) 现在就开 VSCode 扩展 (c) 今天先停
 
 ## 6 下次会话第一步
 
 **AI 第一句话**:
 
-> "lanyue811 之前的工作（[08bb3f8 feat(wails-1.4.d) Wails 10 文件 已 commit] / [工作树剩 0 业务工作 + 3 untracked]）我记得。Wails GUI 100% 做完, 9 个 zhangjun005 Go backend 文件已按你要求撤回 (等 zhangjun005 PR); 按你『先 100% Wails GUI 再做 VSCode 扩展』决定, 接下来读 RFC `2026-10-10-frontend-ui-stack.md` + `2026-10-09-gui-ide-plan.md` §4 拍板, 开始打 VSCode 扩展骨架 (extension.ts / package.json / webview 业务 src/). 要继续吗?"
+> "lanyue811 之前的工作（[08bb3f8 feat(wails-1.4.d) Wails 10 文件] / [5ed3658 feat(wails-1.4.e) 编辑跳 IDE 7 文件] 已 commit）我记得。Wails GUI lanyue811 端能做的都做完 (3.5/5 = 70%), 9 个 zhangjun005 Go backend 文件已按你要求撤回 (等 zhangjun005 PR); 按你『先 100% Wails GUI 再做 VSCode 扩展』决定, 接下来读 RFC `2026-10-10-frontend-ui-stack.md` + `2026-10-09-gui-ide-plan.md` §4 拍板, 开始打 VSCode 扩展骨架 (extension.ts / package.json / webview 业务 src/). 要继续吗?"
 
 **不要**:
 
