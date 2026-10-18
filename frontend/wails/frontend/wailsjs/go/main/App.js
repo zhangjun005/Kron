@@ -17,3 +17,7 @@ export function ListMCPTools() {
 export function ListMCPToolsLive() {
   return window['go']['main']['App']['ListMCPToolsLive']();
 }
+
+export function ListProjectsLive() {
+  return window['go']['main']['App']['ListProjectsLive']();
+}
