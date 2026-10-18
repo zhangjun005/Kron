@@ -1,0 +1,74 @@
+{
+  "name": "kron-vscode",
+  "displayName": "Kron",
+  "publisher": "homofluctus",
+  "description": "Kron intent ledger — IDE integration",
+  "version": "0.0.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zhangjun005/Kron.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "kron.refreshIntents",
+        "title": "Kron: Refresh Intents"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "kron.refreshIntents",
+          "when": "view == kron.intents",
+          "group": "navigation"
+        }
+      ]
+    },
+    "views": {
+      "explorer": [
+        {
+          "id": "kron.intents",
+          "name": "Kron Intents"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Kron",
+      "properties": {
+        "kron.serverPath": {
+          "type": "string",
+          "default": "kron",
+          "description": "Path to the Kron executable. Set an absolute path when kron is not on the extension host PATH."
+        }
+      }
+    }
+  },
+  "main": "./out/extension.js",
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package --dependencies",
+    "build:webview": "cd webview && pnpm install && pnpm build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "vscode-languageclient": "^10.0.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^4.0.0",
+    "typescript": "^5.6.3"
+  }
+}
