@@ -95,3 +95,11 @@ assumption 是可被多个 intent 引用的独立文件。界面应先用 `kron_
 - 表单保存后树、详情和原文一致；原文外部修改后刷新能显示新内容。
 - 共享 assumption 的编辑和删除对用户可见其影响范围。
 - deactivate 会停止该 workspace 的两个子进程。
+
+## Extension Host 与 Webview 约定
+
+- Extension Host 分别管理 `kron serve-mcp` 与 `kron serve-lsp` 两个 stdio 子进程；MCP 与 LSP 请求不互相转发。扩展不直接导入主仓的 `internal/` 或 `cmd/kron/`。
+- Webview 通过 `postMessage` 与 Extension Host 通信。请求类型为 `kron_tree:request`（首次加载）和 `kron_tree:refresh`（刷新）；响应为 `kron_tree:result`（`TreeResult`）或 `kron_tree:error`（`{ message: string }`）。
+- `TreeNode` 字段：`slug`、`name`、`is_dir`，以及可选的 `title`、`status`、`children`；`TreeResult` 包含 `root: TreeNode`。
+- 扩展宿主和 Webview 是独立的 Vite/npm 项目，各自管理依赖；VSCode 与 Wails 客户端不互相导入代码。
+- 可执行文件默认名为 `kron`；扩展配置 `configuration.kron.serverPath` 可覆盖该路径。
