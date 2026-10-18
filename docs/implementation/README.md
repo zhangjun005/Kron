@@ -17,6 +17,8 @@
 | `lsp.md` | `.deprecated/2026-10-09-process-cleanup/lsp.md` |
 | `mcp.md` | `.deprecated/2026-10-09-process-cleanup/mcp.md` |
 | `testing.md` | `.deprecated/2026-10-09-process-cleanup/testing.md` |
+> ⚠️ 2026-10-18 例外: scode-extension.md 是新增 ([`2026-10-18-vscode-skeleton-sdk.md`](../rfc/2026-10-18-vscode-skeleton-sdk.md) 搂4 步 11 实施落地),不走"重写归档文档"流程。**VSCode 层实施参走没有旧版可归档** ,直接作为 v1.3+ 户端层实施参。
+
 
 ## 为什么归档
 

@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| **状态** | **草案 (2026-10-18, spike 数据已采, 待 zhangjun005 拍板)** |
+| **状态** | **已拍板 (修订 v1.1, 2026-10-18, 搂4 步骤 3 加 2 步前提: Tailwind CSS 4 + tsconfig path alias)** |
 | **作者** | AI assistant, 经 zhangjun005 委托 |
 | **创建日期** | 2026-10-18 |
 | **目标版本** | v1.3+ |
@@ -327,7 +327,7 @@ $ npm view shadcn version
 | 10 | `.vscode-test/` + F5 host 装 `.vsix` 调 `kron serve-mcp` list 工具 (master §9.2 拍板 spike 6 步) | `frontend/vscode/` | 0.5 天 | spike 验证 |
 | 11 | `docs/implementation/vscode-extension.md` 同步 (master 已**有**, 增量补**实施**细节) | `docs/implementation/vscode-extension.md` | 0.5 天 | 文档 |
 
-**总改动 ~7.5 天**. 1 个 PR 链 (11 commit, 逐步 reviewable).
+**总改动 ~7.5 + 0.35 = ~7.85 天**. 1 个 PR 链 (12 commit, 逐步 reviewable).
 
 ---
 
