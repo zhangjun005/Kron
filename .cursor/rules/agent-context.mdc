@@ -10,7 +10,7 @@ alwaysApply: true
 
 ## 0 一句话
 
-**lanyue811 = Wails GUI + VSCode 扩展. RFC 在 `.worktrees/master/docs/rfc/` 是项目唯一真相源. AI 工作 = 严格按 RFC 拍板的实施路径走.**
+**lanyue811 = Wails GUI 端 + VSCode 扩展的 GUI/webview 端. HomoFluctus = LSP + VSCode 扩展的 IDE 端. zhangjun005 = 底层 + RFC 拍板. RFC 在 `.worktrees/master/docs/rfc/` 是项目唯一真相源. AI 工作 = 严格按 RFC 拍板的实施路径走, 严格按 §1 人员分工的边界走, 不越界.**
 
 ## 0.5 人话模式（**硬约束** — lanyue811 是 AI 编程外行）
 
@@ -41,20 +41,54 @@ alwaysApply: true
 
 ## 1 人员分工（硬约束）
 
+**核心原则**（2026-10-18 lanyue811 拍板）: **lanyue811 范围 = "给用户看的东西"**（Wails GUI 端 + VSCode 扩展的 GUI/webview 端）；**HomoFluctus 范围 = "跟 Kron 后端/编辑器对话的东西"**（LSP 协议访问层 + VSCode 扩展的 IDE/extension 顶层）；**zhangjun005 范围 = "Kron 后端"**（internal/ + MCP + RFC 拍板）。三个角色**不重叠**。
+
 | 角色 | GitHub | 负责 | AI 该做 / 不该做 |
 |---|---|---|---|
-| **lanyue811**（用户）| 本地 | **Wails GUI + 配套 VSCode 扩展** | ✅ AI 全力协助 |
-| **zhangjun005**（发起人）| zhangjv233@163.com | **底层 + RFC 拍板**（internal/ 8 包 + MCP server + RFC 拍板）| ❌ 不替 commit / 不动他的工作 |
-| **第三方协作者** | — | **LSP 相关**（`feat/serve-lsp` 分支 + `parser.AnchorsForFile`）| ❌ 不碰 |
-| **AI（我）** | — | lanyue811 的 GUI + VSCode 协作者 | ❌ 不评估他人工作 |
+| **lanyue811**（用户）| 本地 | **Wails GUI 端**（桌面应用整体）<br>**+ VSCode 扩展的 GUI/webview 端**（Vite + React + shadcn/ui 的视图层）| ✅ AI 全力协助 |
+| **HomoFluctus**（第三方协作者）| `1226605124@qq.com` / 泓洲 | **LSP 相关**（`cmd/kron/serve-lsp/` Go 端 + `parser.AnchorsForFile` internal API + `feat/serve-lsp` 分支 27 commit）<br>**+ VSCode 扩展的 IDE 端**（`src/extension.ts` 顶层 + LSP/MCP 客户端 + 状态条 + VSIX 打包）| ❌ 不替 commit / 不动他的工作 |
+| **zhangjun005**（发起人）| `zhangjv233@163.com` | **底层 + RFC 拍板**（internal/ 8 包 + MCP server + RFC 拍板 + Wails Go 后端 1.4.d Go backend）| ❌ 不替 commit / 不动他的工作 |
+| **AI（我）** | — | lanyue811 的 GUI 端协作者 | ❌ 不评估他人工作 |
+
+**按 RFC `2026-10-18-vscode-skeleton-sdk.md` §4 实施的 11 项切分**（拍板切分）:
+
+| # | 实施内容 | 谁 |
+|---|---|---|
+| #1 | `frontend/vscode/` 跑 `yo code`（TypeScript 模板空壳）| **lanyue811**（前端骨架）|
+| #2 | `frontend/vscode/webview/` 跑 `pnpm create vite@latest webview` | **lanyue811**（webview 前端）|
+| #3 | `pnpm dlx shadcn@4.22.0 init`（首期 5 组件）| **lanyue811**（UI 组件）|
+| #4 | `package.json` 锁版本 + `tsconfig.json` strict + shadcn `components.json` | **lanyue811**（前端配置）|
+| **#5** | **`src/extension.ts` activate/deactivate + `src/mcp/client.ts` + `src/lsp/client.ts`** | **HomoFluctus**（extension 顶层 + LSP/MCP 客户端 = IDE 端）|
+| **#6** | **`src/views/intentTree.ts`（TreeDataProvider 原生）**| **HomoFluctus**（MCP tree 调 IDE 端）|
+| **#7** | **`src/views/statusBar.ts`（StatusBarItem）** | **HomoFluctus**（状态条 IDE 端）|
+| #8 | `src/views/intentEditor.ts`（WebviewPanel + Vite 5 输出）| **HomoFluctus 主 / lanyue811 配合**（WebviewPanel 桥 = IDE 端创建容器 + lanyue811 端填充内容）|
+| #9 | `webview/src/App.tsx`（shadcn 5 组件 + 列表）+ `kron_tree` 调 MCP | **lanyue811**（webview UI 业务）|
+| #10 | `.vscode-test/` F5 host 装 `.vsix` 调 `kron serve-mcp` | **lanyue811**（验证；HomoFluctus 已打包 VSIX）|
+| #11 | `docs/implementation/vscode-extension.md` 同步 | **lanyue811**（文档）|
+
+**lanyue811 的 VSCode 工作** = #1 + #2 + #3 + #4 + #9 + #10 + #11（7 项）——**前端/webview/配置/文档**。
+
+**HomoFluctus 的 VSCode 工作** = #5 + #6 + #7（3 项）——**extension 顶层 + LSP/MCP 客户端 + 状态条 + VSIX 打包**。
+
+**#8 协作** = HomoFluctus 写 WebviewPanel 创建容器 + lanyue811 写 webview 业务内容；lanyue811 按 HomoFluctus 拍板的接口契约写。
 
 **AI 工作范围**（硬）:
 
-- ✅ `Kron/frontend/wails/`（Go + TS）— Wails GUI 端
-- ✅ `Kron/frontend/vscode/`（TS + webview）— VSCode 扩展
-- ✅ lanyue811 已写代码的 review / commit / push
+- ✅ `Kron/frontend/wails/`（Go + TS）— Wails GUI 端（lanyue811 域）
+- ✅ `Kron/frontend/vscode/webview/`（TS + React + shadcn/ui）— VSCode 扩展的 GUI 端（lanyue811 域）
+- ✅ `Kron/frontend/vscode/package.json` / `tsconfig.json` / `components.json`（lanyue811 域）
+- ✅ `Kron/frontend/vscode/src/views/intentEditor.ts`（lanyue811 域，仅 webview 内容部分；HomoFluctus 写 WebviewPanel 容器）
+- ✅ `Kron/frontend/vscode/.vscode-test/`（lanyue811 域，验证）
+- ✅ `docs/implementation/vscode-extension.md`（lanyue811 域，文档）
 - ❌ `Kron/internal/` 改动 — 只 zhangjun005 改
-- ❌ `Kron/cmd/kron/serve-mcp/` / `serve-lsp/` 业务 — 只 zhangjun005 / LSP 协作者
+- ❌ `Kron/cmd/kron/serve-mcp/` 业务 — 只 zhangjun005 改
+- ❌ `Kron/cmd/kron/serve-lsp/` 业务 — 只 HomoFluctus 改（`feat/serve-lsp` 分支）
+- ❌ `Kron/frontend/vscode/src/extension.ts` 顶层 — 只 HomoFluctus 写
+- ❌ `Kron/frontend/vscode/src/mcp/client.ts` — 只 HomoFluctus 写
+- ❌ `Kron/frontend/vscode/src/lsp/client.ts` — 只 HomoFluctus 写
+- ❌ `Kron/frontend/vscode/src/views/intentTree.ts` — 只 HomoFluctus 写
+- ❌ `Kron/frontend/vscode/src/views/statusBar.ts` — 只 HomoFluctus 写
+- ❌ `Kron/frontend/vscode/src/views/intentEditor.ts` 的 WebviewPanel 部分（容器创建）— 只 HomoFluctus 写
 
 ## 2 RFC 位置（**必读**）
 
@@ -75,6 +109,8 @@ alwaysApply: true
 7. `2026-10-08-lsp-client.md` §3 — VSCode 端起 serve-mcp + serve-lsp 双子进程
 8. `2026-10-08-mcp-lifecycle.md` — stdio 父进程寿命
 9. `2026-10-04-mcp-sdk-adoption.md` — `modelcontextprotocol/go-sdk` 锁 v1.0.x
+10. `2026-10-12-lsp-decision-points.md` — HomoFluctus 提的 LSP 决策点，等 zhangjun005 拍板（**lanyue811 不拍 LSP 范畴**）
+11. `2026-10-18-vscode-skeleton-sdk.md` — VSCode 扩展 §4 实施清单 11 项切分（lanyue811 端 7 项 + HomoFluctus 端 3 项 + 协作 1 项）—— **lanyue811 必读**
 
 **其余 8 个 RFC** 扫标题即可.
 
@@ -85,6 +121,7 @@ alwaysApply: true
 3. ❌ AI 试图 commit 15 文件业务代码 — **没意识到 working tree 比 master 落后 16 个文件**（差点 CI 挂）
 4. ❌ AI 让 lanyue811 "不下 10 次"提醒要拉 master — **完全没听**
 5. ❌ 浪费 lanyue811 **500 配额（14 块钱）** vscode 工作
+6. ❌ AI 误判 `feat/serve-lsp` 分支 = zhangjun005 工作 — **实际是 HomoFluctus 工作**（`1226605124@qq.com` / 泓洲），评估 LSP server "100% 完成等 zhangjun005 PR" 错（实际是等 zhangjun005 拍板 RFC `2026-10-12-lsp-decision-points.md` §1-§2 的依赖批准 + 新 internal API），评估 "VSCode 端 6 commit = zhangjun005 越界" 错（实际是 HomoFluctus 域内职责——LSP + IDE 端）—— lanyue811 22:00 当面指出"@HomoFluctus 就是负责 LSP 和 IDE 这一块, 怎么会是 zhangjun005 的越界呢"
 
 **lanyue811 原话**:
 
@@ -105,8 +142,8 @@ alwaysApply: true
 - ❌ 凭 `git status` 评估进度（结果 ≠ 计划）
 - ❌ 凭 `git log` 数 commit 算百分比
 - ❌ 评估"X 端 0%" 除非读过对应 RFC 拍板的工作清单
-- ❌ 替 zhangjun005 / LSP 协作者 commit
-- ❌ 改 `Kron/internal/` / `cmd/kron/serve-mcp/` 业务 / `cmd/kron/serve-lsp/` 业务
+- ❌ 替 zhangjun005 / **HomoFluctus** commit —— zhangjun005 域 = `Kron/internal/` + `cmd/kron/serve-mcp/` + Wails Go backend；HomoFluctus 域 = `Kron/cmd/kron/serve-lsp/` + `Kron/frontend/vscode/src/extension.ts` + `src/mcp/client.ts` + `src/lsp/client.ts` + `src/views/intentTree.ts` + `src/views/statusBar.ts` + `src/views/intentEditor.ts` WebviewPanel 容器部分 + VSIX 打包
+- ❌ 改 `Kron/internal/` / `cmd/kron/serve-mcp/` / `cmd/kron/serve-lsp/` 业务
 
 **允许**:
 
@@ -114,7 +151,7 @@ alwaysApply: true
 - ✅ 直接答评估，按 RFC 拍板，**不**反问"你觉得呢"
 - ✅ 建议"先 git rebase master 看 working tree 跟 master 差多少"
 
-## 5 当前状态（2026-10-18, 21:48 快照 — 1.4.e 写完, lanyue811 Wails 端 = 3.5/5 = 70%）
+## 5 当前状态（2026-10-18, 22:00 快照 — 1.4.e 写完, lanyue811 Wails 端 = 3.5/5 = 70%, HomoFluctus LSP 27 commit 写完 = 100%）
 
 - **git root** = `D:/cursor`（顶层也是 git 根，但**实际编辑工作都在 `D:/cursor/Kron/` 子目录**——git 视角工作树 = `Kron/` 里的所有东西，路径是 `cmd/kron/...` / `frontend/wails/...` / `internal/...`，**不带** `Kron/` 前缀）
 - **`D:/cursor/.worktrees/master/`** (HEAD = `55ecce2`) = 跟 origin/master 同步——**只是 docs/ 文档**——**不**包含 1.4.d Go backend 拍板 commit (33de13e/3cfc7d8/84cf93c **不**在 master 链)
@@ -144,13 +181,15 @@ alwaysApply: true
   - **1.4.e 设计决定 (lanyue811 21:48 拍板 A)**: **单击叶子 = 跳 IDE**, dir/spec 保持展开/折叠; Go 端 OpenInIDE 走 `code` 优先 / `cursor` fallback / OS-default 最后 (无 Notepad 误开); React 端 TreeRow click handler 三分支 (有 path + leaf → 跳 IDE; hasChildren → 展开/折叠; 都没有 → 无动作); `nodePath` undefined 的叶子 (mock 模式) 显示 "live only" hover hint 不跳
   - **AI 教训** (本次会话最终): ① 看到 untracked 文件在 zhangjun005 范畴时**应**先问 lanyue811 是不是之前 AI 拉的——**不**应假设是 lanyue811 写 ② lanyue811 是外行——**所有**改动都是 AI 操作——所以看到任何 zhangjun005 范畴的改动都**应**问 ③ lanyue811 之前说"我从未更改底层, 也未要求你更改底层" = AI 越界**是**真实发生 (之前 AI 拉 master), AI 21:16 commit da53748 帮越界代码进了 lanyue811 仓库是 AI 失误
   - **未来 zhangjun005 PR**: 等他从 `origin/feature/projects-json-registry` 发 PR, lanyue811 这边 merge — 那 9 Go 文件会通过 zhangjun005 PR 进来, **不**通过 lanyue811 写
-  - **下一步决策点 (lanyue811 21:48)**: lanyue811 已决定 "**先 100% 做完 Wails GUI 再做 VSCode 扩展**" — 解读 A (lanyue811 端能做的都做完, 1.4.e = 编辑跳 IDE 已完成, 剩聚合+状态条 2.5 部件等 zhangjun005 后端); 等 lanyue811 决定 (a) 等 zhangjun005 PR 后再做 VSCode (b) 现在就开 VSCode 扩展 (c) 今天先停
+  - **下一步决策点 (lanyue811 22:00 拍板)**: lanyue811 决定 "**按 master RFC 拍板来, 我做 Wails GUI + VSCode 的 GUI 部分, HomoFluctus 做 LSP + VSCode 的 IDE 端**" —— lanyue811 **新开分支 `feat/vscode-gui`** (在 `feat/wails-1.4.d-projects-json` 基础上分叉, 跟 Wails 工作分两个 PR 链) —— lanyue811 VSCode GUI 工作 = RFC `2026-10-18-vscode-skeleton-sdk.md` §4 实施 #1 + #2 + #3 + #4 + #9 + #10 + #11 共 7 项 (前端骨架 + webview + UI 组件 + 配置 + 业务 + 验证 + 文档), **不**做 #5 + #6 + #7 (extension 顶层 + LSP/MCP 客户端 + 状态条) —— **不阻塞**: lanyue811 按 RFC 拍板写 lanyue811 部分, HomoFluctus 那半他自己 commit 到他 `feat/serve-lsp` 分支, 两人合 master 时协商
+  - **HomoFluctus 当前状态 (origin/feat/serve-lsp, HEAD = `a5e5d76`, 领先 master 27 commit)**: ① LSP server 4 能力 (initialize/hover/definition/shutdown/exit) 100% 实现 + 3 验收全过 (go test 通过); ② VSCode 端 LSP 集成 80% (launch serve-lsp + source anchor + MCP tree + language client demo + VSIX 打包, 4 commit 完整); ③ CLI trash/restore 100% (RFC 拍板 + 实现); ④ store 强化 100% (5 boundary test + 串行); ⑤ `feat/serve-lsp` 整体**等 zhangjun005 拍板合 master** —— HomoFluctus 提了 RFC `2026-10-12-lsp-decision-points.md` §1 拍板请求: `go.lsp.dev/protocol v1.0.1` 入 `go.mod` + `parser.AnchorsForFile` 新 internal API 接受, **2 个等 zhangjun005 回** —— lanyue811 **不**拍板 LSP 范畴的事
+  - **未来 HomoFluctus PR 流程**: 等 zhangjun005 拍板 RFC `2026-10-12-lsp-decision-points.md` §1-§2 后, HomoFluctus 从 `feat/serve-lsp` 发 PR 进 master, lanyue811 跟 master sync (lanyue811 不参与 LSP server 评审) —— lanyue811 VSCode 端 LSP/MCP 客户端那一半 (#5 + #6 + #7) 由 HomoFluctus 写进 lanyue811 的 `feat/vscode-gui` 分支 或 HomoFluctus 自己的 `feat/serve-lsp` 分支, **合 master 时协商**
 
 ## 6 下次会话第一步
 
 **AI 第一句话**:
 
-> "lanyue811 之前的工作（[08bb3f8 feat(wails-1.4.d) Wails 10 文件] / [5ed3658 feat(wails-1.4.e) 编辑跳 IDE 7 文件] 已 commit）我记得。Wails GUI lanyue811 端能做的都做完 (3.5/5 = 70%), 9 个 zhangjun005 Go backend 文件已按你要求撤回 (等 zhangjun005 PR); 按你『先 100% Wails GUI 再做 VSCode 扩展』决定, 接下来读 RFC `2026-10-10-frontend-ui-stack.md` + `2026-10-09-gui-ide-plan.md` §4 拍板, 开始打 VSCode 扩展骨架 (extension.ts / package.json / webview 业务 src/). 要继续吗?"
+> "lanyue811 之前的工作（[08bb3f8 feat(wails-1.4.d) Wails 10 文件] / [5ed3658 feat(wails-1.4.e) 编辑跳 IDE 7 文件] 已 commit）我记得。Wails GUI lanyue811 端能做的都做完 (3.5/5 = 70%), 9 个 zhangjun005 Go backend 文件已按你要求撤回 (等 zhangjun005 PR)。按你 22:00 拍板『按 master RFC 拍板来, 我做 Wails GUI + VSCode 的 GUI 端, HomoFluctus 做 LSP + VSCode 的 IDE 端』, 现在做的是 VSCode 扩展的 GUI 部分, 我先 `git checkout -b feat/vscode-gui` 开新分支, 然后读 RFC `2026-10-18-vscode-skeleton-sdk.md` §4 实施清单切分 (lanyue811 端 7 项: #1 yo code 骨架 + #2 webview Vite + #3 shadcn + #4 配置 + #9 webview 业务 + #10 F5 验证 + #11 文档), HomoFluctus 端 3 项 (#5 extension 顶层 + #6 MCP tree + #7 状态条) 我**不**碰。要继续吗?"
 
 **不要**:
 
@@ -158,6 +197,9 @@ alwaysApply: true
 - 不要先看 git status / git log — 本 rule 已总结
 - 不要 commit zhangjun005 范畴的 Go 文件 (internal/store/ + cmd/kron/cli/ + cmd/kron/serve-mcp/) — rule §1 硬约束, AI 之前越界过, **不能**重蹈覆辙
 - 不要让 zhangjun005 范畴的 Go 文件再次被"拉过来" — lanyue811 之前让 AI 拉 master, 之前 AI 拉越界, 不再有
+- **不要碰 HomoFluctus 范畴**: `Kron/cmd/kron/serve-lsp/` 业务 + `Kron/frontend/vscode/src/extension.ts` + `src/mcp/client.ts` + `src/lsp/client.ts` + `src/views/intentTree.ts` + `src/views/statusBar.ts` + `src/views/intentEditor.ts` 的 WebviewPanel 容器部分 —— lanyue811 VSCode GUI 工作**只**做 §1 表 7 项 (`webview/` + `package.json` + `tsconfig.json` + `components.json` + `.vscode-test/` + 文档 + `intentEditor.ts` webview 内容部分)
+- **不要评估 HomoFluctus 工作完成度** — 那是 HomoFluctus 自己的事, lanyue811 只看 RFC 拍板的 lanyue811 部分
+- **不要"按 RFC 拍板"的捷径**走错边 — 写 LSP/MCP 客户端那一半是 HomoFluctus, lanyue811 写 webview UI 业务 (按 RFC §4 #9) — 两者是分开的
 
 **要**:
 
