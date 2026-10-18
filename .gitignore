@@ -36,6 +36,9 @@ frontend/dist/
 frontend/.vite/
 frontend/vscode/out/
 frontend/vscode/node_modules/
+frontend/vscode/webview/node_modules/
+frontend/vscode/webview/dist/
+frontend/vscode/.vscode-test/
 frontend/wails/node_modules/
 frontend/wails/dist/
 frontend/wails/.vite/
