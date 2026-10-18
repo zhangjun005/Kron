@@ -15,6 +15,7 @@ import {
     Sparkles,
     Search,
     ChevronRight,
+    Folder,
 } from 'lucide-react';
 import {Button} from '@/components/ui/button';
 import {Badge} from '@/components/ui/badge';
@@ -29,7 +30,7 @@ import {
 import {ScrollArea} from '@/components/ui/scroll-area';
 import {Separator} from '@/components/ui/separator';
 import {Progress} from '@/components/ui/progress';
-import {GetKronInfo, ListMCPTools, ListMCPToolsLive, CallMCPTool} from '../wailsjs/go/main/App';
+import {GetKronInfo, ListMCPTools, ListMCPToolsLive, CallMCPTool, ListProjectsLive} from '../wailsjs/go/main/App';
 import {
     type KronInfo,
     type IntentNode,
@@ -40,6 +41,7 @@ import {
 import {BootAnimation} from '@/components/boot-animation';
 import {IntentTree} from '@/components/intent-tree';
 import {kronTreeToIntentNodes} from '@/lib/real-tree';
+import {type ListProjectsLiveResult} from '@/lib/mcp-types';
 
 // DataSource: how the MCP tools panel is populated. 'mock' is the
 // 1.3-era hard-coded list returned by ListMCPTools(); 'live' asks the
@@ -79,6 +81,21 @@ function App() {
     const [liveTreeError, setLiveTreeError] = useState<string | null>(null);
     const [liveTreeLoading, setLiveTreeLoading] = useState<boolean>(false);
     const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+
+    // 1.4.d: live multi-project registry. liveProjects holds the
+    // kron_list_projects-derived ListProjectsLiveResult; it is
+    // fetched only when the user is in 'live' mode AND opens the
+    // "Projects" view (lazy to avoid paying the registry read
+    // cost on every Settings toggle). liveProjectsError surfaces
+    // a friendly message in place of the list on failure.
+    // liveProjectsLoading controls a subtle skeleton inside the
+    // panel. On failure the previous liveProjects is kept so the
+    // UI does not flicker empty.
+    const [liveProjects, setLiveProjects] = useState<ListProjectsLiveResult | null>(
+        null,
+    );
+    const [liveProjectsError, setLiveProjectsError] = useState<string | null>(null);
+    const [liveProjectsLoading, setLiveProjectsLoading] = useState<boolean>(false);
 
     // dataSource-aware tree: in 'mock' mode we always render the
     // hard-coded mockIntentTree; in 'live' mode we render liveTree
@@ -137,6 +154,25 @@ function App() {
         }
     }, []);
 
+    // 1.4.d: refresh the live multi-project registry. Single
+    // JSON-RPC round-trip via ListProjectsLive (which in turn
+    // calls kron_list_projects through the work 1.4.c bridge).
+    // Pattern mirrors refreshLiveTree: failure keeps the
+    // previous liveProjects so the UI does not flicker empty.
+    const refreshLiveProjects = useCallback(async (): Promise<void> => {
+        setLiveProjectsLoading(true);
+        setLiveProjectsError(null);
+        try {
+            const result = await ListProjectsLive();
+            setLiveProjects(result);
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            setLiveProjectsError(msg);
+        } finally {
+            setLiveProjectsLoading(false);
+        }
+    }, []);
+
     useEffect(() => {
         let cancelled = false;
         (async (): Promise<void> => {
@@ -175,8 +211,16 @@ function App() {
         if (dataSource === 'live') {
             void refreshLive();
             void refreshLiveTree();
+            // 1.4.d: also kick off the multi-project registry
+            // fetch. The Projects view is the only consumer; if
+            // the user never opens it the data is still cheap
+            // (one kron_list_projects round-trip) and we avoid a
+            // "stale data on first open" UX. Failures are
+            // surfaced only when the user actually opens the
+            // Projects view.
+            void refreshLiveProjects();
         }
-    }, [dataSource, refreshLive, refreshLiveTree]);
+    }, [dataSource, refreshLive, refreshLiveTree, refreshLiveProjects]);
 
     return (
         <>
@@ -204,6 +248,12 @@ function App() {
                     liveLoading={liveLoading}
                     onRefreshLive={(): void => {
                         void refreshLive();
+                    }}
+                    liveProjects={liveProjects}
+                    liveProjectsError={liveProjectsError}
+                    liveProjectsLoading={liveProjectsLoading}
+                    onRefreshLiveProjects={(): void => {
+                        void refreshLiveProjects();
                     }}
                     settingsOpen={settingsOpen}
                     onSettingsOpenChange={setSettingsOpen}
@@ -282,6 +332,10 @@ function LeftRail(props: {
     liveError: string | null;
     liveLoading: boolean;
     onRefreshLive: () => void;
+    liveProjects: ListProjectsLiveResult | null;
+    liveProjectsError: string | null;
+    liveProjectsLoading: boolean;
+    onRefreshLiveProjects: () => void;
     settingsOpen: boolean;
     onSettingsOpenChange: (open: boolean) => void;
 }): JSX.Element {
@@ -299,11 +353,15 @@ function LeftRail(props: {
         liveError,
         liveLoading,
         onRefreshLive,
+        liveProjects,
+        liveProjectsError,
+        liveProjectsLoading,
+        onRefreshLiveProjects,
         settingsOpen,
         onSettingsOpenChange,
     } = props;
     const [activeView, setActiveView] = useState<
-        'explorer' | 'search' | 'git' | 'tools'
+        'explorer' | 'projects' | 'search' | 'git' | 'tools'
     >('explorer');
     const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
         Files: true,
@@ -338,6 +396,13 @@ function LeftRail(props: {
                     onClick={(): void => setActiveView('explorer')}
                 >
                     <ListTree className="h-5 w-5"/>
+                </ActivityIcon>
+                <ActivityIcon
+                    active={activeView === 'projects'}
+                    label="Projects"
+                    onClick={(): void => setActiveView('projects')}
+                >
+                    <Folder className="h-5 w-5"/>
                 </ActivityIcon>
                 <ActivityIcon
                     active={activeView === 'search'}
@@ -381,6 +446,7 @@ function LeftRail(props: {
                 >
                     <span className="font-semibold">
                         {activeView === 'explorer' && 'Explorer'}
+                        {activeView === 'projects' && 'Projects'}
                         {activeView === 'search' && 'Search'}
                         {activeView === 'git' && 'Source Control'}
                         {activeView === 'tools' && 'MCP Tools'}
@@ -541,6 +607,114 @@ function LeftRail(props: {
                                 Use the search bar in the top of the editor
                                 to filter the tree. {stats.intents} indexed.
                             </div>
+                        </div>
+                    )}
+
+                    {/* 1.4.d: Projects view. Renders the live
+                        projects.json registry (kron_list_projects)
+                        when the user is in 'live' mode, and a
+                        short hint pointing to Settings otherwise
+                        (mirrors the Tools view's live/mock split).
+                        The view is intentionally read-only: there
+                        is no "switch" affordance yet (work 1.4.d
+                        scope) — the "active" project is just
+                        highlighted via Badge. */}
+                    {activeView === 'projects' && (
+                        <div className="p-4 space-y-3 text-xs">
+                            {dataSource === 'live' ? (
+                                <>
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-muted-foreground">
+                                            Registry
+                                        </span>
+                                        <Badge
+                                            variant={liveProjectsError !== null
+                                                ? 'destructive'
+                                                : 'secondary'}
+                                            className="text-[10px] h-4 px-1.5"
+                                        >
+                                            {liveProjectsError !== null
+                                                ? 'error'
+                                                : liveProjectsLoading
+                                                    ? 'loading…'
+                                                    : `${liveProjects?.projects.length ?? 0} project${(liveProjects?.projects.length ?? 0) === 1 ? '' : 's'}`}
+                                        </Badge>
+                                    </div>
+                                    {liveProjectsError !== null && (
+                                        <Card className="border-destructive/50 bg-destructive/10">
+                                            <CardContent className="p-2.5">
+                                                <pre className="text-[10px] text-destructive/90 whitespace-pre-wrap break-all">
+                                                    {liveProjectsError}
+                                                </pre>
+                                            </CardContent>
+                                        </Card>
+                                    )}
+                                    {liveProjects !== null && liveProjects.projects.length === 0 && (
+                                        <p className="text-muted-foreground leading-snug">
+                                            No projects registered yet. Run{' '}
+                                            <code className="font-mono">kron init</code>
+                                            {' '}in a project directory to add one.
+                                        </p>
+                                    )}
+                                    {liveProjects !== null && liveProjects.projects.length > 0 && (
+                                        <ul className="space-y-0.5 font-mono text-[11px]">
+                                            {liveProjects.projects.map((p) => {
+                                                const isCurrent = liveProjects.current !== ''
+                                                    && p.path === liveProjects.current;
+                                                return (
+                                                    <li
+                                                        key={p.path}
+                                                        className={[
+                                                            'flex items-center gap-1.5 px-1.5 py-1 rounded',
+                                                            'hover:bg-accent/60',
+                                                            isCurrent
+                                                                ? 'bg-primary/10 text-foreground'
+                                                                : 'text-muted-foreground',
+                                                        ].join(' ')}
+                                                        title={p.path}
+                                                    >
+                                                        <Folder className="h-3.5 w-3.5 shrink-0"/>
+                                                        <span className="truncate flex-1">
+                                                            {p.path}
+                                                        </span>
+                                                        {isCurrent && (
+                                                            <Badge
+                                                                variant="secondary"
+                                                                className="text-[9px] h-4 px-1 shrink-0"
+                                                            >
+                                                                active
+                                                            </Badge>
+                                                        )}
+                                                    </li>
+                                                );
+                                            })}
+                                        </ul>
+                                    )}
+                                    {liveProjects !== null && liveProjects.projectsPath !== '' && (
+                                        <div className="pt-1 text-[10px] text-muted-foreground/70 font-mono break-all">
+                                            {liveProjects.projectsPath}
+                                        </div>
+                                    )}
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={liveProjectsLoading}
+                                        onClick={onRefreshLiveProjects}
+                                        className="w-full h-7 text-[11px]"
+                                    >
+                                        {liveProjectsLoading ? 'Refreshing…' : 'Refresh'}
+                                    </Button>
+                                </>
+                            ) : (
+                                <p className="text-muted-foreground leading-snug">
+                                    Multi-project overview is live-only.
+                                    Switch to{' '}
+                                    <span className="font-semibold">Live</span>{' '}
+                                    in Settings to call{' '}
+                                    <code className="font-mono">kron_list_projects</code>
+                                    {' '}via the Go bridge.
+                                </p>
+                            )}
                         </div>
                     )}
 

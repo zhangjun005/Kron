@@ -77,3 +77,30 @@ export interface IntentBody {
 export interface GetOutput {
     intent: IntentBody;
 }
+
+// --- kron_list_projects (1.4.d: multi-project registry) ----------------
+//
+// Wire shape from cmd/kron/serve-mcp/tools_list_projects.go
+// (projectsListEntry / projectsListOutput). The Go bridge
+// ListProjectsLive already converts snake_case -> camelCase, so the
+// TS side consumes the bridged shape, not the raw MCP wire. The
+// camelCase shape is also what wailsjs/go/main/App.d.ts will declare
+// after the next `wails generate` run.
+
+/** One row of the projects.json registry. */
+export interface ProjectEntry {
+    path: string;
+    addedAt?: string;
+    lastOpened?: string;
+}
+
+/** Return type of ListProjectsLive (mirrors the Go struct). */
+export interface ListProjectsLiveResult {
+    projects: ProjectEntry[];
+    /** Path of the active project, "" if none. */
+    current: string;
+    /** Absolute path of projects.json (for the diagnostic footer). */
+    projectsPath: string;
+    /** Human-readable provenance string ("stdio: ..."). */
+    source: string;
+}

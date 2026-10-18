@@ -737,3 +737,102 @@ func (a *App) callToolLocked(name string, argsJSON []byte) (string, error) {
 	}
 	return callRes.Content[0].Text, nil
 }
+
+// ---- multi-project overview (work 1.4.d) --------------------------------
+//
+// ListProjectsLive is the GUI bridge for `kron_list_projects` (MCP tool,
+// work 1.4.d, RFC 2026-10-14). It returns the contents of the
+// per-machine projects.json registry so the Wails shell can render a
+// "已注册项目" list. The GUI is read-only on this surface: switching
+// the active project is out of scope for work 1.4.d and would require
+// either spawning a new serve-mcp with a different CWD or restarting
+// the GUI.
+//
+// Implementation: it reuses the work 1.4.c CallMCPTool pipeline (which
+// itself reuses the work 1.4.b handshake), so the first call pays
+// the spawn-and-handshake cost and subsequent calls reuse the live
+// subprocess. The tool call returns the raw MCP content text (a JSON
+// object matching `projectsListOutput` in tools_list_projects.go), which
+// we then unmarshal into a typed TS-friendly struct.
+//
+// Iron-rule notes (architecture.md §〇 铁律 #9):
+//   - This method does NOT import internal/*.
+//   - The subprocess IS the access layer; the GUI only orchestrates
+//     the JSON-RPC exchange.
+//   - We do NOT add per-project stats (intent count, lint errors,
+//     assumption count) in this round — those would require N
+//     concurrent `kron_*` calls and a bounded goroutine pool, and
+//     RFC §3.1 explicitly defers them to later milestones. See
+//     docs/implementation/gui.md §3.1 for the boundary.
+
+// ProjectEntry is one row of the projects.json registry. The field
+// names match the JSON tags on store.ProjectEntry + the wire shape
+// in tools_list_projects.go (with TS-friendly camelCase).
+type ProjectEntry struct {
+	Path       string `json:"path"`
+	AddedAt    string `json:"addedAt,omitempty"`
+	LastOpened string `json:"lastOpened,omitempty"`
+}
+
+// ListProjectsLiveResult is what the React side receives from
+// ListProjectsLive. Projects is always non-nil (empty slice if the
+// registry is empty) so the UI can `.map` without a guard. Current
+// is "" when no project is active. ProjectsPath surfaces the absolute
+// path of projects.json for the diagnostic footer (mirrors the
+// provenance string ListMCPToolsLive returns).
+type ListProjectsLiveResult struct {
+	Projects     []ProjectEntry `json:"projects"`
+	Current      string         `json:"current"`
+	ProjectsPath string         `json:"projectsPath"`
+	Source       string         `json:"source"`
+}
+
+// ListProjectsLive calls `kron_list_projects` against the live
+// serve-mcp subprocess and returns the parsed registry.
+func (a *App) ListProjectsLive() (ListProjectsLiveResult, error) {
+	const toolName = "kron_list_projects"
+
+	raw, err := a.CallMCPTool(toolName, "{}")
+	if err != nil {
+		return ListProjectsLiveResult{}, err
+	}
+
+	// Wire shape (from cmd/kron/serve-mcp/tools_list_projects.go):
+	//   {
+	//     "current_project": "...",
+	//     "projects":        [ { "path", "added_at", "last_opened" }, ... ],
+	//     "projects_path":   "..."
+	//   }
+	// We decode into a local struct so the GUI side never has to
+	// worry about server-side snake_case; ListProjectsLiveResult
+	// already uses the TS-friendly camelCase tags.
+	var wire struct {
+		CurrentProject string `json:"current_project"`
+		Projects       []struct {
+			Path       string `json:"path"`
+			AddedAt    string `json:"added_at,omitempty"`
+			LastOpened string `json:"last_opened,omitempty"`
+		} `json:"projects"`
+		ProjectsPath string `json:"projects_path"`
+	}
+	if err := json.Unmarshal([]byte(raw), &wire); err != nil {
+		return ListProjectsLiveResult{}, fmt.Errorf(
+			"wails: ListProjectsLive: parsing %s response: %w (raw=%s)",
+			toolName, err, truncate(raw, 200))
+	}
+
+	out := ListProjectsLiveResult{
+		Current:      wire.CurrentProject,
+		ProjectsPath: wire.ProjectsPath,
+		Projects:     make([]ProjectEntry, 0, len(wire.Projects)),
+	}
+	for _, p := range wire.Projects {
+		out.Projects = append(out.Projects, ProjectEntry{
+			Path:       p.Path,
+			AddedAt:    p.AddedAt,
+			LastOpened: p.LastOpened,
+		})
+	}
+	out.Source = fmt.Sprintf("stdio: kron_list_projects (%d projects)", len(out.Projects))
+	return out, nil
+}
