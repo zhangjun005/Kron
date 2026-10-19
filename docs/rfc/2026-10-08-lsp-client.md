@@ -19,7 +19,7 @@
 
 `internal/` 4 个包 (`store` / `parser` / `relations` / `lint`) **已**完整实现, LSP 服务**只**是 thin wiring:
 
-- `hover` = `parser.ScanAnchors(file) → 找位置 → store.Get(slug) → 渲染 Markdown`
+- `hover` = `parser.AnchorsForFile(file) → 按行找位置 → store.Load(slug) → 渲染 Markdown`
 - `definition` = 同上前两步 → 跳 `.kron/intents/<slug>.md`
 
 **不**需要新 internal 包, **不**需要新算法 — 跨语言客户端接入是**唯一**未决问题.
@@ -123,7 +123,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 **单实例单请求, 串行处理** — LSP 协议**允许**并发 request, 但 v1.3 **不**实现. 理由:
 
-- hover / definition 都是**纯读** (`parser.ScanAnchors` + `store.Get`), 串行足够
+- hover / definition 都是**纯读** (`parser.AnchorsForFile` + `store.Load`), 串行足够
 - 文件 I/O 是**本地** + **小文件** (< 100 KB), 串行延迟 < 5ms
 - 串行实现**简单** — 无锁, 无 goroutine 调度, 无 ctx 取消复杂度
 
@@ -165,8 +165,8 @@ export function activate(context: vscode.ExtensionContext) {
        ↑ ↓
 ┌──────────────────────────┐
 │ internal/               │
-│   parser/anchors.go     │  ← ScanAnchors (复用)
-│   store/reader.go       │  ← Get (复用)
+│   parser/anchors.go     │  ← AnchorsForFile (新增)
+│   store/reader.go       │  ← Load (复用)
 └──────────────────────────┘
 ```
 
@@ -177,26 +177,32 @@ export function activate(context: vscode.ExtensionContext) {
 **新增 internal/parser API** (走 `docs/process/new-internal-api.md`):
 
 ```go
-// 旧 RFC §6 拍板
-func AnchorAtPosition(file string, line, col int) (slug string, ok bool)
+// 最终拍板 (2026-10-12 实施时)
+func AnchorsForFile(file string) ([]model.Anchor, error)
 ```
 
-**实际** (经 2026-10-08 重新评估): `SlugsForFile(file)` **已**存在 (`internal/parser/anchors.go` L62) — 复用即可, **不**需要新加 `AnchorAtPosition`. 简化方案:
+**修订历史** (2026-10-08 草案 → 2026-10-12 实施):
+
+1. 旧 RFC §6 曾拍板「新增 `AnchorAtPosition(file, line, col)`」。
+2. 本 RFC 草案 (2026-10-08) 又改判「`SlugsForFile` 已够, 不新增 API」——**这个判断是错的**。
+3. **实施时 (2026-10-12) 确认**: LSP hover 请求带 `position: {line, character}`, 服务端必须知道「光标那一行是哪个 anchor」。`parser.SlugsForFile(file)` 返回 `[]string`(去重 slug, **丢行号**), 无法按行匹配。
+4. **最终方案**: 新增 `parser.AnchorsForFile(file) ([]model.Anchor, error)`, 返回带 `LineNumber` 的单文件锚点, 复用已有的未导出 `scanFile` (`internal/parser/anchors.go`)。hover 按 `position.line + 1` 匹配(parser 行号 1 索引, LSP 0 索引)。
 
 ```go
-// serve-lsp 内部伪代码
-func (s *Server) hover(ctx, params) Hover {
-    fileSlugs := parser.SlugsForFile(params.TextDocument.URI.Path)
-    for _, slug := range fileSlugs {
-        intent := store.Get(ctx, slug)
-        if intent.SourcePath contains line(params.Position.Line) {
-            return renderHover(intent)
+// serve-lsp 实际逻辑 (见 cmd/kron/serve-lsp/server.go anchorSlugAt)
+func (s *server) anchorSlugAt(td *protocol.TextDocumentPositionParams) (string, bool) {
+    anchors, _ := parser.AnchorsForFile(td.TextDocument.URI.FsPath())
+    line := int(td.Position.Line) + 1
+    for _, a := range anchors {
+        if a.LineNumber == line {
+            return a.Slug, true
         }
     }
+    return "", false
 }
 ```
 
-> **修订**: 旧 RFC §6 拍板"新增 `AnchorAtPosition`" 实际**不**需要 — `SlugsForFile` 已够. **不**走 `new-internal-api.md` 流程, **因为** `SlugsForFile` **已存在** (`internal/parser/anchors.go` L70-95), 既**不**是新加 API, 也**不**改签名 — 是**直接复用**, **不**触发流程门槛.
+> **另注**: 本 RFC 伪代码里 `store.Get` 实为 `store.Load` (`internal/store/reader.go`)。以代码为准。
 
 ### 4.5 serve-lsp caller 注入 — **不**管 (2026-10-08 拍)
 
@@ -207,7 +213,7 @@ func (s *Server) hover(ctx, params) Hover {
 - 原因: `context.Context` 注入身份属性**不便于开发** (调试栈不直观 / 单元测试需额外包装 / 类型安全弱)
 - 详见 [`docs/abstractDesign/architecture.md`](../abstractDesign/architecture.md) §2.3
 
-**实施影响**: `cmd/kron/serve-lsp/main.go` **不**写 `ctx = model.WithCaller(ctx, model.CallerLSP)`, 直接 `cmd.Context()` 传入 `store.Get` / `parser.SlugsForFile`. `ctx` 仍保留**用于取消 / 超时传播** (与 store/parser 函数签名兼容).
+**实施影响**: `cmd/kron/serve-lsp/main.go` **不**写 `ctx = model.WithCaller(ctx, model.CallerLSP)`, 直接 `cmd.Context()` 传入 `store.Load` / `parser.AnchorsForFile`. `ctx` 仍保留**用于取消 / 超时传播** (与 store/parser 函数签名兼容).
 
 **未来 caller 区分场合** (本 RFC **不**列, 等需要时再拍):
 - lint 输出归因 (caller-aware diagnostics)
@@ -234,10 +240,10 @@ func (s *Server) hover(ctx, params) Hover {
 
 **实施清单**:
 
-- [ ] `cmd/kron/serve-lsp/main.go` (cobra 启动 stdio LSP server)
+- [ ] `cmd/kron/serve-lsp/main.go` (`jsonrpc2.NewHeaderStream` 启动 stdio LSP server，stdlib flag 解析 `-CWD <root>`，**不**用 cobra)
 - [ ] `cmd/kron/serve-lsp/server.go` (注册 `initialize` / `textDocument/hover` / `textDocument/definition` / `shutdown` / `exit`)
-- [ ] `cmd/kron/serve-lsp/handlers/hover.go` (调 `parser.SlugsForFile` + `store.Get` + 渲染 Markdown)
-- [ ] `cmd/kron/serve-lsp/handlers/definition.go` (调 `parser.SlugsForFile` + 跳 `.kron/intents/<slug>.md`)
+- [ ] `cmd/kron/serve-lsp/hover.go` (调 `parser.AnchorsForFile` + `store.Load` + 渲染 Markdown)
+- [ ] `cmd/kron/serve-lsp/definition.go` (调 `parser.AnchorsForFile` + `store.Load` + 跳 `.kron/intents/<slug>.md`)
 - [ ] `go.mod` 加 `go.lsp.dev/protocol v3.17.0+` (走 explicit approval = 本 RFC 旧版 §8 已拍)
 - [ ] 测试: hover 拿到正确 Markdown / definition 拿到正确 URI / 悬空锚点 hover 返回 null (不报错)
 
@@ -256,7 +262,7 @@ func (s *Server) hover(ctx, params) Hover {
 
 1. **跨语言客户端接入**: VSCode 扩展 / Cursor **自己**起 `serve-mcp` + `serve-lsp` 两个子进程, **不**下沉 SDK
 2. **进程模型**: stdio, 单实例单请求, 串行, 跟 serve-mcp 同
-3. **复用 internal/**: `parser.SlugsForFile` + `store.Get`, **不**新加 `AnchorAtPosition` (旧 RFC §6 修订)
+3. **复用 internal/**: `parser.AnchorsForFile` + `store.Load`, 新增 `AnchorsForFile` (旧 RFC §6 的 `AnchorAtPosition` 修订为带行号单文件锚点 API, 见 §4.4)
 4. **能力 v1.3**: 仅 `hover` + `definition` (旧 RFC §5 沿用)
 5. **v1.4+ 候选**: `completion` (slug 补全) + `publishDiagnostics` (与 lint A-class 共用)
 
@@ -273,7 +279,7 @@ func (s *Server) hover(ctx, params) Hover {
 | §3 决策 (SDK) | ✅ 沿用 (`go.lsp.dev/protocol`) | |
 | §4 协议版本 + transport | ✅ 沿用 (3.17 + stdio) | |
 | §5 能力范围 | ✅ 沿用 (v1.3 hover/definition, v1.4+ completion/diagnostics) | |
-| §6 调用 `internal/` 边界 | ⚠️ **被本 RFC §4.4 取代** (新增 `AnchorAtPosition` **取消**, 复用 `SlugsForFile`) | |
+| §6 调用 `internal/` 边界 | ⚠️ **被本 RFC §4.4 取代** (`AnchorAtPosition` / `SlugsForFile` 均**改判**, 最终新增 `AnchorsForFile`) | |
 | §7 不兼容风险 | ✅ 沿用 | |
 | §8 待办 | ⚠️ **被本 RFC §5 修订** (1 / 3 沿用, 4 取消) | |
 | §9 备选方案 | ✅ 沿用 | |
@@ -290,4 +296,4 @@ func (s *Server) hover(ctx, params) Hover {
 | "LSP over HTTP (候选 C) 更易部署" | 拒绝. LSP over TCP 不是主流 client 习惯; 增加进程模型复杂度; stdio 简单且足够 |
 | "hover 渲染需要 relations.ReverseLinks" | 拒绝. v1.3 hover **只**显示 intent 标题 + summary, **不**显示反向依赖; v1.4+ 评估 |
 | "serve-lsp 应支持并发" | 拒绝. v1.3 hover/definition 都是**纯读** + **小文件** + **本地**, 串行延迟 < 5ms. **真不够**再优化 (v1.4+) |
-| "新增 `AnchorAtPosition` 是必要的" | 拒绝. `SlugsForFile` 已**足够**; 实际不需要"按行查" 能力 — hover 是按 file 扫, 然后 client 端 line match (LSP client 给的 position) |
+| "新增 `AnchorAtPosition` 是必要的" | ~~拒绝~~ **收回** (2026-10-12): 实施时确认 `SlugsForFile` 丢行号, hover 需按行匹配 → 新增 `AnchorsForFile` (见 §4.4) |

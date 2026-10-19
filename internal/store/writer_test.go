@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -480,4 +482,304 @@ func TestWriter_Update_RejectsShortRationale(t *testing.T) {
 	got, err := r.Load(context.Background(), "auth-jwt")
 	require.NoError(t, err)
 	assert.Empty(t, got.Frontmatter.Assumptions)
+}
+
+// =====================================================================
+// T3: 边界场景（①-A 补测项）
+// =====================================================================
+
+// T3-1: 损坏 frontmatter — 磁盘上文件被手动改坏，Update 应返回可辨识错误，磁盘不变
+func TestWriter_Update_CorruptedFrontmatter(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	require.NoError(t, err)
+
+	intent := newTestIntent("auth-jwt", "@alice")
+	require.NoError(t, w.Write(context.Background(), intent))
+
+	// Simulate disk corruption: overwrite frontmatter with garbage.
+	badContent := []byte("---\ninvalid: [yaml\n  broken\n---")
+	err = os.WriteFile(w.IntentPath("auth-jwt"), badContent, 0o644)
+	require.NoError(t, err)
+
+	newStatus := model.StatusSuperseded
+	patch := UpdatePatch{Status: &newStatus, Actor: "@alice"}
+	err = w.Update(context.Background(), "auth-jwt", patch)
+	require.Error(t, err)
+	// Must not panic; error must mention the parse failure.
+	assert.Contains(t, err.Error(), "parse", "expected frontmatter parse error, got %v", err)
+
+	// Disk must be unchanged (garbage still there, not silently "fixed").
+	raw, err := os.ReadFile(w.IntentPath("auth-jwt"))
+	require.NoError(t, err)
+	assert.Equal(t, badContent, raw, "corrupted file must not be silently overwritten")
+}
+
+// T3-2: 跨 kind 更新 — node 实体 (slug/README.md) 读进来，只改字段，写回仍为 node 形式
+func TestWriter_Update_KindPreserved_NodeToNode(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	require.NoError(t, err)
+
+	// Write as node form (Kind=Node).
+	intent := &model.Intent{
+		Slug: "auth",
+		Kind: model.IntentKindNode,
+		Frontmatter: model.Frontmatter{
+			CreatedBy: "@alice",
+			UpdatedAt: time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC),
+			Status:    model.StatusDraft,
+		},
+		Body: "# Auth\n",
+	}
+	require.NoError(t, w.Write(context.Background(), intent))
+
+	// Verify node form on disk.
+	assert.FileExists(t, filepath.Join(dir, ".kron", "intents", "auth", "README.md"),
+		"node intent must write as auth/README.md")
+
+	// Update a field (does not change Kind).
+	newStatus := model.StatusActive
+	patch := UpdatePatch{Status: &newStatus, Actor: "@alice"}
+	require.NoError(t, w.Update(context.Background(), "auth", patch))
+
+	// File shape must still be node form.
+	assert.NoFileExists(t, w.IntentPath("auth"),
+		"leaf form must not appear after node Update")
+	assert.FileExists(t, filepath.Join(dir, ".kron", "intents", "auth", "README.md"),
+		"node form must be preserved after Update")
+
+	// Content correct.
+	r, err := NewReader(dir)
+	require.NoError(t, err)
+	got, err := r.Load(context.Background(), "auth")
+	require.NoError(t, err)
+	assert.Equal(t, model.IntentKindNode, got.Kind)
+	assert.Equal(t, model.StatusActive, got.Frontmatter.Status)
+}
+
+// T3-3: 跨 kind 更新 — leaf 实体更新后仍为 leaf（Update 不改变 kind）
+func TestWriter_Update_KindPreserved_LeafToLeaf(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	require.NoError(t, err)
+
+	intent := newTestIntent("auth-jwt", "@alice")
+	intent.Kind = model.IntentKindLeaf
+	require.NoError(t, w.Write(context.Background(), intent))
+
+	// Verify leaf form on disk.
+	assert.FileExists(t, w.IntentPath("auth-jwt"))
+	_, err = os.Stat(filepath.Join(dir, ".kron", "intents", "auth-jwt", "README.md"))
+	assert.True(t, os.IsNotExist(err), "leaf intent must not create subdir")
+
+	// Update.
+	newStatus := model.StatusSuperseded
+	patch := UpdatePatch{Status: &newStatus, Actor: "@alice"}
+	require.NoError(t, w.Update(context.Background(), "auth-jwt", patch))
+
+	// Still leaf.
+	_, err = os.Stat(filepath.Join(dir, ".kron", "intents", "auth-jwt", "README.md"))
+	assert.True(t, os.IsNotExist(err), "leaf form must be preserved after Update")
+}
+
+// T3-4: 连续 trash→restore→trash→restore — 四步幂等链路
+func TestWriter_TrashRestore_IdempotentChain(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	require.NoError(t, err)
+
+	intent := newTestIntent("auth-jwt", "@alice")
+	require.NoError(t, w.Write(context.Background(), intent))
+	originalPath := w.IntentPath("auth-jwt")
+
+	// Step 1: trash
+	require.NoError(t, w.MoveToTrash(context.Background(), "auth-jwt"))
+	assert.NoFileExists(t, originalPath)
+	assert.FileExists(t, w.TrashPath("auth-jwt"))
+
+	// Step 2: restore
+	require.NoError(t, w.RestoreFromTrash(context.Background(), "auth-jwt"))
+	assert.FileExists(t, originalPath)
+	assert.NoFileExists(t, w.TrashPath("auth-jwt"))
+
+	// Step 3: trash again (idempotent re-trash)
+	require.NoError(t, w.MoveToTrash(context.Background(), "auth-jwt"))
+	assert.NoFileExists(t, originalPath)
+	assert.FileExists(t, w.TrashPath("auth-jwt"))
+
+	// Step 4: restore again
+	require.NoError(t, w.RestoreFromTrash(context.Background(), "auth-jwt"))
+	assert.FileExists(t, originalPath)
+	assert.NoFileExists(t, w.TrashPath("auth-jwt"))
+
+	// Content intact after full cycle.
+	r, err := NewReader(dir)
+	require.NoError(t, err)
+	got, err := r.Load(context.Background(), "auth-jwt")
+	require.NoError(t, err)
+	assert.Equal(t, "@alice", got.Frontmatter.CreatedBy)
+	assert.Equal(t, "# Title\n\nBody paragraph.\n", got.Body)
+}
+
+// T3-5: 并发写入 — 两 goroutine 同时写同一 intent，只有一个人成功，另一个返回原文件状态
+// Note: last-write-wins 是 v1.x 的已知限制（writer.go TODO 标注）。
+// 本测试验证：两个 Update 同时执行，不会 panic，且最终状态是某个正确值。
+func TestWriter_Update_Concurrent_NoPanic(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	require.NoError(t, err)
+
+	intent := newTestIntent("auth-jwt", "@alice")
+	require.NoError(t, w.Write(context.Background(), intent))
+
+	errCh := make(chan error, 2)
+
+	go func() {
+		s := model.StatusActive
+		errCh <- w.Update(context.Background(), "auth-jwt",
+			UpdatePatch{Status: &s, Actor: "@alice"})
+	}()
+	go func() {
+		s := model.StatusSuperseded
+		errCh <- w.Update(context.Background(), "auth-jwt",
+			UpdatePatch{Status: &s, Actor: "@bob"})
+	}()
+
+	// Both must return without panic.
+	err1 := <-errCh
+	err2 := <-errCh
+
+	// At least one write succeeded.
+	hasSuccess := err1 == nil || err2 == nil
+	assert.True(t, hasSuccess, "at least one concurrent write must succeed; got %v, %v", err1, err2)
+
+	// Final state is a valid Status (not corrupted).
+	r, err := NewReader(dir)
+	require.NoError(t, err)
+	got, err := r.Load(context.Background(), "auth-jwt")
+	require.NoError(t, err)
+	assert.True(t, got.Frontmatter.Status == model.StatusActive ||
+		got.Frontmatter.Status == model.StatusSuperseded ||
+		got.Frontmatter.Status == model.StatusDraft,
+		"final status must be a valid enum value, got %v", got.Frontmatter.Status)
+}
+
+func TestWriter_Update_ConcurrentSeparateWritersPreservePatches(t *testing.T) {
+	dir := t.TempDir()
+	firstWriter, err := NewWriter(dir)
+	require.NoError(t, err)
+	secondWriter, err := NewWriter(dir)
+	require.NoError(t, err)
+	require.NoError(t, firstWriter.Write(context.Background(), newTestIntent("auth-jwt", "@alice")))
+
+	status := model.StatusSuperseded
+	reviewers := []string{"@reviewer"}
+	start := make(chan struct{})
+	errCh := make(chan error, 2)
+	go func() {
+		<-start
+		errCh <- firstWriter.Update(context.Background(), "auth-jwt", UpdatePatch{Status: &status, Actor: "@alice"})
+	}()
+	go func() {
+		<-start
+		errCh <- secondWriter.Update(context.Background(), "auth-jwt", UpdatePatch{Reviewers: &reviewers, Actor: "@bob"})
+	}()
+	close(start)
+	require.NoError(t, <-errCh)
+	require.NoError(t, <-errCh)
+
+	reader, err := NewReader(dir)
+	require.NoError(t, err)
+	got, err := reader.Load(context.Background(), "auth-jwt")
+	require.NoError(t, err)
+	assert.Equal(t, model.StatusSuperseded, got.Frontmatter.Status)
+	assert.Equal(t, reviewers, got.Frontmatter.Reviewers)
+}
+
+func TestIntentLock_ProcessHelper(t *testing.T) {
+	if os.Getenv("KRON_INTENT_LOCK_HELPER") != "1" {
+		return
+	}
+	w, err := NewWriter(os.Getenv("KRON_INTENT_LOCK_ROOT"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(os.Getenv("KRON_INTENT_LOCK_STARTED"), []byte("started"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := w.lockIntent("auth-jwt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := unlock(); err != nil {
+			t.Errorf("unlock intent: %v", err)
+		}
+	}()
+	if err := os.WriteFile(os.Getenv("KRON_INTENT_LOCK_ACQUIRED"), []byte("acquired"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(os.Getenv("KRON_INTENT_LOCK_RELEASE")); err == nil {
+			return
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("stat release signal: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for release signal")
+}
+
+func TestIntentLock_CoordinatesAcrossProcesses(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	require.NoError(t, err)
+	unlock, err := w.lockIntent("auth-jwt")
+	require.NoError(t, err)
+
+	started := filepath.Join(dir, "child-started")
+	acquired := filepath.Join(dir, "child-acquired")
+	release := filepath.Join(dir, "child-release")
+	command := exec.Command(os.Args[0], "-test.run=^TestIntentLock_ProcessHelper$")
+	command.Env = append(os.Environ(),
+		"KRON_INTENT_LOCK_HELPER=1",
+		"KRON_INTENT_LOCK_ROOT="+dir,
+		"KRON_INTENT_LOCK_STARTED="+started,
+		"KRON_INTENT_LOCK_ACQUIRED="+acquired,
+		"KRON_INTENT_LOCK_RELEASE="+release,
+	)
+	if err := command.Start(); err != nil {
+		require.NoError(t, unlock())
+		require.NoError(t, err)
+	}
+	childFinished := false
+	t.Cleanup(func() {
+		if !childFinished && command.Process != nil {
+			_ = command.Process.Kill()
+			_ = command.Wait()
+		}
+	})
+	waitForFile := func(path string) error {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, err := os.Stat(path); err == nil {
+				return nil
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		return fmt.Errorf("timed out waiting for %s", path)
+	}
+	require.NoError(t, waitForFile(started))
+	time.Sleep(100 * time.Millisecond)
+	_, acquiredErr := os.Stat(acquired)
+	assert.ErrorIs(t, acquiredErr, os.ErrNotExist, "child must wait while parent holds the per-intent lock")
+	require.NoError(t, unlock())
+	require.NoError(t, waitForFile(acquired))
+	require.NoError(t, os.WriteFile(release, []byte("release"), 0o600))
+	require.NoError(t, command.Wait())
+	childFinished = true
 }

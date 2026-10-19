@@ -515,5 +515,3 @@ src/
 2. **"MCP 里有的都要测" = 5 个 method family** (`initialize` / `tools/*` / `prompts/*` / `resources/*` / `notifications/*`), **不**只 tool. r3 §9.5.3 报告"18/18 tool 跑过"是**不**诚实的, 漏**了** 4 个 method family. r4 补.
 3. **server 跟 client 双重 bug** — B1/B2/B3 是 Cursor 桥, **客**户**端**不**能**靠** server 修**;** B4 是 server 自身, **两**者**同**时**踩. AI agent 接 MCP server **必**须**有** raw stdio 测**试** baseline, **不**只信 client tool 列举.
 4. **`kron-drift-check` prompt 的"AI-friendly 包装"**是**真**的 — 它**直**接**包**装** `kron_lint` 输出, 给 AI 一**个** ready-to-use review checklist (跟 r3 §9.5.1 lint 输出 11 错**完**全**对**得上). **这**是**设**计**亮点.
-
-

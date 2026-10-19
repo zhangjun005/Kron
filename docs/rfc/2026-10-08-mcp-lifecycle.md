@@ -79,54 +79,56 @@ AI 工具启动
 - **不**做 `flock` 自我协调
 - **不**需要"启动时检查已有实例"
 
-### 2.2 并发安全 = `internal/store` 加 `flock`
+### 2.2 并发安全 = `internal/store` 按逻辑 intent 加 OS 文件锁
 
-每个 MCP 进程**对每个写操作**走 `flock(LOCK_EX)`:
+每个写操作都按已验证的 slug 对同一个稳定 sidecar lock file 获取排他 OS 锁。不能直接锁 intent 文件本身：`writeFileAtomic` 用 rename 替换 inode，替换后新进程可能锁到新 inode，从而绕过仍持有旧 inode 锁的进程。
 
 ```go
-// internal/store/writer.go (v1.1 增补)
-func (w *Writer) writeWithLock(path string, data []byte) error {
-    f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o644)
+// internal/store/intent_lock.go — stable path, independent from atomic renames
+func (w *Writer) lockIntent(slug string) (unlock func(), err error) {
+    key := sha256.Sum256([]byte(slug))
+    path := filepath.Join(w.Root, ".kron", ".lock", hex.EncodeToString(key[:]) + ".flock")
+    if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+        return nil, fmt.Errorf("mkdir lock directory: %w", err)
+    }
+    f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
     if err != nil {
-        return fmt.Errorf("open: %w", err)
+        return nil, fmt.Errorf("open: %w", err)
     }
-    defer f.Close()
-
-    if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-        return fmt.Errorf("flock: %w", err)
+    if err := lockOSFile(f); err != nil {
+        _ = f.Close()
+        return nil, fmt.Errorf("lock: %w", err)
     }
-    defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-
-    return writeFileAtomic(path, data, 0o644)  // 已有的 temp+rename
+    return func() { _ = unlockOSFile(f); _ = f.Close() }, nil
 }
 ```
 
-**锁粒度** = **每个 .md 文件一把锁** (`flock` on file descriptor, 跨进程可见):
+**锁粒度** = **每个逻辑 intent 一把稳定 sidecar 锁**（跨进程可见；leaf 与 `README.md` 两种物理形态共用同一 slug 锁）：
 
 ```
-MCP-A: flock("auth/jwt.md") → 写 → unlock
-MCP-B: flock("auth/jwt.md") → 等 → 锁释放 → 写 → unlock
+MCP-A: lock(".kron/.lock/<slug-hash>.flock") → read/modify/rename → unlock
+MCP-B: lock(".kron/.lock/<slug-hash>.flock") → 等 → 锁释放 → read/modify/rename → unlock
 ```
 
-**不锁整目录** (粒度太粗, 阻塞其他 slug 写).
+sidecar 文件在进程退出后保留，只释放 OS 锁，不删除文件；删除后并发进程可能分别锁住不同 inode。**不锁整目录**（粒度太粗，会阻塞其他 slug 写）。Windows 用 `LockFileEx`，macOS/Linux 用 `flock`，不增加 Go 依赖。
 
 ### 2.5 与现有 `writeFileAtomic` 的整合
 
 `internal/store/writer.go` L167-202 `writeFileAtomic` **已**是 temp+rename 原子写, 但**不**跨进程防并发 (rename 在 OS 层原子, **多进程**同时打开 + rename 仍 race). 拍板:
 
-- **包成** `writeFileAtomicLocked(path, data, perm)`: 在 `writeFileAtomic` **前** `flock(LOCK_EX)`, **defer** `flock(LOCK_UN)`
-- 3 个写方法 (`Write` L65 / `MoveToTrash` L100 / `RestoreFromTrash` L135) **全**走新 helper, **不**改方法签名 (仍 `ctx context.Context` 在前)
+- `Write` / `Update` / `MoveToTrash` / `RestoreFromTrash` 在读改写或 rename 的完整事务外层按 slug 加锁，**不**改方法签名
+- lock file 位于 `.kron/.lock/`，由 slug 的 SHA-256 派生稳定文件名；覆盖同 slug 的 leaf / README 形态
 - `writeFileAtomic` **不**重命名 (向后兼容既有测试期望, 如 `writer_test.go` 直接测该 helper)
-- 3 个写方法内的 `_ = ctx` **保持不变** (caller 注入 **不**管, 走 `lsp-client.md` §4.5 + `architecture.md` §2.3 — 同一拍板; `ctx` 仅供取消 / 超时传播)
+- 写方法内的 `_ = ctx` **保持不变**（本任务不改变公开 API；锁等待不承诺 context 取消）
 
 ### 2.3 影响面
 
 | 改动 | 风险 |
 |---|---|
-| `internal/store/writer.go` 三个写方法 (`Write` / `MoveToTrash` / `RestoreFromTrash`) 全加 flock | 低 — `flock` 是 stdlib (`syscall.Flock`), 不增依赖 |
+| `internal/store` 四个写方法 (`Write` / `Update` / `MoveToTrash` / `RestoreFromTrash`) 全加 OS 文件锁 | 低 — 使用 Go 标准库系统调用，不增依赖 |
 | 写方法签名**不**变 (仍 `ctx context.Context` 在前) | 兼容 |
 | `Read` **不**加锁 (rename 原子 + flock 阻塞写 → 读到的是**全**或**没**, 不存在半写) | 中 — 需 lint 强制 "Read 必须发生在 Write 完成" |
-| 行为变化: 锁冲突时**返回错误** (`model.ErrConcurrentWrite` **新增**) | 中 — CLI / MCP 错误码顺改 |
+| 行为变化: 同 slug 的写请求等待前一个事务释放锁；OS 锁获取失败时返回带上下文的错误 | 低 — 既有访问层错误路径处理该错误 |
 
 ### 2.4 不做的事 (架构铁律合规)
 
@@ -137,7 +139,7 @@ MCP-B: flock("auth/jwt.md") → 等 → 锁释放 → 写 → unlock
 | ❌ **不**加 PID 文件 | 违反铁律 #7 "不靠运行时隐式状态" |
 | ❌ **不**加 `--path` flag (MCP daemon 模式) | 违反 iron rule "新增 CLI flag 走 `cli-flag.md` 流程" |
 | ❌ **不**做"启动时单例检查" (`pgrep`) | 违反铁律 #6 #7 |
-| ✅ **只**加 `flock` (进程级文件锁, 无运行时状态) | 符合铁律 #6 #7 (锁状态由 OS 管, **不**由 Kron 进程管) |
+| ✅ **只**加 per-intent sidecar OS 文件锁 (无数据库/daemon/应用层锁状态) | 符合铁律 #6 #7 (锁状态由 OS 管, **不**由 Kron 进程管) |
 
 ---
 
@@ -152,16 +154,15 @@ MCP-B: flock("auth/jwt.md") → 等 → 锁释放 → 写 → unlock
 
 ### 3.2 Phase 2 (v1.1 实施, 1-2 周)
 
-- [ ] `internal/store/writer.go` 加 `writeFileAtomicLocked` 包装 (走 §2.5), 3 个写方法**不**改签名
-- [ ] `model.ErrConcurrentWrite` 错误码 — **可选**, 实施前**先** grep `cmd/kron/serve-mcp/` 看是否有 `errors.Is(err, syscall.EAGAIN)` 需求; 若无, **直接** `fmt.Errorf("flock: %w", syscall.EAGAIN)` 不加 sentinel
-- [ ] `internal/store/writer_test.go` 增并发测试 (`go test -race`)
-- [ ] `docs/implementation/error-catalog.md` 增 `ErrConcurrentWrite` 描述 (若新增)
-- [ ] `cmd/kron/serve-mcp/` 错误码映射 (`ErrConcurrentWrite` / `syscall.EAGAIN` → JSON-RPC `internal_error`)
-- [ ] `_ = ctx` 行 (L65 / L105 / L143) **保持不变** (caller 注入 **不**管, 走 `lsp-client.md` §4.5)
+- [x] `internal/store` 加 stable per-intent sidecar lock (覆盖 Write / Update / MoveToTrash / RestoreFromTrash), 不改公开 API
+- [x] 不新增 `ErrConcurrentWrite`：同 slug 写入等待锁；仅锁系统错误返回普通包装错误
+- [x] `internal/store/writer_test.go` 增跨 Writer 与跨进程锁测试 (`go test -race`)
+- [x] 不增加 `ErrConcurrentWrite`，因此不修改 error catalog
+- [x] 锁错误沿用 `serve-mcp` 的一般内部错误映射
+- [x] `_ = ctx` 行保持不变（锁等待不承诺 context 取消；本任务不改变公开 API）
 
 ### 3.3 Phase 3 (v1.2+ 优化, 可选)
 
-- [ ] `internal/store` 加 advisory lock (`.kron/.lock/<slug>.flock` 副作用, 跨平台更稳) — **不**做, 留给 v1.2 评估
 - [ ] `lint` 加规则: 读 .md 后**未**等待写完成 → 警告 (理想情况 read 也要排队)
 
 ---

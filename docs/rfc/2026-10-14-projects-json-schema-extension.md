@@ -41,7 +41,7 @@
 // projects.json — v1.3+ 拍板 schema
 {
   "current_project": "E:\\works\\proj1", // 当前激活项目绝对路径, 可空
-  
+
   "projects": [                          // 已注册项目列表, 必填 (空数组合法)
     {
       "path": "E:\\works\\my-project",   // 绝对路径, 必填

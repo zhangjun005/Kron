@@ -150,6 +150,16 @@ func SlugsForFile(filePath string) ([]string, error) {
 // preserves every anchor entry so callers (e.g. LSP hover/definition)
 // can match a cursor position to a specific anchor line.
 //
+// root is the repo root; it is used to normalise Anchor.FilePath to
+// the canonical repo-relative, forward-slash form (RFC
+// 2026-10-08-path-conventions.md §2.1). filePath may be absolute or
+// already repo-relative; the result's FilePath is the canonical form
+// regardless of which one the caller passed in. Pass "" to disable
+// the normalisation (FilePath is set to filePath verbatim, which is
+// only safe for callers that never re-emit FilePath into a stable
+// identifier — the LSP layer always passes the repo root so the
+// emitted FilePath matches the "repo-relative + slash" contract).
+//
 // filePath may be absolute or repo-relative. The file is opened and
 // parsed directly (no walk), so this is the right entry point when
 // the caller already knows the file (e.g. a single hover/definition
@@ -157,7 +167,7 @@ func SlugsForFile(filePath string) ([]string, error) {
 //
 // Empty filePath or a path that cannot be opened returns an error.
 // A file with no anchors returns an empty (non-nil) slice.
-func AnchorsForFile(filePath string) ([]model.Anchor, error) {
+func AnchorsForFile(root, filePath string) ([]model.Anchor, error) {
 	if filePath == "" {
 		return nil, fmt.Errorf("parser: AnchorsForFile: filePath is empty")
 	}
@@ -170,6 +180,16 @@ func AnchorsForFile(filePath string) ([]model.Anchor, error) {
 	anchors, err := scanFile(f, filePath)
 	if err != nil {
 		return nil, err
+	}
+	// Normalise FilePath to the canonical "repo-relative + forward
+	// slash" form. Done after scanFile so the file's on-disk path
+	// drives the open; the normalisation only affects the emitted
+	// identifier, not the read. Skip when root is empty (see doc
+	// above for the "" contract).
+	if root != "" {
+		for i := range anchors {
+			anchors[i].FilePath = toRepoRelative(anchors[i].FilePath, root)
+		}
 	}
 	sortAnchors(anchors)
 	return anchors, nil
