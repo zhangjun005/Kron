@@ -1,8 +1,8 @@
 # LSP Access Layer
 
-> Source of truth (architecture): [`docs/abstractDesign/architecture.md`](../abstractDesign/architecture.md) §〇 铁律 + §一 访问层  
-> Source of truth (tech selection): [`docs/rfc/2026-10-07-lsp-sdk.md`](../rfc/2026-10-07-lsp-sdk.md)  
-> Source of truth (client layer boundary): [`docs/rfc/2026-10-08-lsp-client.md`](../rfc/2026-10-08-lsp-client.md)  
+> Source of truth (architecture): [`docs/abstractDesign/architecture.md`](../abstractDesign/architecture.md) §〇 铁律 + §一 访问层
+> Source of truth (tech selection): [`docs/rfc/2026-10-07-lsp-sdk.md`](../rfc/2026-10-07-lsp-sdk.md)
+> Source of truth (client layer boundary): [`docs/rfc/2026-10-08-lsp-client.md`](../rfc/2026-10-08-lsp-client.md)
 > Source of truth (caller-injection change): [`docs/tracking/homofluctus.md`](../tracking/homofluctus.md) 10-12 决策点
 
 This document is the LSP **access layer** specification. The Go entry point is `cmd/kron/serve-lsp/` (package `lsp`); the package implements the LSP server-side protocol over stdio.
