@@ -25,3 +25,7 @@ export function ListProjectsLive() {
 export function OpenInIDE(arg1) {
   return window['go']['main']['App']['OpenInIDE'](arg1);
 }
+
+export function SwitchProject(arg1) {
+  return window['go']['main']['App']['SwitchProject'](arg1);
+}

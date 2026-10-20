@@ -27,6 +27,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -63,6 +64,10 @@ type App struct {
 	// round-trip. Cleared by killLocked.
 	mcpServerInfo LiveServerInfo
 	mcpTools      []LiveMCPTool
+	// mcpRoot is empty until the registry is read or the user selects a
+	// project. Once set, every new subprocess is pinned to this project via
+	// serve-mcp -CWD so a project switch cannot leave the GUI on stale data.
+	mcpRoot string
 }
 
 // NewApp creates a new App application struct.
@@ -360,12 +365,15 @@ func tryServeMCPCandidate(path string) (string, bool) {
 // spawnLocked starts the kron serve-mcp subprocess. The caller MUST
 // hold mcpMu.
 func (a *App) spawnLocked(executable string) error {
-	cmd := exec.Command(executable, "serve-mcp")
+	args := []string{"serve-mcp"}
+	if a.mcpRoot != "" {
+		args = append(args, "-CWD", a.mcpRoot)
+	}
+	cmd := exec.Command(executable, args...)
 	cmd.Stderr = os.Stderr // serve-mcp writes its own diagnostics to stderr
-	// No cwd override — serve-mcp defaults to os.Getwd(), which is the
-	// same as our CWD in the wails dev environment (frontend/wails/).
-	// When the GUI grows multi-workspace support (Phase 2.x) we will
-	// plumb a -CWD arg from the React side.
+	// When no registered project is active, preserve serve-mcp's normal
+	// current_project / working-directory resolution. Project selection
+	// pins the subprocess to the chosen root with -CWD.
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -739,32 +747,177 @@ func (a *App) callToolLocked(name string, argsJSON []byte) (string, error) {
 	return callRes.Content[0].Text, nil
 }
 
-// ---- multi-project overview (work 1.4.d) --------------------------------
-//
-// ListProjectsLive is the GUI bridge for `kron_list_projects` (MCP tool,
-// work 1.4.d, RFC 2026-10-14). It returns the contents of the
-// per-machine projects.json registry so the Wails shell can render a
-// "已注册项目" list. The GUI is read-only on this surface: switching
-// the active project is out of scope for work 1.4.d and would require
-// either spawning a new serve-mcp with a different CWD or restarting
-// the GUI.
-//
-// Implementation: it reuses the work 1.4.c CallMCPTool pipeline (which
-// itself reuses the work 1.4.b handshake), so the first call pays
-// the spawn-and-handshake cost and subsequent calls reuse the live
-// subprocess. The tool call returns the raw MCP content text (a JSON
-// object matching `projectsListOutput` in tools_list_projects.go), which
-// we then unmarshal into a typed TS-friendly struct.
-//
-// Iron-rule notes (architecture.md §〇 铁律 #9):
-//   - This method does NOT import internal/*.
-//   - The subprocess IS the access layer; the GUI only orchestrates
-//     the JSON-RPC exchange.
-//   - We do NOT add per-project stats (intent count, lint errors,
-//     assumption count) in this round — those would require N
-//     concurrent `kron_*` calls and a bounded goroutine pool, and
-//     RFC §3.1 explicitly defers them to later milestones. See
-//     docs/implementation/gui.md §3.1 for the boundary.
+// ---- multi-project registry (RFC 2026-10-13) -----------------------------
+
+// projectRegistryWireEntry mirrors one projects.json row. Unknown registry
+// fields are kept separately as RawMessages when writing so a GUI version
+// does not discard fields added by a newer CLI version.
+type projectRegistryWireEntry struct {
+	Path       string `json:"path"`
+	AddedAt    string `json:"added_at,omitempty"`
+	LastOpened string `json:"last_opened,omitempty"`
+}
+
+type projectRegistryDocument struct {
+	fields   map[string]json.RawMessage
+	projects []map[string]json.RawMessage
+}
+
+func projectsJSONPath() (string, error) {
+	if override := os.Getenv("KRON_PROJECTS_JSON_PATH"); override != "" {
+		return filepath.Abs(override)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("wails: locate projects.json: %w", err)
+	}
+	return filepath.Join(filepath.Dir(executable), "projects.json"), nil
+}
+
+func readProjectRegistry(path string) (*projectRegistryDocument, error) {
+	doc := &projectRegistryDocument{
+		fields:   make(map[string]json.RawMessage),
+		projects: make([]map[string]json.RawMessage, 0),
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return doc, nil
+		}
+		return nil, fmt.Errorf("wails: read projects.json %q: %w", path, err)
+	}
+	if err := json.Unmarshal(data, &doc.fields); err != nil {
+		return nil, fmt.Errorf("wails: parse projects.json %q: %w", path, err)
+	}
+	if doc.fields == nil {
+		doc.fields = make(map[string]json.RawMessage)
+	}
+	projectsRaw, ok := doc.fields["projects"]
+	if !ok || string(projectsRaw) == "null" {
+		return doc, nil
+	}
+	var rows []json.RawMessage
+	if err := json.Unmarshal(projectsRaw, &rows); err != nil {
+		return nil, fmt.Errorf("wails: parse projects.json projects: %w", err)
+	}
+	for i, row := range rows {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(row, &fields); err != nil || fields == nil {
+			return nil, fmt.Errorf("wails: parse projects.json projects[%d]: invalid project entry", i)
+		}
+		var entry projectRegistryWireEntry
+		if err := json.Unmarshal(row, &entry); err != nil || entry.Path == "" {
+			return nil, fmt.Errorf("wails: parse projects.json projects[%d]: missing or invalid path", i)
+		}
+		doc.projects = append(doc.projects, fields)
+	}
+	return doc, nil
+}
+
+func (doc *projectRegistryDocument) snapshot(path string) (ListProjectsLiveResult, error) {
+	result := ListProjectsLiveResult{
+		Projects:     make([]ProjectEntry, 0, len(doc.projects)),
+		ProjectsPath: path,
+		Source:       "file: " + path,
+	}
+	for i, fields := range doc.projects {
+		encoded, err := json.Marshal(fields)
+		if err != nil {
+			return ListProjectsLiveResult{}, fmt.Errorf("wails: encode projects.json projects[%d]: %w", i, err)
+		}
+		var entry projectRegistryWireEntry
+		if err := json.Unmarshal(encoded, &entry); err != nil {
+			return ListProjectsLiveResult{}, fmt.Errorf("wails: decode projects.json projects[%d]: %w", i, err)
+		}
+		result.Projects = append(result.Projects, ProjectEntry{
+			Path:       entry.Path,
+			AddedAt:    entry.AddedAt,
+			LastOpened: entry.LastOpened,
+		})
+	}
+	sort.SliceStable(result.Projects, func(i, j int) bool {
+		return result.Projects[i].LastOpened > result.Projects[j].LastOpened
+	})
+
+	if currentRaw, ok := doc.fields["current_project"]; ok {
+		if err := json.Unmarshal(currentRaw, &result.Current); err != nil {
+			return ListProjectsLiveResult{}, fmt.Errorf("wails: parse projects.json current_project: %w", err)
+		}
+	}
+	if !containsProject(result.Projects, result.Current) {
+		result.Current = ""
+		if len(result.Projects) > 0 {
+			// RFC §2.7: when no active pointer is stored, default to the most
+			// recently opened registered project. The file is not changed until
+			// the user explicitly selects a project.
+			result.Current = result.Projects[0].Path
+		}
+	}
+	return result, nil
+}
+
+func containsProject(projects []ProjectEntry, path string) bool {
+	if path == "" {
+		return false
+	}
+	for _, project := range projects {
+		if sameProjectPath(project.Path, path) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameProjectPath(left, right string) bool {
+	left = filepath.Clean(left)
+	right = filepath.Clean(right)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
+}
+
+func writeProjectRegistry(path string, doc *projectRegistryDocument) error {
+	rows := make([]json.RawMessage, 0, len(doc.projects))
+	for i, fields := range doc.projects {
+		row, err := json.Marshal(fields)
+		if err != nil {
+			return fmt.Errorf("wails: encode projects.json projects[%d]: %w", i, err)
+		}
+		rows = append(rows, row)
+	}
+	projectsJSON, err := json.Marshal(rows)
+	if err != nil {
+		return fmt.Errorf("wails: encode projects.json projects: %w", err)
+	}
+	doc.fields["projects"] = projectsJSON
+	data, err := json.MarshalIndent(doc.fields, "", "  ")
+	if err != nil {
+		return fmt.Errorf("wails: encode projects.json: %w", err)
+	}
+	data = append(data, '\n')
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".projects-*.tmp")
+	if err != nil {
+		return fmt.Errorf("wails: create projects.json temporary file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("wails: write projects.json temporary file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("wails: sync projects.json temporary file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("wails: close projects.json temporary file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("wails: replace projects.json: %w", err)
+	}
+	return nil
+}
 
 // ProjectEntry is one row of the projects.json registry. The field
 // names match the JSON tags on store.ProjectEntry + the wire shape
@@ -788,54 +941,98 @@ type ListProjectsLiveResult struct {
 	Source       string         `json:"source"`
 }
 
-// ListProjectsLive calls `kron_list_projects` against the live
-// serve-mcp subprocess and returns the parsed registry.
+// ListProjectsLive reads the portable projects.json registry and pins any
+// future MCP subprocess to the selected project root. The registry is the
+// explicitly permitted GUI file-I/O boundary in the registration RFC.
 func (a *App) ListProjectsLive() (ListProjectsLiveResult, error) {
-	const toolName = "kron_list_projects"
-
-	raw, err := a.CallMCPTool(toolName, "{}")
+	path, err := projectsJSONPath()
 	if err != nil {
 		return ListProjectsLiveResult{}, err
 	}
-
-	// Wire shape (from cmd/kron/serve-mcp/tools_list_projects.go):
-	//   {
-	//     "current_project": "...",
-	//     "projects":        [ { "path", "added_at", "last_opened" }, ... ],
-	//     "projects_path":   "..."
-	//   }
-	// We decode into a local struct so the GUI side never has to
-	// worry about server-side snake_case; ListProjectsLiveResult
-	// already uses the TS-friendly camelCase tags.
-	var wire struct {
-		CurrentProject string `json:"current_project"`
-		Projects       []struct {
-			Path       string `json:"path"`
-			AddedAt    string `json:"added_at,omitempty"`
-			LastOpened string `json:"last_opened,omitempty"`
-		} `json:"projects"`
-		ProjectsPath string `json:"projects_path"`
+	doc, err := readProjectRegistry(path)
+	if err != nil {
+		return ListProjectsLiveResult{}, err
 	}
-	if err := json.Unmarshal([]byte(raw), &wire); err != nil {
-		return ListProjectsLiveResult{}, fmt.Errorf(
-			"wails: ListProjectsLive: parsing %s response: %w (raw=%s)",
-			toolName, err, truncate(raw, 200))
+	out, err := doc.snapshot(path)
+	if err != nil {
+		return ListProjectsLiveResult{}, err
 	}
-
-	out := ListProjectsLiveResult{
-		Current:      wire.CurrentProject,
-		ProjectsPath: wire.ProjectsPath,
-		Projects:     make([]ProjectEntry, 0, len(wire.Projects)),
+	a.mcpMu.Lock()
+	defer a.mcpMu.Unlock()
+	if out.Current != "" {
+		abs, absErr := filepath.Abs(out.Current)
+		if absErr != nil {
+			return ListProjectsLiveResult{}, fmt.Errorf("wails: resolve active project path: %w", absErr)
+		}
+		if !sameProjectPath(a.mcpRoot, abs) && a.mcpCmd != nil {
+			a.killLocked()
+		}
+		a.mcpRoot = abs
+	} else if a.mcpRoot != "" {
+		a.killLocked()
+		a.mcpRoot = ""
 	}
-	for _, p := range wire.Projects {
-		out.Projects = append(out.Projects, ProjectEntry{
-			Path:       p.Path,
-			AddedAt:    p.AddedAt,
-			LastOpened: p.LastOpened,
-		})
-	}
-	out.Source = fmt.Sprintf("stdio: kron_list_projects (%d projects)", len(out.Projects))
 	return out, nil
+}
+
+// SwitchProject atomically updates projects.json and restarts the MCP session
+// on the selected project. The returned registry is ready to render in TS.
+func (a *App) SwitchProject(projectPath string) (ListProjectsLiveResult, error) {
+	if strings.TrimSpace(projectPath) == "" {
+		return ListProjectsLiveResult{}, errors.New("wails: project path is required")
+	}
+	abs, err := filepath.Abs(projectPath)
+	if err != nil {
+		return ListProjectsLiveResult{}, fmt.Errorf("wails: resolve project path: %w", err)
+	}
+	if !isKronProject(abs) {
+		return ListProjectsLiveResult{}, fmt.Errorf("wails: %q is not a Kron project (.kron directory not found)", abs)
+	}
+	path, err := projectsJSONPath()
+	if err != nil {
+		return ListProjectsLiveResult{}, err
+	}
+	a.mcpMu.Lock()
+	defer a.mcpMu.Unlock()
+	doc, err := readProjectRegistry(path)
+	if err != nil {
+		return ListProjectsLiveResult{}, err
+	}
+	index := -1
+	for i, fields := range doc.projects {
+		encoded, marshalErr := json.Marshal(fields)
+		if marshalErr != nil {
+			return ListProjectsLiveResult{}, fmt.Errorf("wails: encode project entry: %w", marshalErr)
+		}
+		var entry projectRegistryWireEntry
+		if err := json.Unmarshal(encoded, &entry); err != nil {
+			return ListProjectsLiveResult{}, fmt.Errorf("wails: parse project entry: %w", err)
+		}
+		if sameProjectPath(entry.Path, abs) {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return ListProjectsLiveResult{}, fmt.Errorf("wails: project %q is not registered; run `kron init` or `kron register` first", abs)
+	}
+	currentJSON, _ := json.Marshal(abs)
+	doc.fields["current_project"] = currentJSON
+	lastOpenedJSON, _ := json.Marshal(time.Now().UTC().Format(time.RFC3339))
+	doc.projects[index]["last_opened"] = lastOpenedJSON
+	if err := writeProjectRegistry(path, doc); err != nil {
+		return ListProjectsLiveResult{}, err
+	}
+	if !sameProjectPath(a.mcpRoot, abs) {
+		a.killLocked()
+	}
+	a.mcpRoot = abs
+	return doc.snapshot(path)
+}
+
+func isKronProject(root string) bool {
+	info, err := os.Stat(filepath.Join(root, ".kron"))
+	return err == nil && info.IsDir()
 }
 
 // ---- open-in-IDE bridge (work 1.4.e: edit-jump-IDE) -------------------

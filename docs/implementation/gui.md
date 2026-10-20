@@ -117,6 +117,17 @@ type ProjectEntry struct {
 
 ---
 
+## Wails follow-up: live dashboard and project switching
+
+This section supersedes the 1.4.d deferrals above for the Wails GUI only.
+
+- `ListProjectsLive()` reads the RFC 2026-10-13 `projects.json` beside the GUI executable. This is the documented GUI exception for the registry file; it does not import `internal/` or call a tool that the MCP server does not register.
+- When `current_project` is absent or invalid, the GUI displays the most recently opened registered project as the default without writing the registry. A user click on **Switch** transactionally updates `current_project` and `last_opened`, then restarts `serve-mcp` with `-CWD <project-root>`.
+- The live explorer and counts come from `kron_tree`; lint counts come from `kron_lint`. They describe the selected project only. If there is no active project, no mock counts or tree are presented as live data.
+- The Projects view reports registry loading/read errors and switch errors. The main pane distinguishes loading, no active project, connection/tree errors, and an empty real tree. Refresh retries the live calls.
+- `KRON_PROJECTS_JSON_PATH` is an optional local override for development. Production uses the executable directory as the registry location.
+- Mock mode has separate frontend-only project fixtures: switching samples changes the displayed tree, counts, and lint summary without reading or writing `projects.json` or starting MCP. It includes an empty project state, expandable groups, and a leaf-click hint for the Live IDE-open action; Reset and New intent remain demo-only.
+
 ## 7 与 RFC §9.1 交付物对应
 
 | RFC §9.1 checklist | 本文档对应 | 状态 |

@@ -78,14 +78,9 @@ export interface GetOutput {
     intent: IntentBody;
 }
 
-// --- kron_list_projects (1.4.d: multi-project registry) ----------------
-//
-// Wire shape from cmd/kron/serve-mcp/tools_list_projects.go
-// (projectsListEntry / projectsListOutput). The Go bridge
-// ListProjectsLive already converts snake_case -> camelCase, so the
-// TS side consumes the bridged shape, not the raw MCP wire. The
-// camelCase shape is also what wailsjs/go/main/App.d.ts will declare
-// after the next `wails generate` run.
+// --- projects.json registry bridge ---------------------------------------
+// The Go bridge reads the portable registry and converts snake_case row
+// fields to this camelCase shape for the React UI.
 
 /** One row of the projects.json registry. */
 export interface ProjectEntry {
@@ -101,6 +96,6 @@ export interface ListProjectsLiveResult {
     current: string;
     /** Absolute path of projects.json (for the diagnostic footer). */
     projectsPath: string;
-    /** Human-readable provenance string ("stdio: ..."). */
+    /** Human-readable provenance string (for example, the registry path). */
     source: string;
 }

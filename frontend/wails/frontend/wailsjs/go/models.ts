@@ -1,5 +1,5 @@
 export namespace main {
-	
+
 	export class KronInfo {
 	    name: string;
 	    version: string;
@@ -88,8 +88,8 @@ export namespace main {
 	}
 	export class ProjectEntry {
 	    path: string;
-	    addedAt: string;
-	    lastOpened: string;
+	    addedAt?: string;
+	    lastOpened?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ProjectEntry(source);
@@ -107,11 +107,11 @@ export namespace main {
 	    current: string;
 	    projectsPath: string;
 	    source: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ListProjectsLiveResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.projects = this.convertValues(source["projects"], ProjectEntry);
@@ -119,7 +119,7 @@ export namespace main {
 	        this.projectsPath = source["projectsPath"];
 	        this.source = source["source"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -138,17 +138,19 @@ export namespace main {
 		    return a;
 		}
 	}
+	
+	
 	export class OpenIDEResult {
 	    ok: boolean;
 	    ide: string;
-	    pid: number;
-	    err: string;
+	    pid?: number;
+	    err?: string;
 	    path: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new OpenIDEResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ok = source["ok"];
@@ -158,7 +160,6 @@ export namespace main {
 	        this.path = source["path"];
 	    }
 	}
-
 
 }
 

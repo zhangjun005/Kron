@@ -30,13 +30,13 @@ import {
 import {ScrollArea} from '@/components/ui/scroll-area';
 import {Separator} from '@/components/ui/separator';
 import {Progress} from '@/components/ui/progress';
-import {GetKronInfo, ListMCPTools, ListMCPToolsLive, CallMCPTool, ListProjectsLive} from '../wailsjs/go/main/App';
+import {GetKronInfo, ListMCPTools, ListMCPToolsLive, CallMCPTool, ListProjectsLive, SwitchProject} from '../wailsjs/go/main/App';
 import {
     type KronInfo,
     type IntentNode,
     type TreeStats,
-    mockIntentTree,
     mockStats,
+    mockProjects,
 } from '@/lib/mock';
 import {BootAnimation} from '@/components/boot-animation';
 import {IntentTree} from '@/components/intent-tree';
@@ -56,7 +56,8 @@ function App() {
     const [tools, setTools] = useState<string[]>([]);
     const [loadError, setLoadError] = useState<string | null>(null);
     const [filter, setFilter] = useState<string>('');
-    const [tree, setTree] = useState<IntentNode[]>(mockIntentTree);
+    const [activeMockProjectId, setActiveMockProjectId] = useState<string>(mockProjects[0]!.id);
+    const [tree, setTree] = useState<IntentNode[]>(mockProjects[0]!.tree);
     const [stats, setStats] = useState<TreeStats>(mockStats);
 
     // 1.4.b: data-source toggle. Default 'mock' preserves the
@@ -80,31 +81,26 @@ function App() {
     const [liveTree, setLiveTree] = useState<IntentNode[] | null>(null);
     const [liveTreeError, setLiveTreeError] = useState<string | null>(null);
     const [liveTreeLoading, setLiveTreeLoading] = useState<boolean>(false);
+    const [noActiveProject, setNoActiveProject] = useState<boolean>(false);
+    const [lintStats, setLintStats] = useState<{errors: number; warnings: number} | null>(mockProjects[0]!.lint);
+    const [lintError, setLintError] = useState<string | null>(null);
+    const [lintLoading, setLintLoading] = useState<boolean>(false);
+    const [switchingProject, setSwitchingProject] = useState<string | null>(null);
+    const [projectSwitchError, setProjectSwitchError] = useState<string | null>(null);
     const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
 
-    // 1.4.d: live multi-project registry. liveProjects holds the
-    // kron_list_projects-derived ListProjectsLiveResult; it is
-    // fetched only when the user is in 'live' mode AND opens the
-    // "Projects" view (lazy to avoid paying the registry read
-    // cost on every Settings toggle). liveProjectsError surfaces
-    // a friendly message in place of the list on failure.
-    // liveProjectsLoading controls a subtle skeleton inside the
-    // panel. On failure the previous liveProjects is kept so the
-    // UI does not flicker empty.
+    // The projects view reads the portable registry through the Go
+    // bridge and remains available in both mock and live display modes.
     const [liveProjects, setLiveProjects] = useState<ListProjectsLiveResult | null>(
         null,
     );
     const [liveProjectsError, setLiveProjectsError] = useState<string | null>(null);
     const [liveProjectsLoading, setLiveProjectsLoading] = useState<boolean>(false);
+    const activeMockProject = mockProjects.find((project) => project.id === activeMockProjectId) ?? mockProjects[0]!;
 
-    // dataSource-aware tree: in 'mock' mode we always render the
-    // hard-coded mockIntentTree; in 'live' mode we render liveTree
-    // when available, and fall back to mockIntentTree on the first
-    // render before the fetch lands (or on error). Resetting the
-    // data source back to 'mock' discards the live tree so the
-    // user sees the canonical demo data again.
+    // Live mode must never silently render demo data as if it were real.
     const displayTree: IntentNode[] =
-        dataSource === 'live' && liveTree !== null ? liveTree : mockIntentTree;
+        dataSource === 'live' ? (liveTree ?? []) : tree;
     const showLiveTreeSkeleton: boolean =
         dataSource === 'live' && liveTree === null && liveTreeError === null;
 
@@ -112,6 +108,16 @@ function App() {
         setLiveLoading(true);
         setLiveError(null);
         try {
+            const projects = await ListProjectsLive();
+            setLiveProjects(projects);
+            if (projects.current === '') {
+                setNoActiveProject(true);
+                setLiveTools([]);
+                setLiveServerName('');
+                setLiveServerVersion('');
+                setLiveSource('');
+                return;
+            }
             const result = await ListMCPToolsLive();
             setLiveTools(result.tools.map((t) => t.name));
             setLiveServerName(result.serverInfo.name);
@@ -137,13 +143,39 @@ function App() {
     const refreshLiveTree = useCallback(async (): Promise<void> => {
         setLiveTreeLoading(true);
         setLiveTreeError(null);
+        setLintLoading(true);
+        setLintError(null);
         try {
+            const projects = await ListProjectsLive();
+            setLiveProjects(projects);
+            if (projects.current === '') {
+                setNoActiveProject(true);
+                setLiveTree([]);
+                setStats(emptyStats());
+                setLintStats(null);
+                return;
+            }
+            setNoActiveProject(false);
             const treeText = await CallMCPTool('kron_tree', '{}');
             const treeJson = JSON.parse(treeText) as {
                 root: import('@/lib/mcp-types').TreeNode;
             };
             const converted = await kronTreeToIntentNodes(treeJson);
             setLiveTree(converted);
+            setStats(statsFromTree(converted));
+            try {
+                const lintText = await CallMCPTool('kron_lint', '{}');
+                const lint = JSON.parse(lintText) as {summary?: {errors?: number; warnings?: number}};
+                if (typeof lint.summary?.errors !== 'number' || typeof lint.summary?.warnings !== 'number') {
+                    throw new Error('kron_lint returned no numeric summary counters');
+                }
+                setLintStats({errors: lint.summary.errors, warnings: lint.summary.warnings});
+            } catch (err: unknown) {
+                setLintStats(null);
+                setLintError(err instanceof Error ? err.message : String(err));
+            } finally {
+                setLintLoading(false);
+            }
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
             setLiveTreeError(msg);
@@ -151,14 +183,12 @@ function App() {
             // UI does not flicker empty.
         } finally {
             setLiveTreeLoading(false);
+            setLintLoading(false);
         }
     }, []);
 
-    // 1.4.d: refresh the live multi-project registry. Single
-    // JSON-RPC round-trip via ListProjectsLive (which in turn
-    // calls kron_list_projects through the work 1.4.c bridge).
-    // Pattern mirrors refreshLiveTree: failure keeps the
-    // previous liveProjects so the UI does not flicker empty.
+    // Refresh the projects.json registry. On failure, keep the previous
+    // snapshot visible and surface the read error beside it.
     const refreshLiveProjects = useCallback(async (): Promise<void> => {
         setLiveProjectsLoading(true);
         setLiveProjectsError(null);
@@ -172,6 +202,29 @@ function App() {
             setLiveProjectsLoading(false);
         }
     }, []);
+
+    const switchLiveProject = useCallback(async (path: string): Promise<void> => {
+        setSwitchingProject(path);
+        setProjectSwitchError(null);
+        setLiveTree(null);
+        setLiveTreeError(null);
+        try {
+            const result = await SwitchProject(path);
+            setLiveProjects(result);
+            setNoActiveProject(false);
+            if (dataSource !== 'live') setDataSource('live');
+            else {
+                await refreshLive();
+                await refreshLiveTree();
+            }
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            setProjectSwitchError(message);
+            if (dataSource === 'live') setLiveTreeError(message);
+        } finally {
+            setSwitchingProject(null);
+        }
+    }, [dataSource, refreshLive, refreshLiveTree]);
 
     useEffect(() => {
         let cancelled = false;
@@ -209,18 +262,28 @@ function App() {
     // React state updates compose into a single render.
     useEffect(() => {
         if (dataSource === 'live') {
-            void refreshLive();
-            void refreshLiveTree();
-            // 1.4.d: also kick off the multi-project registry
-            // fetch. The Projects view is the only consumer; if
-            // the user never opens it the data is still cheap
-            // (one kron_list_projects round-trip) and we avoid a
-            // "stale data on first open" UX. Failures are
-            // surfaced only when the user actually opens the
-            // Projects view.
-            void refreshLiveProjects();
+            void (async (): Promise<void> => {
+                await refreshLiveProjects();
+                await refreshLive();
+                await refreshLiveTree();
+            })();
+        } else {
+            setTree(activeMockProject.tree);
+            setStats(activeMockProject.stats);
+            setLintStats(activeMockProject.lint);
+            setLintError(null);
         }
-    }, [dataSource, refreshLive, refreshLiveTree, refreshLiveProjects]);
+    }, [dataSource, activeMockProject, refreshLive, refreshLiveTree, refreshLiveProjects]);
+
+    const updateMockTree = (next: IntentNode[]): void => {
+        setTree(next);
+        if (dataSource === 'mock') setStats(statsFromTree(next));
+    };
+
+    const resetMockTree = (): void => {
+        setTree(activeMockProject.tree);
+        setStats(activeMockProject.stats);
+    };
 
     return (
         <>
@@ -238,6 +301,7 @@ function App() {
                     tools={tools}
                     error={loadError}
                     stats={stats}
+                    tree={displayTree}
                     dataSource={dataSource}
                     onDataSourceChange={setDataSource}
                     liveTools={liveTools}
@@ -250,11 +314,20 @@ function App() {
                         void refreshLive();
                     }}
                     liveProjects={liveProjects}
+                    mockProjects={mockProjects}
+                    activeMockProjectId={activeMockProjectId}
+                    onSelectMockProject={setActiveMockProjectId}
                     liveProjectsError={liveProjectsError}
                     liveProjectsLoading={liveProjectsLoading}
                     onRefreshLiveProjects={(): void => {
                         void refreshLiveProjects();
                     }}
+                    onSwitchProject={(path): void => { void switchLiveProject(path); }}
+                    switchingProject={switchingProject}
+                    projectSwitchError={projectSwitchError}
+                    lintStats={lintStats}
+                    lintError={lintError}
+                    lintLoading={lintLoading}
                     settingsOpen={settingsOpen}
                     onSettingsOpenChange={setSettingsOpen}
                 />
@@ -263,7 +336,9 @@ function App() {
                         tree={displayTree}
                         filter={filter}
                         onFilterChange={setFilter}
-                        onTreeChange={setTree}
+                        onTreeChange={updateMockTree}
+                        onResetTree={resetMockTree}
+                        rootLabel={activeMockProject.name}
                         dataSource={dataSource}
                         liveTreeLoading={liveTreeLoading}
                         liveTreeError={liveTreeError}
@@ -273,7 +348,22 @@ function App() {
                     />
                     <Separator/>
                     <div className="flex-1 overflow-hidden">
-                        <IntentTree data={displayTree} filter={filter}/>
+                        {showLiveTreeSkeleton ? (
+                            <div className="p-6 text-sm text-muted-foreground">Loading the selected project's intents…</div>
+                        ) : noActiveProject && dataSource === 'live' ? (
+                            <div className="p-6 text-sm text-muted-foreground">No active Kron project. Run kron init or kron register, refresh Projects, then select a project.</div>
+                        ) : liveTreeError !== null && dataSource === 'live' ? (
+                            <div className="p-6 text-sm text-destructive">Could not load the live project tree. Use Retry below after checking the MCP connection.</div>
+                        ) : dataSource === 'mock' && displayTree.length === 0 ? (
+                            <div className="p-6 text-sm text-muted-foreground">This demo project has no intents yet. Switch to another demo project or add a demo intent.</div>
+                        ) : (
+                            <IntentTree
+                                data={displayTree}
+                                filter={filter}
+                                demoMode={dataSource === 'mock'}
+                                projectName={dataSource === 'mock' ? activeMockProject.name : 'Active project'}
+                            />
+                        )}
                     </div>
                     {/* 1.4.c: live-tree status footer. Shows a
                         subtle hint under the tree when we are
@@ -318,11 +408,76 @@ function App() {
     );
 }
 
+function emptyStats(): TreeStats {
+    return {intents: 0, groups: 0, stale: 0, verified: 0, draft: 0, review: 0, archived: 0};
+}
+
+function statsFromTree(nodes: IntentNode[]): TreeStats {
+    const stats = emptyStats();
+    const visit = (items: IntentNode[]): void => {
+        for (const node of items) {
+            if (node.kind === 'spec') stats.groups += 1;
+            else {
+                stats.intents += 1;
+                if (node.status === 'draft') stats.draft += 1;
+                if (node.status === 'review') stats.review += 1;
+                if (node.status === 'accepted') stats.verified += 1;
+                if (node.status === 'stale') { stats.stale += 1; stats.archived += 1; }
+            }
+            visit(node.children);
+        }
+    };
+    visit(nodes);
+    return stats;
+}
+
+function MockProjectsPanel(props: {
+    projects: typeof mockProjects;
+    activeProjectId: string;
+    onSelectProject: (id: string) => void;
+}): JSX.Element {
+    return (
+        <>
+            <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Demo projects</span>
+                <Badge variant="secondary" className="text-[10px] h-4 px-1.5">{props.projects.length} samples</Badge>
+            </div>
+            <p className="text-[10px] leading-snug text-muted-foreground">
+                Switching here only changes demo data. It does not edit projects.json or connect to MCP.
+            </p>
+            <ul className="space-y-1">
+                {props.projects.map((project) => {
+                    const active = project.id === props.activeProjectId;
+                    return (
+                        <li key={project.id} className={`rounded border p-2 ${active ? 'border-primary/50 bg-primary/10' : 'border-border'}`}>
+                            <div className="flex items-center gap-2">
+                                <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground"/>
+                                <span className="min-w-0 flex-1 truncate font-medium">{project.name}</span>
+                                <Button size="sm" variant={active ? 'secondary' : 'outline'} className="h-6 px-2 text-[10px]"
+                                    disabled={active} onClick={(): void => props.onSelectProject(project.id)}>
+                                    {active ? 'Current' : 'Switch'}
+                                </Button>
+                            </div>
+                            <div className="mt-1 pl-5 truncate font-mono text-[9px] text-muted-foreground" title={project.path}>
+                                {project.path}
+                            </div>
+                            <div className="mt-1 pl-5 text-[9px] text-muted-foreground">
+                                {project.stats.intents} intents · {project.lint.errors} lint errors · {project.lint.warnings} warnings
+                            </div>
+                        </li>
+                    );
+                })}
+            </ul>
+        </>
+    );
+}
+
 function LeftRail(props: {
     info: KronInfo | null;
     tools: string[];
     error: string | null;
     stats: TreeStats;
+    tree: IntentNode[];
     dataSource: DataSource;
     onDataSourceChange: (s: DataSource) => void;
     liveTools: string[];
@@ -333,9 +488,18 @@ function LeftRail(props: {
     liveLoading: boolean;
     onRefreshLive: () => void;
     liveProjects: ListProjectsLiveResult | null;
+    mockProjects: typeof mockProjects;
+    activeMockProjectId: string;
+    onSelectMockProject: (id: string) => void;
     liveProjectsError: string | null;
     liveProjectsLoading: boolean;
     onRefreshLiveProjects: () => void;
+    onSwitchProject: (path: string) => void;
+    switchingProject: string | null;
+    projectSwitchError: string | null;
+    lintStats: {errors: number; warnings: number} | null;
+    lintError: string | null;
+    lintLoading: boolean;
     settingsOpen: boolean;
     onSettingsOpenChange: (open: boolean) => void;
 }): JSX.Element {
@@ -344,6 +508,7 @@ function LeftRail(props: {
         tools,
         error,
         stats,
+        tree,
         dataSource,
         onDataSourceChange,
         liveTools,
@@ -354,14 +519,23 @@ function LeftRail(props: {
         liveLoading,
         onRefreshLive,
         liveProjects,
+        mockProjects: demoProjects,
+        activeMockProjectId,
+        onSelectMockProject,
         liveProjectsError,
         liveProjectsLoading,
         onRefreshLiveProjects,
+        onSwitchProject,
+        switchingProject,
+        projectSwitchError,
+        lintStats,
+        lintError,
+        lintLoading,
         settingsOpen,
         onSettingsOpenChange,
     } = props;
     const [activeView, setActiveView] = useState<
-        'explorer' | 'projects' | 'search' | 'git' | 'tools'
+        'explorer' | 'projects' | 'git' | 'tools'
     >('explorer');
     const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
         Files: true,
@@ -405,13 +579,6 @@ function LeftRail(props: {
                     <Folder className="h-5 w-5"/>
                 </ActivityIcon>
                 <ActivityIcon
-                    active={activeView === 'search'}
-                    label="Search"
-                    onClick={(): void => setActiveView('search')}
-                >
-                    <Search className="h-5 w-5"/>
-                </ActivityIcon>
-                <ActivityIcon
                     active={activeView === 'git'}
                     label="Source control"
                     onClick={(): void => setActiveView('git')}
@@ -447,7 +614,6 @@ function LeftRail(props: {
                     <span className="font-semibold">
                         {activeView === 'explorer' && 'Explorer'}
                         {activeView === 'projects' && 'Projects'}
-                        {activeView === 'search' && 'Search'}
                         {activeView === 'git' && 'Source Control'}
                         {activeView === 'tools' && 'MCP Tools'}
                     </span>
@@ -539,7 +705,7 @@ function LeftRail(props: {
                             />
                             {openGroups['Files'] && (
                                 <ul className="text-sm">
-                                    {mockIntentTree.map((node) => (
+                                    {tree.map((node) => (
                                         <li
                                             key={node.id}
                                             className={[
@@ -567,7 +733,7 @@ function LeftRail(props: {
                             />
                             {openGroups['Archived'] && (
                                 <ul className="text-sm">
-                                    {mockIntentTree
+                                    {tree
                                         .filter((n) => n.status === 'stale')
                                         .map((node) => (
                                             <li
@@ -597,19 +763,6 @@ function LeftRail(props: {
                         </div>
                     )}
 
-                    {activeView === 'search' && (
-                        <div className="p-4 space-y-3">
-                            <Input
-                                placeholder="Search intents…"
-                                className="h-8 text-xs"
-                            />
-                            <div className="text-[11px] text-muted-foreground">
-                                Use the search bar in the top of the editor
-                                to filter the tree. {stats.intents} indexed.
-                            </div>
-                        </div>
-                    )}
-
                     {/* 1.4.d: Projects view. Renders the live
                         projects.json registry (kron_list_projects)
                         when the user is in 'live' mode, and a
@@ -621,7 +774,13 @@ function LeftRail(props: {
                         highlighted via Badge. */}
                     {activeView === 'projects' && (
                         <div className="p-4 space-y-3 text-xs">
-                            {dataSource === 'live' ? (
+                            {dataSource === 'mock' ? (
+                                <MockProjectsPanel
+                                    projects={demoProjects}
+                                    activeProjectId={activeMockProjectId}
+                                    onSelectProject={onSelectMockProject}
+                                />
+                            ) : (
                                 <>
                                     <div className="flex items-center justify-between">
                                         <span className="text-muted-foreground">
@@ -677,14 +836,12 @@ function LeftRail(props: {
                                                         <span className="truncate flex-1">
                                                             {p.path}
                                                         </span>
-                                                        {isCurrent && (
-                                                            <Badge
-                                                                variant="secondary"
-                                                                className="text-[9px] h-4 px-1 shrink-0"
-                                                            >
-                                                                active
-                                                            </Badge>
-                                                        )}
+                                                        <Button size="sm" variant={isCurrent ? 'secondary' : 'outline'}
+                                                            className="h-6 px-2 text-[10px] shrink-0"
+                                                            disabled={isCurrent || switchingProject !== null}
+                                                            onClick={(): void => onSwitchProject(p.path)}>
+                                                            {isCurrent ? 'Active' : switchingProject === p.path ? 'Switching…' : 'Switch'}
+                                                        </Button>
                                                     </li>
                                                 );
                                             })}
@@ -695,6 +852,7 @@ function LeftRail(props: {
                                             {liveProjects.projectsPath}
                                         </div>
                                     )}
+                                    {projectSwitchError !== null && <p role="alert" className="text-[10px] text-destructive break-words">{projectSwitchError}</p>}
                                     <Button
                                         variant="outline"
                                         size="sm"
@@ -705,15 +863,6 @@ function LeftRail(props: {
                                         {liveProjectsLoading ? 'Refreshing…' : 'Refresh'}
                                     </Button>
                                 </>
-                            ) : (
-                                <p className="text-muted-foreground leading-snug">
-                                    Multi-project overview is live-only.
-                                    Switch to{' '}
-                                    <span className="font-semibold">Live</span>{' '}
-                                    in Settings to call{' '}
-                                    <code className="font-mono">kron_list_projects</code>
-                                    {' '}via the Go bridge.
-                                </p>
                             )}
                         </div>
                     )}
@@ -744,10 +893,19 @@ function LeftRail(props: {
                                 <li className="flex items-center gap-2">
                                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-400"/>
                                     <span className="truncate">
-                                        {stats.verified} verified
+                                        {stats.verified} {dataSource === 'live' ? 'active' : 'verified'}
                                     </span>
                                 </li>
                             </ul>
+                            <Separator />
+                            <div className="space-y-1.5">
+                                <div className="font-medium">Project lint</div>
+                                {dataSource !== 'live' ? <p className="text-muted-foreground">Demo result: {lintStats?.errors ?? 0} errors · {lintStats?.warnings ?? 0} warnings</p>
+                                    : lintLoading ? <p className="text-muted-foreground">Checking…</p>
+                                    : lintError !== null ? <p className="text-destructive break-words">Lint unavailable: {lintError}</p>
+                                    : lintStats !== null ? <p className={lintStats.errors > 0 ? 'text-destructive' : 'text-emerald-400'}>{lintStats.errors} errors · {lintStats.warnings} warnings</p>
+                                    : <p className="text-muted-foreground">No active project to lint.</p>}
+                            </div>
                         </div>
                     )}
 
@@ -1026,6 +1184,8 @@ function TopBar(props: {
     filter: string;
     onFilterChange: (v: string) => void;
     onTreeChange: (t: IntentNode[]) => void;
+    onResetTree: () => void;
+    rootLabel: string;
     dataSource: DataSource;
     liveTreeLoading: boolean;
     liveTreeError: string | null;
@@ -1036,6 +1196,8 @@ function TopBar(props: {
         filter,
         onFilterChange,
         onTreeChange,
+        onResetTree,
+        rootLabel,
         dataSource,
         liveTreeLoading,
         liveTreeError,
@@ -1049,7 +1211,7 @@ function TopBar(props: {
                 <span className="truncate">Intent tree</span>
                 <ChevronRight className="h-3.5 w-3.5 shrink-0"/>
                 <span className="text-foreground font-medium truncate">
-                    {isLive ? 'kron serve-mcp' : 'workspace'}
+                    {isLive ? 'kron serve-mcp' : rootLabel}
                 </span>
             </div>
 
@@ -1081,7 +1243,7 @@ function TopBar(props: {
                             ? 'Switch to Mock data to edit the demo tree'
                             : 'Reset the demo tree to its initial state'
                     }
-                    onClick={(): void => onTreeChange(mockIntentTree)}
+                    onClick={onResetTree}
                 >
                     Reset
                 </Button>

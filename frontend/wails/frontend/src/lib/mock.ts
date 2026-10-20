@@ -168,3 +168,78 @@ export const mockIntentTree: IntentNode[] = [
         ],
     },
 ];
+
+export interface MockProject {
+    id: string;
+    name: string;
+    path: string;
+    tree: IntentNode[];
+    stats: TreeStats;
+    lint: {errors: number; warnings: number};
+}
+
+const demoNow = new Date().toISOString();
+
+export const mockProjects: MockProject[] = [
+    {
+        id: 'kron-core',
+        name: 'Kron Core',
+        path: 'C:\\Demo\\Kron',
+        tree: mockIntentTree,
+        stats: mockStats,
+        lint: {errors: 2, warnings: 0},
+    },
+    {
+        id: 'web-dashboard',
+        name: 'Web Dashboard',
+        path: 'C:\\Demo\\WebDashboard',
+        tree: [
+            {
+                id: 'demo-frontend',
+                title: 'Frontend',
+                kind: 'spec',
+                status: 'accepted',
+                updatedAt: demoNow,
+                children: [
+                    {
+                        id: 'demo-nav',
+                        title: 'Dashboard navigation',
+                        kind: 'adr',
+                        status: 'accepted',
+                        updatedAt: demoNow,
+                        summary: 'Keep the primary actions visible on smaller screens.',
+                        children: [],
+                    },
+                    {
+                        id: 'demo-accessibility',
+                        title: 'Accessibility review',
+                        kind: 'note',
+                        status: 'review',
+                        updatedAt: demoNow,
+                        summary: 'Keyboard navigation and contrast checks are in review.',
+                        children: [],
+                    },
+                    {
+                        id: 'demo-metrics',
+                        title: 'Usage metrics panel',
+                        kind: 'rfc',
+                        status: 'draft',
+                        updatedAt: demoNow,
+                        summary: 'Draft scope for the first release.',
+                        children: [],
+                    },
+                ],
+            },
+        ],
+        stats: {intents: 3, groups: 1, stale: 0, verified: 1, draft: 1, review: 1, archived: 0},
+        lint: {errors: 1, warnings: 2},
+    },
+    {
+        id: 'empty-sandbox',
+        name: 'Empty Sandbox',
+        path: 'C:\\Demo\\EmptySandbox',
+        tree: [],
+        stats: {intents: 0, groups: 0, stale: 0, verified: 0, draft: 0, review: 0, archived: 0},
+        lint: {errors: 0, warnings: 0},
+    },
+];

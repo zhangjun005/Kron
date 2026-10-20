@@ -28,6 +28,8 @@ import type {IntentKind, IntentNode, IntentStatus} from '@/lib/mock';
 interface IntentTreeProps {
     data: IntentNode[];
     filter: string;
+    projectName: string;
+    demoMode?: boolean;
 }
 
 const kindIcon: Record<IntentKind, React.ReactNode> = {
@@ -55,7 +57,7 @@ const statusDot: Record<IntentStatus, React.ReactNode> = {
 };
 
 export function IntentTree(props: IntentTreeProps): JSX.Element {
-    const {data, filter} = props;
+    const {data, filter, projectName, demoMode = false} = props;
     const filtered = useMemo(
         () => filterTree(data, filter.trim().toLowerCase()),
         [data, filter]
@@ -68,14 +70,14 @@ export function IntentTree(props: IntentTreeProps): JSX.Element {
                     <div className="px-4 py-3 flex items-center justify-between">
                         <div className="flex items-center gap-2">
                             <span className="text-sm font-medium">
-                                Workspace intents
+                                {projectName} intents
                             </span>
                             <Badge variant="secondary" className="text-[10px]">
                                 {countNodes(filtered)} items
                             </Badge>
                         </div>
                         <span className="text-[11px] text-muted-foreground">
-                            Click a row to expand or open in IDE
+                            {demoMode ? 'Click folders to expand; click an intent to preview the IDE action' : 'Click a row to expand or open in IDE'}
                         </span>
                     </div>
                     <Separator/>
@@ -86,7 +88,7 @@ export function IntentTree(props: IntentTreeProps): JSX.Element {
                             </div>
                         ) : (
                             filtered.map((node) => (
-                                <TreeRow key={node.id} node={node} depth={0}/>
+                                <TreeRow key={node.id} node={node} depth={0} demoMode={demoMode}/>
                             ))
                         )}
                     </div>
@@ -99,9 +101,10 @@ export function IntentTree(props: IntentTreeProps): JSX.Element {
 interface TreeRowProps {
     node: IntentNode;
     depth: number;
+    demoMode: boolean;
 }
 
-function TreeRow({node, depth}: TreeRowProps): JSX.Element {
+function TreeRow({node, depth, demoMode}: TreeRowProps): JSX.Element {
     const [open, setOpen] = useState<boolean>(true);
     // Work 1.4.e: per-row IDE-open error state. Cleared on next
     // successful open. Rendered as a tiny destructive line under the
@@ -110,6 +113,7 @@ function TreeRow({node, depth}: TreeRowProps): JSX.Element {
     // so useState's initialiser is symmetric and the conditional
     // render stays terse).
     const [openErr, setOpenErr] = useState<string>('');
+    const [demoMessage, setDemoMessage] = useState<string>('');
     const hasChildren = node.children.length > 0;
     const isGroup = node.kind === 'spec' && hasChildren;
     const status = statusBadge[node.status];
@@ -131,6 +135,10 @@ function TreeRow({node, depth}: TreeRowProps): JSX.Element {
     // icon button would dilute that. The chevron + ExternalLink
     // indicators hint at the click outcome.
     const handleClick = (): void => {
+        if (demoMode && !isGroup) {
+            setDemoMessage('Demo: Live mode would open this intent in your IDE.');
+            return;
+        }
         if (canOpenInIDE) {
             // OpenInIDE is fire-and-forget: we optimistically clear
             // the previous error and surface a new one if the bridge
@@ -189,6 +197,8 @@ function TreeRow({node, depth}: TreeRowProps): JSX.Element {
                     title={
                         canOpenInIDE
                             ? `Open ${nodePath} in your IDE`
+                            : demoMode && !isGroup
+                                ? 'Demo: Live mode would open this intent in your IDE'
                             : !isGroup && !canOpenInIDE
                                 ? 'Open in IDE available in live mode (switch in Settings)'
                                 : node.title
@@ -241,10 +251,16 @@ function TreeRow({node, depth}: TreeRowProps): JSX.Element {
                 </div>
             )}
 
+            {demoMessage !== '' && (
+                <div className="pb-1.5 text-[10px] text-muted-foreground" style={{paddingLeft: indent + 24}}>
+                    {demoMessage}
+                </div>
+            )}
+
             {hasChildren && open && (
                 <div>
                     {node.children.map((child) => (
-                        <TreeRow key={child.id} node={child} depth={depth + 1}/>
+                        <TreeRow key={child.id} node={child} depth={depth + 1} demoMode={demoMode}/>
                     ))}
                 </div>
             )}
