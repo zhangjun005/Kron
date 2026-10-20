@@ -181,6 +181,40 @@ func TestAppBridgeE2E(t *testing.T) {
 		t.Logf("lint errors=%d warnings=%d", out.Summary.Errors, out.Summary.Warnings)
 	})
 
+	t.Run("KronAssumeList", func(t *testing.T) {
+		raw, err := app.CallMCPTool("kron_assume_list", "{}")
+		if err != nil {
+			t.Fatalf("kron_assume_list: %v", err)
+		}
+		var out struct {
+			Assumptions []struct {
+				ID              string `json:"id"`
+				Text            string `json:"text"`
+				DefaultSeverity string `json:"default_severity"`
+			} `json:"assumptions"`
+		}
+		if err := json.Unmarshal([]byte(raw), &out); err != nil {
+			t.Fatalf("parse kron_assume_list: %v\nraw: %.300s", err, raw)
+		}
+		byID := map[string]string{}
+		for _, item := range out.Assumptions {
+			byID[item.ID] = item.DefaultSeverity
+			if item.Text == "" {
+				t.Errorf("assumption %q has no registry text", item.ID)
+			}
+		}
+		for _, want := range []string{"single-region", "idempotency-key"} {
+			if byID[want] == "" {
+				t.Errorf("assumption registry missing %q (got %v)", want, byID)
+				continue
+			}
+			if byID[want] != "hard" {
+				t.Errorf("assumption %q default_severity = %q, want hard", want, byID[want])
+			}
+		}
+		t.Logf("assumptions: %v", byID)
+	})
+
 	t.Run("SwitchProject", func(t *testing.T) {
 		if current == "" {
 			t.Skip("no current project from ListProjectsLive")

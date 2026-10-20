@@ -99,3 +99,25 @@ export interface ListProjectsLiveResult {
     /** Human-readable provenance string (for example, the registry path). */
     source: string;
 }
+
+// --- kron_assume_list ------------------------------------------------------
+// Mirrors tools_schema.go::AssumptionSummary. The GUI lists assumptions in the
+// left rail (separate from the intent tree) and cross-references them against
+// the intents that declare them in frontmatter.
+
+export interface AssumptionSummary {
+    id: string;
+    text: string;
+    default_severity: string;
+    status: string;
+    created_by: string;
+    updated_at: string;
+    expires_at?: string;
+    verified_at?: string;
+    verified_by?: string;
+    reviewers?: string[];
+}
+
+export interface AssumptionListOutput {
+    assumptions: AssumptionSummary[];
+}

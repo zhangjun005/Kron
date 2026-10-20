@@ -15,6 +15,7 @@ import {
     Sparkles,
     Search,
     ChevronRight,
+    ChevronDown,
     Folder,
 } from 'lucide-react';
 import {Button} from '@/components/ui/button';
@@ -37,11 +38,26 @@ import {
     type TreeStats,
     mockStats,
     mockProjects,
+    mockAssumptions,
 } from '@/lib/mock';
 import {BootAnimation} from '@/components/boot-animation';
 import {IntentCanvas} from '@/components/intent-canvas';
 import {kronTreeToIntentNodes} from '@/lib/real-tree';
-import {type ListProjectsLiveResult} from '@/lib/mcp-types';
+import {
+    type AssumptionListOutput,
+    type AssumptionSummary,
+    type ListProjectsLiveResult,
+} from '@/lib/mcp-types';
+
+/** Left-rail shape of an assumption (mock + live normalised to the same thing). */
+interface RailAssumption {
+    id: string;
+    text: string;
+    severity: 'hard' | 'soft';
+    expiresAt?: string;
+    verifiedAt?: string;
+    verifiedBy?: string;
+}
 
 // DataSource: how the MCP tools panel is populated. 'mock' is the
 // 1.3-era hard-coded list returned by ListMCPTools(); 'live' asks the
@@ -85,6 +101,10 @@ function App() {
     const [lintStats, setLintStats] = useState<{errors: number; warnings: number} | null>(mockProjects[0]!.lint);
     const [lintError, setLintError] = useState<string | null>(null);
     const [lintLoading, setLintLoading] = useState<boolean>(false);
+    // B-3 assumption registry (separate from the intent tree). Live mode fills
+    // this from kron_assume_list; mock mode uses the bundled demo registry.
+    const [liveAssumptions, setLiveAssumptions] = useState<AssumptionSummary[]>([]);
+    const [assumptionsError, setAssumptionsError] = useState<string | null>(null);
     const [switchingProject, setSwitchingProject] = useState<string | null>(null);
     const [projectSwitchError, setProjectSwitchError] = useState<string | null>(null);
     const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
@@ -185,6 +205,18 @@ function App() {
                 setLintError(err instanceof Error ? err.message : String(err));
             } finally {
                 setLintLoading(false);
+            }
+
+            // Assumption registry listing. Failure is non-fatal: the tree and
+            // lint counts stay usable, the rail surfaces the error instead.
+            try {
+                const assumptionsText = await CallMCPTool('kron_assume_list', '{}');
+                const parsed = JSON.parse(assumptionsText) as AssumptionListOutput;
+                setLiveAssumptions(Array.isArray(parsed.assumptions) ? parsed.assumptions : []);
+                setAssumptionsError(null);
+            } catch (err: unknown) {
+                setLiveAssumptions([]);
+                setAssumptionsError(err instanceof Error ? err.message : String(err));
             }
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -290,6 +322,26 @@ function App() {
         }
     }, [dataSource, activeMockProject, refreshLive, refreshLiveTree, refreshLiveProjects]);
 
+    // Normalise mock + live assumptions into the same rail shape.
+    const railAssumptions: RailAssumption[] =
+        dataSource === 'live'
+            ? liveAssumptions.map((item) => ({
+                  id: item.id,
+                  text: item.text,
+                  severity: item.default_severity === 'soft' ? 'soft' : 'hard',
+                  ...(item.expires_at !== undefined ? {expiresAt: item.expires_at} : {}),
+                  ...(item.verified_at !== undefined ? {verifiedAt: item.verified_at} : {}),
+                  ...(item.verified_by !== undefined ? {verifiedBy: item.verified_by} : {}),
+              }))
+            : mockAssumptions.map((item) => ({
+                  id: item.id,
+                  text: item.text,
+                  severity: item.defaultSeverity,
+                  ...(item.expiresAt !== undefined ? {expiresAt: item.expiresAt} : {}),
+                  ...(item.verifiedAt !== undefined ? {verifiedAt: item.verifiedAt} : {}),
+                  ...(item.verifiedBy !== undefined ? {verifiedBy: item.verifiedBy} : {}),
+              }));
+
     return (
         <>
             <BootAnimation onDone={(): void => setBooted(true)}/>
@@ -335,6 +387,8 @@ function App() {
                     lintLoading={lintLoading}
                     settingsOpen={settingsOpen}
                     onSettingsOpenChange={setSettingsOpen}
+                    assumptions={railAssumptions}
+                    assumptionsError={dataSource === 'live' ? assumptionsError : null}
                     onSelectIntent={(id): void => {
                         setSelectedIntentId(id);
                         setFocusRequest((n) => n + 1);
@@ -514,6 +568,9 @@ function LeftRail(props: {
     lintLoading: boolean;
     settingsOpen: boolean;
     onSettingsOpenChange: (open: boolean) => void;
+    /** B-3 assumption registry entries (mock or live). */
+    assumptions: RailAssumption[];
+    assumptionsError: string | null;
     /** Select an intent in the canvas (left-rail row click). */
     onSelectIntent: (id: string) => void;
 }): JSX.Element {
@@ -547,6 +604,8 @@ function LeftRail(props: {
         lintLoading,
         settingsOpen,
         onSettingsOpenChange,
+        assumptions,
+        assumptionsError,
         onSelectIntent,
     } = props;
     const [activeView, setActiveView] = useState<
@@ -555,8 +614,24 @@ function LeftRail(props: {
     const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
         Files: true,
         Archived: true,
+        Assumptions: true,
         'MCP Tools': false,
     });
+
+    // Which intents declare each assumption (derived from the tree, so it
+    // always matches what the canvas shows).
+    const referencedBy = new Map<string, string[]>();
+    const walkAssumptions = (nodes: IntentNode[]): void => {
+        for (const node of nodes) {
+            for (const assumption of node.assumptions ?? []) {
+                const list = referencedBy.get(assumption.id) ?? [];
+                list.push(node.id);
+                referencedBy.set(assumption.id, list);
+            }
+            walkAssumptions(node.children);
+        }
+    };
+    walkAssumptions(tree);
 
     const toggleGroup = (name: string): void => {
         setOpenGroups((prev) => ({...prev, [name]: !prev[name]}));
@@ -721,6 +796,25 @@ function LeftRail(props: {
                             {openGroups['Files'] && (
                                 <ul className="text-sm">
                                     {tree.map((node) => (
+                                        <RailTreeRow
+                                            key={node.id}
+                                            node={node}
+                                            depth={0}
+                                            onSelectIntent={onSelectIntent}
+                                        />
+                                    ))}
+                                </ul>
+                            )}
+
+                            <GroupHeader
+                                name="Archived"
+                                count={stats.archived}
+                                open={openGroups['Archived'] ?? false}
+                                onToggle={(): void => toggleGroup('Archived')}
+                            />
+                            {openGroups['Archived'] && (
+                                <ul className="text-sm">
+                                    {collectArchivedLeaves(tree).map((node) => (
                                         <li
                                             key={node.id}
                                             role="button"
@@ -737,63 +831,54 @@ function LeftRail(props: {
                                                 'group flex items-center gap-1.5',
                                                 'pl-6 pr-2 py-1 cursor-pointer',
                                                 'hover:bg-accent/60',
+                                                'opacity-70',
                                             ].join(' ')}
                                         >
                                             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60"/>
-                                            <FileCode2 className="h-3.5 w-3.5 text-muted-foreground"/>
+                                            <History className="h-3.5 w-3.5 text-muted-foreground"/>
                                             <span className="truncate flex-1">
                                                 {node.title}
                                             </span>
-                                            <StatusBadge status={node.status}/>
+                                            <Badge
+                                                variant="outline"
+                                                className="text-[9px] h-4 px-1"
+                                            >
+                                                stale
+                                            </Badge>
                                         </li>
                                     ))}
                                 </ul>
                             )}
 
                             <GroupHeader
-                                name="Archived"
-                                count={stats.archived}
-                                open={openGroups['Archived'] ?? false}
-                                onToggle={(): void => toggleGroup('Archived')}
+                                name="Assumptions"
+                                count={assumptions.length}
+                                open={openGroups['Assumptions'] ?? true}
+                                onToggle={(): void => toggleGroup('Assumptions')}
                             />
-                            {openGroups['Archived'] && (
-                                <ul className="text-sm">
-                                    {tree
-                                        .filter((n) => n.status === 'stale')
-                                        .map((node) => (
-                                            <li
-                                                key={node.id}
-                                                role="button"
-                                                tabIndex={0}
-                                                title="Show this intent in the canvas"
-                                                onClick={(): void => onSelectIntent(node.id)}
-                                                onKeyDown={(event): void => {
-                                                    if (event.key === 'Enter' || event.key === ' ') {
-                                                        event.preventDefault();
-                                                        onSelectIntent(node.id);
-                                                    }
-                                                }}
-                                                className={[
-                                                    'group flex items-center gap-1.5',
-                                                    'pl-6 pr-2 py-1 cursor-pointer',
-                                                    'hover:bg-accent/60',
-                                                    'opacity-70',
-                                                ].join(' ')}
-                                            >
-                                                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60"/>
-                                                <History className="h-3.5 w-3.5 text-muted-foreground"/>
-                                                <span className="truncate flex-1">
-                                                    {node.title}
-                                                </span>
-                                                <Badge
-                                                    variant="outline"
-                                                    className="text-[9px] h-4 px-1"
-                                                >
-                                                    stale
-                                                </Badge>
-                                            </li>
+                            {openGroups['Assumptions'] && (
+                                <div className="pb-2">
+                                    {assumptionsError !== null && (
+                                        <p className="px-3 py-1 text-[10px] leading-snug text-destructive break-words">
+                                            {assumptionsError}
+                                        </p>
+                                    )}
+                                    {assumptionsError === null && assumptions.length === 0 && (
+                                        <p className="px-3 py-1 text-[11px] text-muted-foreground">
+                                            No assumptions registered.
+                                        </p>
+                                    )}
+                                    <ul className="text-sm">
+                                        {assumptions.map((assumption) => (
+                                            <AssumptionRailRow
+                                                key={assumption.id}
+                                                assumption={assumption}
+                                                intents={referencedBy.get(assumption.id) ?? []}
+                                                onSelectIntent={onSelectIntent}
+                                            />
                                         ))}
-                                </ul>
+                                    </ul>
+                                </div>
                             )}
                         </div>
                     )}
@@ -1163,6 +1248,174 @@ function StatusBadge(props: {status: string}): JSX.Element {
         >
             {props.status}
         </span>
+    );
+}
+
+// Recursive left-rail tree row: folders expand/collapse, leaves select the
+// matching canvas node. Previously only the top-level folders were rendered,
+// so the intents inside them were unreachable from the rail.
+function RailTreeRow(props: {
+    node: IntentNode;
+    depth: number;
+    onSelectIntent: (id: string) => void;
+}): JSX.Element {
+    const {node, depth, onSelectIntent} = props;
+    const hasChildren = node.children.length > 0;
+    const [open, setOpen] = useState<boolean>(depth === 0);
+    const activate = (): void => {
+        if (hasChildren) {
+            setOpen((value) => !value);
+            return;
+        }
+        onSelectIntent(node.id);
+    };
+    return (
+        <li>
+            <div
+                role="button"
+                tabIndex={0}
+                title={hasChildren ? 'Expand or collapse' : 'Show this intent in the canvas'}
+                onClick={activate}
+                onKeyDown={(event): void => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        activate();
+                    }
+                }}
+                className={[
+                    'group flex items-center gap-1.5',
+                    'pr-2 py-1 cursor-pointer',
+                    'hover:bg-accent/60',
+                ].join(' ')}
+                style={{paddingLeft: 8 + depth * 14}}
+            >
+                <span className="flex w-3.5 shrink-0 items-center justify-center text-muted-foreground/60">
+                    {hasChildren ? (
+                        open ? (
+                            <ChevronDown className="h-3.5 w-3.5"/>
+                        ) : (
+                            <ChevronRight className="h-3.5 w-3.5"/>
+                        )
+                    ) : null}
+                </span>
+                {hasChildren ? (
+                    <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground"/>
+                ) : (
+                    <FileCode2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground"/>
+                )}
+                <span className="truncate flex-1">{node.title}</span>
+                <StatusBadge status={node.status}/>
+            </div>
+            {hasChildren && open && (
+                <ul>
+                    {node.children.map((child) => (
+                        <RailTreeRow
+                            key={child.id}
+                            node={child}
+                            depth={depth + 1}
+                            onSelectIntent={onSelectIntent}
+                        />
+                    ))}
+                </ul>
+            )}
+        </li>
+    );
+}
+
+/** Leaves that are stale/superseded anywhere in the tree. */
+function collectArchivedLeaves(nodes: IntentNode[]): IntentNode[] {
+    const out: IntentNode[] = [];
+    const walk = (list: IntentNode[]): void => {
+        for (const node of list) {
+            if (node.children.length === 0) {
+                if (node.status === 'stale') out.push(node);
+                continue;
+            }
+            walk(node.children);
+        }
+    };
+    walk(nodes);
+    return out;
+}
+
+// One assumption in the rail. Clicking expands its registry text, verification
+// metadata and the intents that reference it (with jump-to-canvas chips).
+function AssumptionRailRow(props: {
+    assumption: RailAssumption;
+    intents: string[];
+    onSelectIntent: (id: string) => void;
+}): JSX.Element {
+    const {assumption, intents, onSelectIntent} = props;
+    const [open, setOpen] = useState<boolean>(false);
+    return (
+        <li>
+            <div
+                role="button"
+                tabIndex={0}
+                title="Show assumption details"
+                onClick={(): void => setOpen((value) => !value)}
+                onKeyDown={(event): void => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setOpen((value) => !value);
+                    }
+                }}
+                className={[
+                    'group flex items-center gap-1.5',
+                    'pl-6 pr-2 py-1 cursor-pointer',
+                    'hover:bg-accent/60',
+                ].join(' ')}
+            >
+                <span className="flex w-3.5 shrink-0 items-center justify-center text-muted-foreground/60">
+                    {open ? (
+                        <ChevronDown className="h-3.5 w-3.5"/>
+                    ) : (
+                        <ChevronRight className="h-3.5 w-3.5"/>
+                    )}
+                </span>
+                <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-muted-foreground"/>
+                <span className="truncate flex-1 font-mono text-[11px]">{assumption.id}</span>
+                <Badge
+                    variant={assumption.severity === 'hard' ? 'destructive' : 'secondary'}
+                    className="text-[9px] h-4 px-1"
+                >
+                    {assumption.severity}
+                </Badge>
+            </div>
+            {open && (
+                <div className="space-y-1 px-6 pb-2 text-[11px] leading-snug text-muted-foreground">
+                    <p>{assumption.text}</p>
+                    {(assumption.expiresAt !== undefined || assumption.verifiedAt !== undefined) && (
+                        <p className="text-[10px] text-muted-foreground/80">
+                            {assumption.expiresAt !== undefined ? `expires ${assumption.expiresAt}` : 'no expiry'}
+                            {assumption.verifiedAt !== undefined
+                                ? ` · verified ${assumption.verifiedAt}${assumption.verifiedBy !== undefined ? ` by ${assumption.verifiedBy}` : ''}`
+                                : ' · never verified'}
+                        </p>
+                    )}
+                    {intents.length > 0 ? (
+                        <div className="flex flex-wrap items-center gap-1">
+                            <span className="text-muted-foreground/70">referenced by</span>
+                            {intents.map((id) => (
+                                <button
+                                    key={id}
+                                    type="button"
+                                    className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] hover:bg-accent hover:text-foreground"
+                                    onClick={(event): void => {
+                                        event.stopPropagation();
+                                        onSelectIntent(id);
+                                    }}
+                                >
+                                    {id}
+                                </button>
+                            ))}
+                        </div>
+                    ) : (
+                        <p className="text-[10px] text-muted-foreground/60">referenced by no intent yet</p>
+                    )}
+                </div>
+            )}
+        </li>
     );
 }
 

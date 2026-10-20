@@ -205,6 +205,30 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
         [layout.nodes, selectedId],
     );
 
+    // Cross-intent relations are NOT hierarchy edges: references are soft links
+    // (dashed arrow), depends_on are hard prerequisites (solid arrow). Only the
+    // endpoints that exist in the current tree are drawn.
+    const relationEdges = useMemo(() => {
+        const byId = new Map(layout.nodes.map((laid) => [laid.node.id, laid]));
+        const out: Array<{from: LaidOutNode; to: LaidOutNode; kind: 'depends' | 'references'}> = [];
+        for (const laid of layout.nodes) {
+            if (laid.isBranch) continue;
+            for (const slug of laid.node.dependsOn ?? []) {
+                const target = byId.get(slug);
+                if (target !== undefined && target.node.id !== laid.node.id) {
+                    out.push({from: laid, to: target, kind: 'depends'});
+                }
+            }
+            for (const slug of laid.node.references ?? []) {
+                const target = byId.get(slug);
+                if (target !== undefined && target.node.id !== laid.node.id) {
+                    out.push({from: laid, to: target, kind: 'references'});
+                }
+            }
+        }
+        return out;
+    }, [layout.nodes]);
+
     // Center the selected node only when the click came from outside the canvas
     // (left-rail row). Clicking a node inside the canvas must not move the view.
     const focusState = useRef<{selectedId: string | null; nodes: LaidOutNode[]}>({
@@ -318,10 +342,41 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
                     {/* Edges */}
                     <svg
                         className="pointer-events-none absolute left-0 top-0"
-                        width={layout.width}
-                        height={layout.height}
+                        width={layout.width + 280}
+                        height={layout.height + 280}
                         aria-hidden="true"
                     >
+                        <defs>
+                            <marker
+                                id="kron-arrow-depends"
+                                viewBox="0 0 10 10"
+                                refX="9"
+                                refY="5"
+                                markerWidth="6"
+                                markerHeight="6"
+                                orient="auto-start-reverse"
+                            >
+                                <path d="M 0 0 L 10 5 L 0 10 z" fill="hsl(var(--primary))"/>
+                            </marker>
+                            <marker
+                                id="kron-arrow-references"
+                                viewBox="0 0 10 10"
+                                refX="9"
+                                refY="5"
+                                markerWidth="6"
+                                markerHeight="6"
+                                orient="auto-start-reverse"
+                            >
+                                <path
+                                    d="M 0 0 L 10 5 L 0 10"
+                                    fill="none"
+                                    stroke="hsl(var(--muted-foreground))"
+                                    strokeWidth={1.5}
+                                />
+                            </marker>
+                        </defs>
+
+                        {/* Structural parent → child edges. */}
                         {layout.edges.map((edge) => {
                             const x1 = edge.from.x + NODE_W;
                             const y1 = edge.from.y + NODE_H / 2;
@@ -335,6 +390,53 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
                                     fill="none"
                                     stroke="hsl(var(--border))"
                                     strokeWidth={1.5}
+                                />
+                            );
+                        })}
+
+                        {/* Cross-intent relations. These are NOT hierarchy edges:
+                            references (soft) = dashed thin arrow,
+                            depends_on (hard) = solid thicker arrow. */}
+                        {relationEdges.map((edge) => {
+                            const isDepends = edge.kind === 'depends';
+                            const x1 = edge.from.x + NODE_W / 2;
+                            const y1 = edge.from.y + NODE_H;
+                            const x2 = edge.to.x + NODE_W / 2;
+                            const y2 = edge.to.y;
+                            // Same-column edges (the common case for siblings at
+                            // one depth) must bow sideways, otherwise the curve
+                            // runs straight through the nodes stacked between
+                            // the endpoints.
+                            const horizontallySeparated =
+                                Math.abs(x2 - x1) >= Math.abs(y2 - y1);
+                            const bowAmount = horizontallySeparated ? 80 : 150;
+                            const bow = (isDepends ? 1 : -1) * bowAmount;
+                            const controlX = horizontallySeparated
+                                ? (x1 + x2) / 2
+                                : (x1 + x2) / 2 + bow;
+                            const controlY = horizontallySeparated
+                                ? (y1 + y2) / 2 + bow
+                                : (y1 + y2) / 2;
+                            const active =
+                                selectedId === edge.from.node.id || selectedId === edge.to.node.id;
+                            return (
+                                <path
+                                    key={`rel-${edge.kind}-${edge.from.node.id}->${edge.to.node.id}`}
+                                    d={`M ${x1} ${y1} Q ${controlX} ${controlY} ${x2} ${y2}`}
+                                    fill="none"
+                                    stroke={
+                                        isDepends
+                                            ? 'hsl(var(--primary))'
+                                            : 'hsl(var(--muted-foreground))'
+                                    }
+                                    strokeWidth={isDepends ? 2 : 1.5}
+                                    strokeDasharray={isDepends ? undefined : '6 4'}
+                                    markerEnd={
+                                        isDepends
+                                            ? 'url(#kron-arrow-depends)'
+                                            : 'url(#kron-arrow-references)'
+                                    }
+                                    opacity={active ? 1 : 0.55}
                                 />
                             );
                         })}
@@ -552,9 +654,34 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
 
             {/* Canvas controls */}
             <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between p-3">
-                <span className="pointer-events-auto rounded-md bg-background/80 px-2 py-1 text-[10px] text-muted-foreground">
-                    Drag empty space to pan · click a node for details
-                </span>
+                <div className="pointer-events-auto flex flex-col gap-1 rounded-md bg-background/80 px-2 py-1 text-[10px] text-muted-foreground">
+                    <span>Drag empty space to pan · click a node for details</span>
+                    <span className="flex flex-wrap items-center gap-3">
+                        <span className="flex items-center gap-1">
+                            <svg width="26" height="8" aria-hidden="true">
+                                <line
+                                    x1="1" y1="4" x2="22" y2="4"
+                                    stroke="hsl(var(--primary))"
+                                    strokeWidth={2}
+                                    markerEnd="url(#kron-arrow-depends)"
+                                />
+                            </svg>
+                            depends_on (hard)
+                        </span>
+                        <span className="flex items-center gap-1">
+                            <svg width="26" height="8" aria-hidden="true">
+                                <line
+                                    x1="1" y1="4" x2="22" y2="4"
+                                    stroke="hsl(var(--muted-foreground))"
+                                    strokeWidth={1.5}
+                                    strokeDasharray="6 4"
+                                    markerEnd="url(#kron-arrow-references)"
+                                />
+                            </svg>
+                            references (soft)
+                        </span>
+                    </span>
+                </div>
                 <button
                     type="button"
                     onClick={resetView}

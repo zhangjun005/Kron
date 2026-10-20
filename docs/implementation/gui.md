@@ -157,7 +157,9 @@ Explorer 主面板不再渲染文件浏览器式的列表树，而是**左→右
 | 数据 | 仍然只来自 `kron_tree` + 每叶 `kron_get`；画布不写任何文件、不调写工具 |
 | 只读边界 | 移除了 mock 模式的 `Reset` / `New intent` 演示按钮——GUI 不提供 intent 的增删改；编辑在用户 IDE 里做 |
 | 过滤 | 顶部 Filter 命中时高亮，未命中的节点淡出（保留结构，不重排） |
-| 左侧栏联动 | `FILES` / `ARCHIVED` 行可点击：选中对应节点、把画布平移到它居中、并弹出信息卡（earlier 这些行只有 cursor 样式，没有事件） |
+| 跨意图关系 | `references`（软）画**虚线细箭头**、`depends_on`（硬）画**实线粗箭头**；两者都是节点间的横向关系，不是父子层级边；端点不在当前树中的关系不画；画布左下角有图例 |
+| 左侧栏 | `FILES` 是**完整递归树**（文件夹可展开/折叠到叶子，叶子点击选中并居中画布）；`ARCHIVED` 汇总 stale 叶子；`ASSUMPTIONS` 是独立的假设区 |
+| 假设展示 | 数据来自 `kron_assume_list`（live）或内置 mock；行内显示 id + `hard/soft` 徽章，展开后显示 registry 文本、`expires_at` / `verified_at` / `verified_by`，以及 **referenced by** 的意图芯片（从树的 per-intent `assumptions[]` 反推），点击芯片跳到画布节点 |
 
 ### 8.1 子进程调度（弹窗 / 探测）
 

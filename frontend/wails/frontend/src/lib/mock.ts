@@ -90,6 +90,9 @@ export const mockIntentTree: IntentNode[] = [
                 status: 'accepted',
                 updatedAt: isoMinusDays(40),
                 summary: 'Single static binary, fast cold start, excellent std lib.',
+                // Demo cross-relations so the canvas draws ref/dep arrows in
+                // mock mode too.
+                references: ['i-fm-schema'],
                 children: [],
             },
             {
@@ -117,6 +120,15 @@ export const mockIntentTree: IntentNode[] = [
                 status: 'review',
                 updatedAt: isoMinusDays(1),
                 summary: 'id, kind, status, updated_at, tags[].',
+                symbols: ['model.Frontmatter'],
+                reviewers: ['@zhangjun005'],
+                assumptions: [
+                    {
+                        id: 'small-repo',
+                        severity: 'soft',
+                        rationale: 'Demo: 大规模仓库下需要检索索引，当前规模够用',
+                    },
+                ],
                 children: [],
             },
             {
@@ -180,6 +192,8 @@ export const mockIntentTree: IntentNode[] = [
                 kind: 'note',
                 status: 'draft',
                 updatedAt: isoMinusDays(0),
+                // Demo hard dependency (solid arrow) for the canvas legend.
+                dependsOn: ['i-gui-wails'],
                 children: [],
             },
         ],
@@ -258,5 +272,33 @@ export const mockProjects: MockProject[] = [
         tree: [],
         stats: {intents: 0, groups: 0, stale: 0, verified: 0, draft: 0, review: 0, archived: 0},
         lint: {errors: 0, warnings: 0},
+    },
+];
+
+/** Mock assumption registry (B-3) for the left-rail Assumptions section. */
+export interface MockAssumption {
+    id: string;
+    text: string;
+    defaultSeverity: 'hard' | 'soft';
+    expiresAt?: string;
+    verifiedAt?: string;
+    verifiedBy?: string;
+}
+
+export const mockAssumptions: MockAssumption[] = [
+    {
+        id: 'small-repo',
+        text: '仓库规模停留在个人/小团队级别（< 1 万条意图），不需要全文检索索引',
+        defaultSeverity: 'soft',
+        verifiedAt: '2026-09-20',
+        verifiedBy: '@zhangjun005',
+    },
+    {
+        id: 'single-region',
+        text: '服务只部署在单个 region，不存在跨区复制延迟与时钟漂移',
+        defaultSeverity: 'hard',
+        expiresAt: '2027-01-01',
+        verifiedAt: '2026-10-01',
+        verifiedBy: '@zhangjun005',
     },
 ];
