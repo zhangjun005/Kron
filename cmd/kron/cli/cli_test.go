@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,40 +67,6 @@ func TestRunInit_Idempotent(t *testing.T) {
 	// Second call should be a no-op success, not an error.
 	require.NoError(t, runInit(nil, &out, &errOut))
 	assert.Contains(t, out.String(), "already exists")
-}
-
-func TestRunTrashAndRestore(t *testing.T) {
-	dir := t.TempDir()
-	chdir(t, dir)
-	var out, errOut bytes.Buffer
-	require.NoError(t, runInit(nil, &out, &errOut))
-	require.NoError(t, runAdd([]string{"-created-by", "@tester", "auth/jwt"}, &out, &errOut))
-
-	require.NoError(t, runTrash([]string{"auth/jwt"}, &out, &errOut))
-	assert.FileExists(t, filepath.Join(dir, ".kron", ".trash", "auth", "jwt.md"))
-	assert.NoFileExists(t, filepath.Join(dir, ".kron", "intents", "auth", "jwt.md"))
-
-	require.NoError(t, runRestore([]string{"auth/jwt"}, &out, &errOut))
-	assert.FileExists(t, filepath.Join(dir, ".kron", "intents", "auth", "jwt.md"))
-	assert.NoFileExists(t, filepath.Join(dir, ".kron", ".trash", "auth", "jwt.md"))
-	assert.Contains(t, out.String(), "trashed auth/jwt")
-	assert.Contains(t, out.String(), "restored auth/jwt")
-}
-
-func TestRunTrashAndRestoreRequireExactlyOneSlug(t *testing.T) {
-	for _, command := range []struct {
-		name string
-		run  func([]string, io.Writer, io.Writer) error
-	}{
-		{name: "trash", run: runTrash},
-		{name: "restore", run: runRestore},
-	} {
-		t.Run(command.name, func(t *testing.T) {
-			var out, errOut bytes.Buffer
-			assert.ErrorIs(t, command.run(nil, &out, &errOut), errUsage)
-			assert.ErrorIs(t, command.run([]string{"one", "two"}, &out, &errOut), errUsage)
-		})
-	}
 }
 
 func TestRunAdd_RequiresInit(t *testing.T) {

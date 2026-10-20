@@ -169,7 +169,7 @@ Kron 暴露**三个互相独立的访问层**，对应三类用户。**这三层
 
 ### 5.1 CLI —— 给人 / CI 用的最小集
 
-CLI 提供本地仓库操作与 lint 命令。软删除和恢复直接调用 `internal/store`，不调用 MCP 访问层：
+CLI 是 v1 唯一已稳定的访问层。**只四个子命令**（最小集，不扩展）：
 
 | 命令 | 用途 | 典型场景 |
 |---|---|---|
@@ -177,10 +177,8 @@ CLI 提供本地仓库操作与 lint 命令。软删除和恢复直接调用 `in
 | `kron add <slug>` | 脚手架一个新意图文件（写默认 frontmatter 骨架） | 写新意图前的骨架 |
 | `kron lint` | 扫描仓库校验锚点 + frontmatter；**唯一 CI 强制命令** | `kron lint` 在 CI gate 强制跑 |
 | `kron serve-mcp` | 启动 MCP stdio server 给 AI 用 | 见 §5.2 |
-| `kron trash <slug>` | 将意图移入 `.kron/.trash/` | 临时移除但保留 Git 历史 |
-| `kron restore <slug>` | 从 `.kron/.trash/` 恢复意图 | 撤销软删除 |
 
-**CLI 不实现**：`list` / `get` / `update` / `assume_check` / `impact` / `intent_density` / `stale` —— 查询类操作由 MCP 提供。软删除/恢复仅是本地存储生命周期命令，CLI 和 MCP 分别调用 `internal/store`，两种访问层不互相调用。
+**CLI 不实现**：`list` / `get` / `update` / `delete` / `restore` / `assume_check` / `impact` / `intent_density` / `stale` —— 查询类操作是 MCP 的事,不是 CLI 的事。这是有意为之——CLI 故意小。
 
 完整契约见 [`docs/implementation/cli.md`](implementation/cli.md)。
 

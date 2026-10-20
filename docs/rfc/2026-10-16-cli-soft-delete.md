@@ -2,8 +2,8 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted for implementation in this task (2026-10-16) |
-| Scope | `kron trash <slug>` and `kron restore <slug>` |
+| Status | **Superseded (2026-10-19)** — 实施已随合并回退；CLI 保持四命令最小集（[`architecture.md`](../abstractDesign/architecture.md) §1.1），软删/恢复保留在 MCP（`kron_delete` / `kron_restore`）。见 [`merge-issues-2026-10-19.md`](../implementation/merge-issues-2026-10-19.md)。 |
+| Scope | `kron trash <slug>` and `kron restore <slug>`（已回退，不再实施） |
 
 ## Decision
 

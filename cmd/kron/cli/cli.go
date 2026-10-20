@@ -5,8 +5,8 @@
 // internal/parser. It MUST NOT import any sibling access layer package
 // (cmd/kron/serve-mcp, future cmd/kron/serve-gui).
 //
-// CLI exposes local repository lifecycle commands and lint. Query
-// operations remain in MCP; trash/restore reuse internal/store directly.
+// CLI exposes local repository lifecycle commands and lint. Query and
+// soft-delete operations remain in MCP.
 package cli
 
 import (
@@ -61,10 +61,6 @@ func Execute() error {
 	switch os.Args[1] {
 	case "init":
 		return runInit(os.Args[2:], out, os.Stderr)
-	case "trash":
-		return runTrash(os.Args[2:], out, os.Stderr)
-	case "restore":
-		return runRestore(os.Args[2:], out, os.Stderr)
 	case "add":
 		return runAdd(os.Args[2:], out, os.Stderr)
 	case "register":
@@ -89,8 +85,6 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  init         Create .kron/ skeleton in the current repository")
 	fmt.Fprintln(w, "  add <slug>   Scaffold a new intent file at .kron/intents/<slug>.md")
-	fmt.Fprintln(w, "  trash <slug> Soft-delete an intent into .kron/.trash/")
-	fmt.Fprintln(w, "  restore <slug> Restore an intent from .kron/.trash/")
 	fmt.Fprintln(w, "  register     Add the current project to the multi-project registry (projects.json)")
 	fmt.Fprintln(w, "  lint         Scan anchors and frontmatter; exit 0 on clean, 1 on errors")
 	fmt.Fprintln(w, "  serve-mcp    Start the MCP stdio server (separate access layer; see cmd/kron/serve-mcp)")
