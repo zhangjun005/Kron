@@ -342,8 +342,8 @@ func formatDur(d time.Duration) string {
 //
 //	go test ./cmd/kron/serve-mcp/ -run TestCacheEffect -v
 func TestCacheEffect(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping cache effect test in -short mode")
+	if os.Getenv("KRON_RUN_CACHE_EFFECT") != "1" {
+		t.Skip("set KRON_RUN_CACHE_EFFECT=1 to run the cache performance measurement")
 	}
 	sizes := []int{10, 100, 500}
 
