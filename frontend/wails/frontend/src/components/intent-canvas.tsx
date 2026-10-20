@@ -185,6 +185,19 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
     const containerRef = useRef<HTMLDivElement | null>(null);
     const dragRef = useRef<{startX: number; startY: number; originX: number; originY: number; moved: boolean} | null>(null);
     const panelRef = useRef<HTMLDivElement | null>(null);
+    // The info card is draggable by grabbing anywhere inside it that is not an
+    // interactive control. Offset is relative to the node anchor, so canvas
+    // panning keeps the card attached to its node.
+    const [panelOffset, setPanelOffset] = useState<{x: number; y: number}>({x: 0, y: 0});
+    const [draggingPanel, setDraggingPanel] = useState<boolean>(false);
+    const panelDragRef = useRef<{startX: number; startY: number; originX: number; originY: number} | null>(null);
+
+    // A new selection starts the card at its default anchor position.
+    useEffect(() => {
+        setPanelOffset({x: 0, y: 0});
+        setDraggingPanel(false);
+        panelDragRef.current = null;
+    }, [selectedId]);
 
     const query = filter.trim().toLowerCase();
 
@@ -482,14 +495,28 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
                                     isSelected
                                         ? 'ring-2 ring-primary ring-offset-2 ring-offset-background'
                                         : 'hover:border-primary/50 hover:shadow-md',
-                                    frame === 'depends' && !isSelected
-                                        ? 'outline outline-2 outline-offset-2 outline-primary'
-                                        : '',
-                                    frame === 'references' && !isSelected
-                                        ? 'outline outline-2 outline-dashed outline-offset-2 outline-primary/60'
-                                        : '',
                                 )}
-                                style={{left: laid.x, top: laid.y, width: NODE_W, height: NODE_H}}
+                                style={{
+                                    left: laid.x,
+                                    top: laid.y,
+                                    width: NODE_W,
+                                    height: NODE_H,
+                                    // Relation frames are set inline: tailwind-merge
+                                    // drops the bare `outline` (solid style) utility
+                                    // when it sits next to outline-2/outline-primary,
+                                    // which made depends_on frames invisible.
+                                    ...(frame !== undefined && !isSelected
+                                        ? {
+                                              outlineStyle: frame === 'depends' ? 'solid' : 'dashed',
+                                              outlineWidth: '2px',
+                                              outlineOffset: '2px',
+                                              outlineColor:
+                                                  frame === 'depends'
+                                                      ? 'hsl(var(--primary))'
+                                                      : 'hsl(var(--primary) / 0.6)',
+                                          }
+                                        : {}),
+                                }}
                                 onClick={(event): void => {
                                     event.stopPropagation();
                                     onSelectedIdChange(isSelected ? null : laid.node.id);
@@ -529,15 +556,59 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
                         );
                     })}
 
-                    {/* Info card: expands below the selected node. */}
+                    {/* Info card: expands below the selected node. Draggable by
+                        grabbing anywhere inside it except interactive controls;
+                        a click outside (or ×) still closes it. */}
                     {selected !== null && (
                         <div
                             ref={panelRef}
                             data-intent-panel="true"
                             role="dialog"
                             aria-label={`${selected.node.title} details`}
-                            className="absolute z-20 w-[360px] max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-popover p-3.5 text-popover-foreground shadow-xl"
-                            style={{left: selected.x, top: selected.y + NODE_H + 12}}
+                            className={cn(
+                                'absolute z-20 w-[360px] max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-popover p-3.5 text-popover-foreground shadow-xl',
+                                draggingPanel ? 'cursor-grabbing select-none' : 'cursor-grab',
+                            )}
+                            style={{
+                                left: selected.x + panelOffset.x,
+                                top: selected.y + NODE_H + 12 + panelOffset.y,
+                            }}
+                            onPointerDown={(event): void => {
+                                const target = event.target as HTMLElement;
+                                if (target.closest('button, a, input, textarea, select, code') !== null) {
+                                    return;
+                                }
+                                // Keep the canvas from panning while the card moves.
+                                event.stopPropagation();
+                                event.preventDefault();
+                                event.currentTarget.setPointerCapture(event.pointerId);
+                                panelDragRef.current = {
+                                    startX: event.clientX,
+                                    startY: event.clientY,
+                                    originX: panelOffset.x,
+                                    originY: panelOffset.y,
+                                };
+                                setDraggingPanel(true);
+                            }}
+                            onPointerMove={(event): void => {
+                                const drag = panelDragRef.current;
+                                if (drag === null) return;
+                                event.stopPropagation();
+                                setPanelOffset({
+                                    x: drag.originX + (event.clientX - drag.startX),
+                                    y: drag.originY + (event.clientY - drag.startY),
+                                });
+                            }}
+                            onPointerUp={(event): void => {
+                                if (panelDragRef.current === null) return;
+                                event.stopPropagation();
+                                panelDragRef.current = null;
+                                setDraggingPanel(false);
+                            }}
+                            onPointerCancel={(): void => {
+                                panelDragRef.current = null;
+                                setDraggingPanel(false);
+                            }}
                         >
                             <div className="flex items-start gap-2">
                                 <div className="min-w-0 flex-1">

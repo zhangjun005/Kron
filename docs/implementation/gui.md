@@ -153,6 +153,7 @@ Explorer 主面板不再渲染文件浏览器式的列表树，而是**左→右
 | 背景 | 点阵（radial-gradient），随画布平移 |
 | 平移 | 拖拽空白处移动整张画布；`Reset view` 复位。不做缩放（未拍板） |
 | 节点点击 | 在节点**下方**展开信息卡：标题 / slug / 状态 / 更新时间 / 正文描述 / **符号、Reviewers、Assumptions（severity + rationale + expires_at）、references / depends_on**；点卡外或右上角 × 关闭；relations 芯片可点击跳到目标节点 |
+| 信息卡拖拽 | 按住卡内任意非交互区域（按钮 / 链接 / `code` 除外）即可拖动，位置相对节点锚点偏移并随画布平移；切换选中节点时回到默认锚点。拖拽不会触发画布平移，也不会触发「点卡外关闭」 |
 | 数据 | 仍然只来自 `kron_tree` + 每叶 `kron_get`；画布不写任何文件、不调写工具 |
 | 只读边界 | GUI 不提供 intent 的增删改（无 `Reset` / `New intent` 之类入口）；编辑在用户 IDE 里做 |
 | 过滤 | 顶部 Filter 命中时高亮，未命中的节点淡出（保留结构，不重排） |
