@@ -132,7 +132,7 @@ This section supersedes the 1.4.d deferrals above for the Wails GUI only.
 - The live explorer and counts come from `kron_tree`; lint counts come from `kron_lint`. They describe the selected project only. If there is no active project, no mock counts or tree are presented as live data.
 - The Projects view reports registry loading/read errors and switch errors. The main pane distinguishes loading, no active project, connection/tree errors, and an empty real tree. Refresh retries the live calls.
 - `KRON_PROJECTS_JSON_PATH` is an optional local override for development. Production uses the executable directory as the registry location.
-- Mock mode has separate frontend-only project fixtures: switching samples changes the displayed tree, counts, and lint summary without reading or writing `projects.json` or starting MCP. It includes an empty project state, expandable groups, and a leaf-click hint for the Live IDE-open action; Reset and New intent remain demo-only.
+- Mock mode has separate frontend-only project fixtures: switching samples changes the displayed tree, counts, and lint summary without reading or writing `projects.json` or starting MCP. It includes an empty project state and expandable groups, and is strictly read-only (no add/reset affordances).
 
 ## 7 与 RFC §9.1 交付物对应
 
@@ -142,3 +142,20 @@ This section supersedes the 1.4.d deferrals above for the Wails GUI only.
 | 子 RFC: Wails SDK 版本锁定 + shadcn/ui 范围 | Wails v2.16.0 (`frontend/wails/go.mod`) + shadcn 组件 (`frontend/src/components/ui/`) | ✅ 1.3 拍板 |
 | spike 验证: Wails 起窗口 + 调 `kron serve-mcp` list 工具 | 1.4.b `ListMCPToolsLive` 跑通 | ✅ 1.4.b 实做 |
 | **1.4.d 多项目概览起步** | 本文档 §3.1 + `app.go` `ListProjectsLive` | 🆕 **本轮交付** |
+
+## 8 Explorer 意图画布（2026-10-20）
+
+Explorer 主面板不再渲染文件浏览器式的列表树，而是**左→右的意图树画布**，实现文件
+`frontend/wails/frontend/src/components/intent-canvas.tsx`（原 `intent-tree.tsx` 已删除）。
+
+| 行为 | 说明 |
+|---|---|
+| 布局 | root → 分组目录 → 意图叶子，**从左到右**；分组节点显示目录名与意图数，叶子显示意图标题与 slug |
+| 背景 | 点阵（radial-gradient），随画布平移 |
+| 平移 | 拖拽空白处移动整张画布；`Reset view` 复位。不做缩放（未拍板） |
+| 节点点击 | 在节点**下方**展开信息卡（标题 / slug / 状态 / 更新时间 / 正文描述）；点卡外或右上角 × 关闭 |
+| 数据 | 仍然只来自 `kron_tree` + 每叶 `kron_get`；画布不写任何文件、不调写工具 |
+| 只读边界 | 移除了 mock 模式的 `Reset` / `New intent` 演示按钮——GUI 不提供 intent 的增删改；编辑在用户 IDE 里做 |
+| 过滤 | 顶部 Filter 命中时高亮，未命中的节点淡出（保留结构，不重排） |
+
+> 已知限制：画布没有缩放，宽项目需要拖拽查看；节点很多时不做虚拟化（当前项目规模够用）。

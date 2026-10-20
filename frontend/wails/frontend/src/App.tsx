@@ -39,7 +39,7 @@ import {
     mockProjects,
 } from '@/lib/mock';
 import {BootAnimation} from '@/components/boot-animation';
-import {IntentTree} from '@/components/intent-tree';
+import {IntentCanvas} from '@/components/intent-canvas';
 import {kronTreeToIntentNodes} from '@/lib/real-tree';
 import {type ListProjectsLiveResult} from '@/lib/mcp-types';
 
@@ -287,16 +287,6 @@ function App() {
         }
     }, [dataSource, activeMockProject, refreshLive, refreshLiveTree, refreshLiveProjects]);
 
-    const updateMockTree = (next: IntentNode[]): void => {
-        setTree(next);
-        if (dataSource === 'mock') setStats(statsFromTree(next));
-    };
-
-    const resetMockTree = (): void => {
-        setTree(activeMockProject.tree);
-        setStats(activeMockProject.stats);
-    };
-
     return (
         <>
             <BootAnimation onDone={(): void => setBooted(true)}/>
@@ -345,11 +335,8 @@ function App() {
                 />
                 <main className="flex-1 flex flex-col min-w-0">
                     <TopBar
-                        tree={displayTree}
                         filter={filter}
                         onFilterChange={setFilter}
-                        onTreeChange={updateMockTree}
-                        onResetTree={resetMockTree}
                         rootLabel={activeMockProject.name}
                         dataSource={dataSource}
                         liveTreeLoading={liveTreeLoading}
@@ -367,13 +354,12 @@ function App() {
                         ) : liveTreeError !== null && dataSource === 'live' ? (
                             <div className="p-6 text-sm text-destructive">Could not load the live project tree. Use Retry below after checking the MCP connection.</div>
                         ) : dataSource === 'mock' && displayTree.length === 0 ? (
-                            <div className="p-6 text-sm text-muted-foreground">This demo project has no intents yet. Switch to another demo project or add a demo intent.</div>
+                            <div className="p-6 text-sm text-muted-foreground">This demo project has no intents yet. Switch to another demo project.</div>
                         ) : (
-                            <IntentTree
+                            <IntentCanvas
                                 data={displayTree}
-                                filter={filter}
-                                demoMode={dataSource === 'mock'}
                                 projectName={dataSource === 'mock' ? activeMockProject.name : liveProjectName}
+                                filter={filter}
                             />
                         )}
                     </div>
@@ -1192,11 +1178,8 @@ function Row(props: {k: string; v: string; mono?: boolean}): JSX.Element {
 }
 
 function TopBar(props: {
-    tree: IntentNode[];
     filter: string;
     onFilterChange: (v: string) => void;
-    onTreeChange: (t: IntentNode[]) => void;
-    onResetTree: () => void;
     rootLabel: string;
     dataSource: DataSource;
     liveTreeLoading: boolean;
@@ -1204,11 +1187,8 @@ function TopBar(props: {
     onRefreshLiveTree: () => void;
 }): JSX.Element {
     const {
-        tree,
         filter,
         onFilterChange,
-        onTreeChange,
-        onResetTree,
         rootLabel,
         dataSource,
         liveTreeLoading,
@@ -1238,53 +1218,9 @@ function TopBar(props: {
             </div>
 
             <div className="ml-auto flex items-center gap-2">
-                {/* 1.4.c: in live mode, "Reset" + "New intent" are
-                    mutations of the mock data and have no meaning
-                    against a real serve-mcp session. They stay
-                    visible (so the user can see the affordance is
-                    not lost — a future 1.4.d will re-wire them to
-                    kron_add / refresh), but are disabled. The
-                    primary action becomes "Refresh tree", which
-                    re-fetches kron_tree. */}
-                <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={isLive}
-                    title={
-                        isLive
-                            ? 'Switch to Mock data to edit the demo tree'
-                            : 'Reset the demo tree to its initial state'
-                    }
-                    onClick={onResetTree}
-                >
-                    Reset
-                </Button>
-                <Button
-                    size="sm"
-                    disabled={isLive}
-                    title={
-                        isLive
-                            ? 'Switch to Mock data to add a demo intent'
-                            : 'Add a synthetic intent to the demo tree'
-                    }
-                    onClick={(): void => {
-                        // Demo: add a synthetic intent at root.
-                        const next: IntentNode[] = [
-                            ...tree,
-                            {
-                                id: `i-${Date.now()}`,
-                                title: `New intent ${tree.length + 1}`,
-                                kind: 'adr',
-                                status: 'draft',
-                                updatedAt: new Date().toISOString(),
-                                children: [],
-                            },
-                        ];
-                        onTreeChange(next);
-                    }}
-                >
-                    New intent
-                </Button>
+                {/* The GUI is deliberately read-only: no intent CRUD here.
+                    Editing happens in the user's IDE on the Markdown files;
+                    the GUI only previews what serve-mcp returns. */}
                 {isLive && (
                     <Button
                         variant="secondary"
