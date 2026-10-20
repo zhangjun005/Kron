@@ -229,6 +229,23 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
         return out;
     }, [layout.nodes]);
 
+    // When a node is selected, frame the intents it points at, so the relation
+    // fields are readable without reading the info card:
+    //   depends_on  -> solid frame (hard prerequisite, same weight as the solid arrow)
+    //   references  -> dashed frame (soft link, same weight as the dashed arrow)
+    // A node that appears in both lists keeps the harder style.
+    const relatedFrames = useMemo(() => {
+        const frames = new Map<string, 'depends' | 'references'>();
+        if (selected === null) return frames;
+        for (const slug of selected.node.dependsOn ?? []) {
+            frames.set(slug, 'depends');
+        }
+        for (const slug of selected.node.references ?? []) {
+            if (!frames.has(slug)) frames.set(slug, 'references');
+        }
+        return frames;
+    }, [selected]);
+
     // Center the selected node only when the click came from outside the canvas
     // (left-rail row). Clicking a node inside the canvas must not move the view.
     const focusState = useRef<{selectedId: string | null; nodes: LaidOutNode[]}>({
@@ -446,6 +463,7 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
                     {layout.nodes.map((laid) => {
                         const dimmed = !matchesFilter(laid.node, query);
                         const isSelected = laid.node.id === selectedId;
+                        const frame = relatedFrames.get(laid.node.id);
                         return (
                             <div
                                 key={laid.node.id}
@@ -464,6 +482,12 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
                                     isSelected
                                         ? 'ring-2 ring-primary ring-offset-2 ring-offset-background'
                                         : 'hover:border-primary/50 hover:shadow-md',
+                                    frame === 'depends' && !isSelected
+                                        ? 'outline outline-2 outline-offset-2 outline-primary'
+                                        : '',
+                                    frame === 'references' && !isSelected
+                                        ? 'outline outline-2 outline-dashed outline-offset-2 outline-primary/60'
+                                        : '',
                                 )}
                                 style={{left: laid.x, top: laid.y, width: NODE_W, height: NODE_H}}
                                 onClick={(event): void => {
@@ -679,6 +703,9 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
                                 />
                             </svg>
                             references (soft)
+                        </span>
+                        <span className="text-muted-foreground/70">
+                            click a node · related nodes: solid frame = depends_on, dashed = references
                         </span>
                     </span>
                 </div>

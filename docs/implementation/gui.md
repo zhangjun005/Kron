@@ -157,6 +157,7 @@ Explorer 主面板不再渲染文件浏览器式的列表树，而是**左→右
 | 只读边界 | GUI 不提供 intent 的增删改（无 `Reset` / `New intent` 之类入口）；编辑在用户 IDE 里做 |
 | 过滤 | 顶部 Filter 命中时高亮，未命中的节点淡出（保留结构，不重排） |
 | 跨意图关系 | `references`（软）画**虚线细箭头**、`depends_on`（硬）画**实线粗箭头**；两者都是节点间的横向关系，不是父子层级边；端点不在当前树中的关系不画；画布左下角有图例 |
+| 关系高亮 | 选中节点时，它指向的节点按字段加框：`depends_on` → **实线框**，`references` → **虚线框**（与箭头轻重一致；两边都有的取 `depends_on`）。选中节点自身仍用 `ring` 高亮 |
 | 左侧栏 | `FILES` 是**完整递归树**（文件夹可展开/折叠到叶子，叶子点击选中并居中画布）；`ARCHIVED` 汇总 stale 叶子；`ASSUMPTIONS` 是独立的假设区 |
 | 假设展示 | 数据来自 `kron_assume_list`；行内显示 id + `hard/soft` 徽章，展开后显示 registry 文本、`expires_at` / `verified_at` / `verified_by`，以及 **referenced by** 的意图芯片（从树的 per-intent `assumptions[]` 反推），点击芯片跳到画布节点 |
 
