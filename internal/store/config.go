@@ -58,7 +58,7 @@ func LoadConfig(ctx context.Context, root string) (*model.Config, error) {
 		}
 		return nil, fmt.Errorf("store: read config: %w", err)
 	}
-	if err := parseConfigTOML(string(data), cfg); err != nil {
+	if err := parseConfigTOML(string(trimUTF8BOM(data)), cfg); err != nil {
 		return nil, fmt.Errorf("%w: %s: %v", model.ErrConfigInvalid, path, err)
 	}
 	return cfg, nil

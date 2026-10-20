@@ -3,6 +3,7 @@ package servemcp
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -50,9 +51,16 @@ func HandleAssumeCheck(ctx context.Context, _ *mcp.CallToolRequest, in AssumeChe
 	// Build the set of slugs the caller is interested in.
 	var slugsOfInterest map[string]struct{}
 	if in.FilePath != "" {
-		slugs, err := parser.SlugsForFile(in.FilePath)
+		// file_path is repo-relative by contract (same as every other MCP
+		// path field), so resolve it against the project root instead of the
+		// server process working directory.
+		scanPath := in.FilePath
+		if !filepath.IsAbs(scanPath) {
+			scanPath = filepath.Join(root, scanPath)
+		}
+		slugs, err := parser.SlugsForFile(scanPath)
 		if err != nil {
-			return nil, AssumeCheckOutput{}, fmt.Errorf("kron_assume_check: scan %s: %w", in.FilePath, err)
+			return nil, AssumeCheckOutput{}, fmt.Errorf("kron_assume_check: scan %s: %w", scanPath, err)
 		}
 		slugsOfInterest = make(map[string]struct{}, len(slugs))
 		for _, s := range slugs {

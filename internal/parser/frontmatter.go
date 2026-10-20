@@ -19,6 +19,12 @@ import (
 	"github.com/xxx/kron/internal/model"
 )
 
+// utf8BOM is the UTF-8 byte order mark. Intent / assumption files are
+// user-editable markdown; Windows editors prepend a BOM when they save it.
+// The splitters require byte 0 to be `<` or `-`, so it is stripped before
+// parsing. Serializers never emit it, so a re-save normalises the file.
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
 // SplitMarkdown separates the YAML frontmatter block from the markdown body.
 //
 // Two on-disk formats are supported:
@@ -56,6 +62,9 @@ func SplitMarkdown(data []byte) (fmRaw []byte, body string, err error) {
 	if len(data) == 0 {
 		return nil, "", nil
 	}
+
+	// Tolerate a UTF-8 BOM (see utf8BOM above).
+	data = bytes.TrimPrefix(data, utf8BOM)
 
 	// Fast path: sentinel-wrapped form. Recognised only when both opening
 	// and closing markers appear; if only one is found, fall through to the

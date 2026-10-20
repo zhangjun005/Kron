@@ -57,5 +57,6 @@
 | [`lsp.md`](./lsp.md) | ✅ 活跃（**唯一 LSP 状态入口**） | LSP 职责、位置语义、实施边界与 §0 实现状态 |
 | [`vscode-extension.md`](./vscode-extension.md) | ✅ 活跃 | `.vsix` 职责、MCP/LSP 双进程与人类编辑闭环 |
 | [`gui-client.md`](./gui-client.md) | ✅ 活跃 | Wails 整体预览职责与 MCP 只读边界 |
+| [`gui.md`](./gui.md) | ✅ 活跃 | Wails Go↔TS 桥方法契约、MCP 工具选型、`projects.json` 直读边界 |
 | `mcp.md` (MCP 协议实现细节) | 🔜 待重写 | 与 `lsp.md` 同批——按 `docs/process/new-internal-api.md` 流程触发 |
 | `status-2026-10-09.md` (现状快照) | 🗒️ **历史快照**（2026-10-09，非现状） | internal + CLI/MCP/LSP 适配情况 + 协议层硬约束；LSP 章节已过期，现状看 `lsp.md` §0 |

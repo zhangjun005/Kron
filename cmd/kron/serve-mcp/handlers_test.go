@@ -520,6 +520,44 @@ func TestAssumeCheck_EmptyStore(t *testing.T) {
 	assert.Empty(t, r.Warnings)
 }
 
+// TestAssumeCheck_RelativeFilePath pins the repo-relative file_path contract:
+// the handler must resolve it against the project root, not the server process
+// working directory (otherwise GUI/IDE callers get ENOENT).
+func TestAssumeCheck_RelativeFilePath(t *testing.T) {
+	dir := initRepo(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "src"), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "src/a.go"),
+		[]byte("// @kron:intent test\npackage src\n"),
+		0o644,
+	))
+	intentYAML := `<!-- kron:frontmatter -->
+created_by: "@a"
+updated_at: 2026-10-01T10:00:00Z
+status: active
+assumptions:
+  - id: single-region
+    severity: hard
+    rationale: "test rationale long enough"
+<!-- /kron:frontmatter -->
+
+# test
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kron/intents/test.md"), []byte(intentYAML), 0o644))
+
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_assume_check",
+		Arguments: map[string]any{"file_path": "src/a.go"},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	var r AssumeCheckOutput
+	require.NoError(t, structuredInto(res, &r))
+	assert.Equal(t, 1, r.Summary.Hard, "the anchored intent's assumption is in scope")
+}
+
 func TestAssumeCheck_ExpiredHard(t *testing.T) {
 	dir := initRepo(t)
 	expired := time.Now().AddDate(0, 0, -30).UTC().Format(time.RFC3339)
