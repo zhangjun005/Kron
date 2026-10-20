@@ -58,6 +58,39 @@ wails build        # production cross-platform binary
 
 `wails dev` requires the Wails CLI (Go 1.20+, `go install github.com/wailsapp/wails/v2/cmd/wails@latest`).
 
+### Running without the Wails CLI (manual `go build`)
+
+`wails` is only a convenience wrapper, but a manual `go build` **must** pass the Wails build tags.
+Without them the binary compiles fine, then at startup shows:
+
+> Wails applications will not build without the correct build tags.
+
+That message comes from a runtime fallback file in the Wails module
+(`internal/app/app_default_windows.go`, build tag `!dev && !production && !bindings && windows`),
+so **`go build ./...` and `go vet ./...` passing proves nothing about this** — only launching the
+binary does.
+
+```bash
+# 1) frontend first — main.go embeds frontend/dist
+cd frontend/wails/frontend && npm ci && npm run build && cd ..
+
+# 2) GUI binary (tags desktop + production; -H windowsgui hides the console window)
+go build -tags "desktop production" -ldflags "-w -s -H windowsgui" \
+  -o build/bin/kron-gui.exe .
+
+# 3) separate CLI binary for live mode (see next section)
+cd ../.. && go build -o frontend/wails/build/bin/kron-cli.exe ./cmd/kron
+```
+
+Start it with cwd = `frontend/wails/` so the executable probe finds `build/bin/kron-cli.exe`:
+
+```bash
+cd frontend/wails && ./build/bin/kron-gui.exe
+```
+
+Do **not** use `go run .` — the temporary binary makes the exe-adjacent `projects.json` lookup fail,
+so live mode can never find the registry.
+
 ### Building the `kron serve-mcp` binary (1.4.b / 1.4.c dev workflow)
 
 The Wails GUI's Go bridge spawns `kron serve-mcp` as a stdio JSON-RPC subprocess. Wails' default
