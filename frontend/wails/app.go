@@ -253,42 +253,28 @@ func (a *App) ListMCPToolsLive() (ListMCPToolsLiveResult, error) {
 	}, nil
 }
 
-// resolveServeMCPExecutable finds the `kron.exe` (or platform equivalent)
-// to spawn. Resolution order:
-//  1. $KRON_WAILS_SERVE_MCP_EXE if set and exists (test/CI escape hatch).
-//  2. ./build/bin/kron.exe relative to the process CWD. This is the
-//     standard `wails dev` artifact location; `wails dev` rebuilds it
-//     whenever the Wails Go side changes.
-//  3. ./build/bin/kron-dev.exe — the headless CLI build that `wails dev`
-//     drops alongside kron.exe so the GUI can spawn a non-GUI kron to
-//     serve MCP without the WebView2 driver attaching. Preferring
-//     kron-dev.exe over kron.exe would normally be wrong (kron.exe is
-//     the version-paired GUI build) but `wails dev` keeps both in sync
-//     from the same source tree, so they have identical code. We only
-//     fall back to kron-dev when kron.exe itself is the Wails GUI
-//     wrapper and would deadlock on a serve-mcp subcommand — we detect
-//     that by probing for a `serve-mcp` invocation that exits 0 within
-//     a short window.
-//  4. ./build/bin/kron-cli.exe — a hand-built or CI-built CLI binary
-//     (e.g. `go build -o build/bin/kron-cli.exe ./cmd/kron`). Useful
-//     for testing without the full Wails dev round-trip.
-//  5. ./build/bin/kron relative to the executable's own directory (for
-//     future `wails build` deployments — Phase 1.5).
+// resolveServeMCPExecutable finds the Kron CLI binary used for the stdio MCP
+// session. The GUI is a separate binary: it cannot serve `serve-mcp` itself
+// (that would open a second WebView2 window), so the bridge must spawn a real
+// CLI build.
 //
-// We deliberately do not search PATH: the Wails GUI and the serve-mcp
-// binary are version-paired and we want to fail loud if the dev artifact
-// is missing rather than accidentally spawn an unrelated `kron` on PATH.
+// Resolution order (first candidate that passes the behaviour probe wins):
+//  1. $KRON_WAILS_SERVE_MCP_EXE (escape hatch for tests / custom layouts).
+//  2. CLI names in <cwd>/build/bin and <cwd> — the `wails dev` layout.
+//  3. CLI names next to the running executable and in <exeDir>/build/bin —
+//     covers double-clicking the GUI: Windows starts it with cwd = exe dir,
+//     so cwd-based candidates degenerate to the same place, while the exe-dir
+//     candidates still find a CLI dropped next to the GUI.
+//  4. A `kron` binary on PATH.
 //
-// Discovered in work 1.4.c: when `wails dev` builds, it produces both
-// `kron.exe` (the Wails GUI itself) and `kron-dev.exe` (a CLI-only
-// build from the same source). The original 1.4.b code only knew
-// about kron.exe and would deadlock in a WebView2 environment when
-// serve-mcp was invoked. The detection-via-`exec.LookPath` step below
-// is intentionally avoided: we cannot ask the OS whether a binary is
-// "GUI or CLI", and `exec.Cmd` doesn't expose that either. The
-// 2-second probe is cheap (it just runs `kron.exe serve-mcp -CWD
-// <empty>` and inspects the exit code) and gives us a definitive
-// answer without a config flag.
+// `kron-cli.exe` / `kron-dev.exe` are tried before `kron.exe` because a
+// `wails build` artifact is also named kron.exe; the 2s probe then rejects
+// the GUI wrapper and we keep looking.
+//
+// Every candidate is validated by tryServeMCPCandidate: the OS cannot tell us
+// whether a binary is GUI or CLI, and exec.Cmd does not expose that either.
+// The probe runs `<candidate> serve-mcp -CWD <empty temp dir>` with closed
+// stdin and accepts any process that exits within 2s — a Wails GUI hangs.
 func resolveServeMCPExecutable() (string, error) {
 	if override := os.Getenv(serveMCPPathEnvOverride); override != "" {
 		if _, err := os.Stat(override); err == nil {
@@ -297,40 +283,50 @@ func resolveServeMCPExecutable() (string, error) {
 		return "", fmt.Errorf("wails: $%s=%q is set but the file does not exist", serveMCPPathEnvOverride, override)
 	}
 
-	// wails dev runs with CWD = frontend/wails/, so ./build/bin/kron.exe
-	// is the standard artifact location.
-	cwd, err := os.Getwd()
-	if err == nil {
-		// First try kron.exe — if it is the Wails GUI wrapper
-		// (the common case in `wails dev`), the probe below
-		// will detect that and we move on to kron-dev.exe.
-		if exe, ok := tryServeMCPCandidate(filepath.Join(cwd, "build", "bin", "kron.exe")); ok {
-			return exe, nil
-		}
-		if exe, ok := tryServeMCPCandidate(filepath.Join(cwd, "build", "bin", "kron-dev.exe")); ok {
-			return exe, nil
-		}
-		if exe, ok := tryServeMCPCandidate(filepath.Join(cwd, "build", "bin", "kron-cli.exe")); ok {
-			return exe, nil
-		}
-		// POSIX / wails build fallback alongside the GUI binary.
-		if exe, ok := tryServeMCPCandidate(filepath.Join(cwd, "build", "bin", "kron")); ok {
-			return exe, nil
-		}
+	var dirs []string
+	if cwd, err := os.Getwd(); err == nil {
+		dirs = append(dirs, filepath.Join(cwd, "build", "bin"), cwd)
 	}
-
-	// Last-resort: same directory as the running executable.
 	if exe, err := os.Executable(); err == nil {
-		candidate := filepath.Join(filepath.Dir(exe), "kron.exe")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
+		dir := filepath.Dir(exe)
+		dirs = append(dirs, dir, filepath.Join(dir, "build", "bin"))
+	}
+
+	// CLI names first; kron.exe last because a `wails build` GUI artifact is
+	// also named kron.exe and would only be rejected after the probe timeout.
+	names := []string{"kron-cli.exe", "kron-dev.exe", "kron", "kron.exe"}
+
+	seen := make(map[string]bool, len(dirs))
+	var searched []string
+	for _, dir := range dirs {
+		if seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		for _, name := range names {
+			candidate := filepath.Join(dir, name)
+			searched = append(searched, candidate)
+			if exe, ok := tryServeMCPCandidate(candidate); ok {
+				return exe, nil
+			}
 		}
 	}
 
-	return "", errors.New(
-		"wails: cannot find kron serve-mcp executable. " +
-			"Run `wails dev` first (it builds ./build/bin/kron.exe), " +
-			"or set $" + serveMCPPathEnvOverride + " to an absolute path.")
+	// Last resort: a globally installed CLI.
+	for _, name := range []string{"kron", "kron.exe"} {
+		if exe, err := exec.LookPath(name); err == nil {
+			searched = append(searched, exe+" (PATH)")
+			if candidate, ok := tryServeMCPCandidate(exe); ok {
+				return candidate, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf(
+		"wails: cannot find the Kron CLI binary used for `serve-mcp` (searched: %s). "+
+			"Build it with `go build -o frontend/wails/build/bin/kron-cli.exe ./cmd/kron`, "+
+			"put it next to the GUI executable, or set $%s to its absolute path",
+		strings.Join(searched, ", "), serveMCPPathEnvOverride)
 }
 
 // tryServeMCPCandidate returns (path, true) if path exists AND looks

@@ -168,4 +168,48 @@ func TestAppBridgeE2E(t *testing.T) {
 		}
 		t.Logf("expected failure: %s", res.Err)
 	})
+
+	// A double-clicked GUI starts with cwd = exe dir, so the CLI must be
+	// discoverable from the executable's own directory too. Copy the CLI next
+	// to the test binary, chdir somewhere unrelated, and resolve again.
+	t.Run("ResolveFromExecutableDir", func(t *testing.T) {
+		source, statErr := os.Stat("build/bin/kron-cli.exe")
+		if statErr != nil {
+			t.Skip("build/bin/kron-cli.exe not present; build it first")
+		}
+		exePath, exeErr := os.Executable()
+		if exeErr != nil {
+			t.Fatalf("os.Executable: %v", exeErr)
+		}
+		exeDir := filepath.Dir(exePath)
+		dest := filepath.Join(exeDir, "kron-cli.exe")
+		if _, err := os.Stat(dest); err == nil {
+			t.Skipf("%s already exists; refusing to overwrite", dest)
+		}
+		content, readErr := os.ReadFile("build/bin/kron-cli.exe")
+		if readErr != nil {
+			t.Fatalf("read CLI: %v", readErr)
+		}
+		if writeErr := os.WriteFile(dest, content, source.Mode()); writeErr != nil {
+			t.Skipf("cannot place CLI next to test binary: %v", writeErr)
+		}
+		t.Cleanup(func() { _ = os.Remove(dest) })
+
+		previous, wdErr := os.Getwd()
+		if wdErr != nil {
+			t.Fatalf("getwd: %v", wdErr)
+		}
+		if chdirErr := os.Chdir(t.TempDir()); chdirErr != nil {
+			t.Fatalf("chdir: %v", chdirErr)
+		}
+		t.Cleanup(func() { _ = os.Chdir(previous) })
+
+		found, findErr := resolveServeMCPExecutable()
+		if findErr != nil {
+			t.Fatalf("resolve from unrelated cwd: %v", findErr)
+		}
+		if filepath.Clean(found) != filepath.Clean(dest) {
+			t.Errorf("resolved %q, want %q", found, dest)
+		}
+	})
 }

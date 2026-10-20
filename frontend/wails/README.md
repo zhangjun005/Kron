@@ -96,17 +96,24 @@ so live mode can never find the registry.
 The Wails GUI's Go bridge spawns `kron serve-mcp` as a stdio JSON-RPC subprocess. Wails' default
 build target is the **Wails GUI** itself (`build/bin/kron.exe`), which is not a CLI binary and
 will hang when invoked with `serve-mcp` (it spins up WebView2 instead of processing the
-subcommand). To run the live GUI in development you therefore need a separate **CLI binary** at
-one of the well-known paths the bridge probes (in order: `kron.exe`, `kron-dev.exe`,
-`kron-cli.exe`):
+subcommand). To run the live GUI you therefore need a separate **CLI binary**:
 
 ```bash
 # from the repo root
 go build -o frontend/wails/build/bin/kron-cli.exe ./cmd/kron
 ```
 
-Then `wails dev` picks up `kron-cli.exe` automatically. Alternatively, set
-`$KRON_WAILS_SERVE_MCP_EXE` to an absolute path of any `kron` CLI build to skip the probe.
+The bridge searches, in order, for `kron-cli.exe` / `kron-dev.exe` / `kron` / `kron.exe` in:
+
+1. `$KRON_WAILS_SERVE_MCP_EXE` (absolute path override),
+2. `<cwd>/build/bin` and `<cwd>`,
+3. the GUI executable's own directory and `<exeDir>/build/bin` — this is what makes a
+   **double-clicked** GUI work (Windows gives it cwd = exe dir),
+4. `PATH`.
+
+Every candidate is validated with a 2-second `serve-mcp` probe, so a GUI binary named `kron.exe`
+is skipped rather than deadlocking. `kron-cli.exe` is preferred by name because `wails build`
+produces a GUI `kron.exe` too.
 
 The CLI binary only needs to be rebuilt when you change the `cmd/kron/serve-mcp/` source tree;
 `wails dev` does not pick up `cmd/kron/` changes automatically (it watches `frontend/wails/`).

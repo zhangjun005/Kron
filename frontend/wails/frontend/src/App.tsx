@@ -352,7 +352,11 @@ function App() {
                         ) : noActiveProject && dataSource === 'live' ? (
                             <div className="p-6 text-sm text-muted-foreground">No active Kron project. Run kron init or kron register, refresh Projects, then select a project.</div>
                         ) : liveTreeError !== null && dataSource === 'live' ? (
-                            <div className="p-6 text-sm text-destructive">Could not load the live project tree. Use Retry below after checking the MCP connection.</div>
+                            <div className="p-6 text-sm text-destructive">
+                                {liveTreeError.includes('cannot find the Kron CLI binary')
+                                    ? 'Live mode needs the Kron CLI binary. Build it with `go build -o frontend/wails/build/bin/kron-cli.exe ./cmd/kron` (or put a kron CLI next to the GUI executable), then Retry.'
+                                    : 'Could not load the live project tree. Use Retry below after checking the MCP connection.'}
+                            </div>
                         ) : dataSource === 'mock' && displayTree.length === 0 ? (
                             <div className="p-6 text-sm text-muted-foreground">This demo project has no intents yet. Switch to another demo project.</div>
                         ) : (
