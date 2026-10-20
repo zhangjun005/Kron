@@ -39,6 +39,8 @@ frontend/vscode/node_modules/
 frontend/wails/node_modules/
 frontend/wails/dist/
 frontend/wails/.vite/
+frontend/wails/build/
+frontend/wails/frontend/*.md5
 
 # Rust legacy (will be cleaned from archive branch if needed)
 # Uncomment if rebuilding Rust side:
@@ -52,6 +54,12 @@ frontend/wails/.vite/
 # restore with `git mv .deprecated/<date>-<reason>/<file> <original-path>`).
 # DO NOT git add files inside .deprecated/ — they're archived, not live.
 .deprecated/
+
+# Personal dev-log: junction (Windows dir link) to d:\cursor\kron-dev-log\.
+# Content lives outside the repo (independent git); junction is just a
+# convenient in-repo mount so the developer (and reviewers) can find it
+# from the Kron tree. Files belong to the *external* dev-log, not here.
+dev-log/
 
 # Accidental redirect output (e.g. `cmd > dev/null` mistake on PowerShell
 # creates a literal dev/null file; not the Unix /dev/null device).

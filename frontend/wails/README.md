@@ -1,31 +1,107 @@
-# frontend/wails/ — Wails GUI 占位（2026-10-09 启动）
+# frontend/wails/ — Kron desktop client (Wails GUI)
 
-> 2026-10-09 拍板：客户端层代码**进** Kron 主仓（[`docs/rfc/2026-10-09-gui-ide-plan.md`](../../../docs/rfc/2026-10-09-gui-ide-plan.md) §6）。
->
-> 本目录是**占位**——`wails init` 骨架的填充节奏由 user 拍板，**不**预排"v1.x 阶段"。
+Wails v2 GUI client for the [Kron](https://example.invalid/kron) intent ledger. This is the **GUI** half of the
+two-client strategy described in [`docs/rfc/2026-10-09-gui-ide-plan.md`](../../docs/rfc/2026-10-09-gui-ide-plan.md)
+(the other half is the VSCode extension under `frontend/vscode/`).
 
-## 启动时做什么
+## What this client does
 
-按 `docs/rfc/2026-10-09-gui-ide-plan.md` §9.1：
+Per RFC §3.1, the Wails GUI is a **read-mostly overview** tool:
 
-1. `wails init -n kron-wails -t react-ts`（Wails v2 + React + TypeScript 模板）
-2. `pnpm dlx shadcn@latest init`（shadcn/ui 初始化）
-3. 加 Go ↔ TS 桥（拼 JSON 调 `kron serve-mcp`）
-4. spike 验证：Wails 起窗口 + 调 `kron serve-mcp` list 工具
+| Capability | Provided | Notes |
+|---|---|---|
+| Multi-project overview | yes | cross-project Kron intent aggregates |
+| Intent tree preview | yes | rendered via `kron serve-mcp` `kron_tree` |
+| Status bar | yes | "last lint: N errors / M warnings" |
+| Hover / go-to-def | **no** | IDE responsibility |
+| Diagnostics / completion | **no** | IDE responsibility |
+| Edit intent files | **no** | GUI jumps to `code <file>`; no embedded editor |
+| Relation graph | **no** | IDE responsibility (see §4.3) |
 
-## 职责边界
+## Architecture (process boundaries)
 
-按 [`docs/rfc/2026-10-09-gui-ide-plan.md` §3](../../docs/rfc/2026-10-09-gui-ide-plan.md)：
+```
+┌────────────────────┐
+│  React 18 + Vite 5 │   ← this directory's frontend/ subdir
+│  (TypeScript)      │
+└─────────┬──────────┘
+          │ Wails bridge (in-process Go ↔ TS, generated bindings)
+┌─────────▼──────────┐
+│  Go (Wails runtime)│   ← this directory's root (app.go, main.go)
+│  small bridge only │
+└─────────┬──────────┘
+          │ stdio JSON-RPC (spawned subprocess)
+┌─────────▼──────────┐
+│  kron serve-mcp    │   ← Kron Go mainline, cmd/kron/serve-mcp/
+└────────────────────┘
+```
 
-- ✅ **整体预览**：多项目概览 + 意图树预览 + 状态条
-- ❌ **不**做 hover / 跳转 / 实时诊断 / 补全 / 关系图（IDE 职责）
+The GUI **never** imports `internal/*` directly (iron rule #9 + #10 in the RFC). All Kron data flows
+through `kron serve-mcp` over stdio JSON-RPC.
 
-## 调用方式
+## Work status
 
-进程外 stdio 子进程：`kron serve-mcp`（**不**直接 import `internal/`）。
+This is the **work 1.3 / 1.4.b / 1.4.c skeleton** — the Wails build pipeline is wired up, the Go ↔ TS
+bridge exposes a live `kron serve-mcp` subprocess (1.4.b), and the React overview page renders the
+real intent tree on the `kron_tree` + `kron_get` MCP responses (1.4.c). Later work items add:
 
-## 不在范围内
+- `wails build` cross-platform artefact (work 1.5)
+- shadcn/ui full coverage + the rest of the kron_* tools (2.x)
 
-- ❌ **不**直接 import `internal/store` / `internal/parser` / `internal/lint`（铁律 #9 + #1）
-- ❌ **不**与 `frontend/vscode/` 互相 import
-- ❌ **不**预设 shadcn Chart 选型（spike 验证后拍）
+## Running
+
+```bash
+# from this directory (frontend/wails/)
+wails dev          # live development with HMR + Go bridge
+wails build        # production cross-platform binary
+```
+
+`wails dev` requires the Wails CLI (Go 1.20+, `go install github.com/wailsapp/wails/v2/cmd/wails@latest`).
+
+### Building the `kron serve-mcp` binary (1.4.b / 1.4.c dev workflow)
+
+The Wails GUI's Go bridge spawns `kron serve-mcp` as a stdio JSON-RPC subprocess. Wails' default
+build target is the **Wails GUI** itself (`build/bin/kron.exe`), which is not a CLI binary and
+will hang when invoked with `serve-mcp` (it spins up WebView2 instead of processing the
+subcommand). To run the live GUI in development you therefore need a separate **CLI binary** at
+one of the well-known paths the bridge probes (in order: `kron.exe`, `kron-dev.exe`,
+`kron-cli.exe`):
+
+```bash
+# from the repo root
+go build -o frontend/wails/build/bin/kron-cli.exe ./cmd/kron
+```
+
+Then `wails dev` picks up `kron-cli.exe` automatically. Alternatively, set
+`$KRON_WAILS_SERVE_MCP_EXE` to an absolute path of any `kron` CLI build to skip the probe.
+
+The CLI binary only needs to be rebuilt when you change the `cmd/kron/serve-mcp/` source tree;
+`wails dev` does not pick up `cmd/kron/` changes automatically (it watches `frontend/wails/`).
+
+## Layout
+
+```
+frontend/wails/
+├── app.go            # Go bridge surface (KronInfo, ListMCPTools)
+├── main.go           # Wails entry point (window options, embed)
+├── wails.json        # Wails project config
+├── go.mod / go.sum   # Wails Go dependencies
+├── build/            # platform build assets (icons, plist, NSIS)
+└── frontend/         # React 18 + Vite 5 + TS frontend
+    ├── index.html
+    ├── package.json
+    ├── tsconfig.json
+    ├── vite.config.ts
+    ├── wailsjs/      # generated Go ↔ TS bindings (do not edit)
+    └── src/
+        ├── main.tsx
+        ├── App.tsx
+        ├── App.css
+        └── style.css
+```
+
+## See also
+
+- [`docs/rfc/2026-10-09-gui-ide-plan.md`](../../docs/rfc/2026-10-09-gui-ide-plan.md) — full RFC
+- [`docs/rfc/2026-10-10-frontend-ui-stack.md`](../../docs/rfc/2026-10-10-frontend-ui-stack.md) — UI library decision (pending)
+- [`docs/process/internal-pkg.md`](../../docs/process/internal-pkg.md) — `internal/*` immutability doctrine
