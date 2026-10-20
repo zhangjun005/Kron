@@ -110,6 +110,7 @@ func readProjectsJSONAt(path string) (*ProjectRegistry, error) {
 		}
 		return nil, fmt.Errorf("store: read projects.json %s: %w", path, err)
 	}
+	data = trimUTF8BOM(data)
 	var reg ProjectRegistry
 	if err := json.Unmarshal(data, &reg); err != nil {
 		return nil, fmt.Errorf("store: parse projects.json %s: %w", path, err)
