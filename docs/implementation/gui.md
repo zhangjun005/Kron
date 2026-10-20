@@ -197,4 +197,5 @@ kron-mcp-test/
 - 因此 GUI 与 CLI 必须在**同一目录**（否则两份 registry 各说各话）；Windows 大小写不敏感，`Kron.exe` 与 `kron.exe` 不能共存，故 GUI 命名 `Kron-GUI.exe`、CLI 保留发布名 `kron.exe`。
 - **验证脚本**：[`verify-mcp-registry.ps1`](../../frontend/wails/scripts/verify-mcp-registry.ps1) 用 [`mcp-probe`](../../frontend/wails/scripts/mcp-probe/main.go)（Go 手写 stdio 客户端）在「cwd 为无关目录、无 `-CWD`」条件下调 `kron_list`，要求从 exe 旁 registry 解析出 8 条 intent；并把 registry 移走做负向对照（必须失败）。
 - 已验证：GUI 双击（cwd=`app`）→ Live 树正常，spawn 的是 `app\kron.exe serve-mcp -CWD project`；MCP 无 `-CWD` 仍能引用 json；`kron lint` 与 fixture 一致（1 error + 1 warning）。
+- **测试隔离**：SDK 客户端脚本会通过 `KRON_PROJECTS_JSON_PATH` 指向临时 registry 再启动子进程——`kron_init` 会写「exe 旁的 `projects.json`」，若不隔离就会把 GUI 的 `current_project` 指到测试临时目录（2026-10-20 实际踩过：目录删除后 GUI 打开即报 `serve-mcp closed stdout before responding`）。跑完校验 `app/projects.json` hash 不变。
 - **真实客户端验证**：`node frontend/wails/scripts/mcp-sdk-client.mjs` 用官方 `@modelcontextprotocol/sdk`（v1.30，客户端与 VSCode/Cursor/Claude 兼容层同源）走完整客户端路径：initialize → tools/list（18 个带 schema）→ 读工具 → 写工具（temp fixture 副本）→ tool error 的 `isError` 语义，9 项断言全 PASS。这补的是"第三方 SDK 客户端兼容性"，与手写帧 probe 互补。

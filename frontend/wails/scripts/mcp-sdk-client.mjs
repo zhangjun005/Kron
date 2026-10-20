@@ -71,15 +71,23 @@ async function main() {
     if (!existsSync(sourceProject)) throw new Error(`missing project: ${sourceProject}`);
 
     const {Client, StdioClientTransport} = loadSdk();
-    const projectCopy = mkdtempSync(join(tmpdir(), 'kron-sdk-client-'));
+    // Isolate ALL registry writes: kron_init / kron_register write projects.json
+    // next to the CLI executable, which in the release-shaped env is shared with
+    // the GUI. Point the child at a throwaway registry so the test can never
+    // move the GUI's active project to a deleted temp directory.
+    const workDir = mkdtempSync(join(tmpdir(), 'kron-sdk-client-'));
+    const projectCopy = join(workDir, 'project');
+    const registryPath = join(workDir, 'projects.json');
     cpSync(sourceProject, projectCopy, {recursive: true});
     console.log(`kron: ${kronExe}`);
     console.log(`project (temp copy): ${projectCopy}`);
+    console.log(`registry (temp): ${registryPath}`);
 
     const client = new Client({name: 'kron-sdk-client', version: '0.0.0'}, {capabilities: {}});
     const transport = new StdioClientTransport({
         command: kronExe,
         args: ['serve-mcp', '-CWD', projectCopy],
+        env: {...process.env, KRON_PROJECTS_JSON_PATH: registryPath},
         stderr: 'pipe',
     });
 
