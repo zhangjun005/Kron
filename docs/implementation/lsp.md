@@ -87,7 +87,13 @@ The server registers 5 LSP methods. All other methods are explicitly "not implem
 
 ### 2.4 `textDocument/didOpen` / `didChange` / `didClose`
 
-v1.3 takes no action on these notifications — the server re-reads the file from disk on every hover/definition request (no in-memory cache). The methods are present on the server (vs. left to `UnimplementedServer`) so the editor sees the capabilities the `Initialize` result declared are actually being served. Without this, editors like VSCode and Neovim disconnect after the first timeout when the server declares a capability and silently ignores the corresponding notifications.
+当前实现会接收这些通知但不保存文本；Hover/Definition 每次从磁盘重读文件。由于 `Initialize` 同时声明了
+`OpenClose=true` 和 `Change=Full`，这只能算协议入口已接通，不能算完整的文档同步实现：未保存的编辑内容不会参与
+后续解析。
+
+完整实现应按 URI 保存打开文档的全文和版本：`didOpen` 建立内存快照，`didChange` 按 `contentChanges` 应用全文或
+增量变更，`didClose` 删除快照；所有依赖文本的请求都应优先读取快照。若暂时不维护快照，则应撤销
+`OpenClose` / `Change` 能力声明，明确服务端只读磁盘。服务端不能一边声明同步能力，一边把通知当作无意义的空操作。
 
 ### 2.5 `shutdown` / `exit`
 
