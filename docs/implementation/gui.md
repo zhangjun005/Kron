@@ -157,5 +157,12 @@ Explorer 主面板不再渲染文件浏览器式的列表树，而是**左→右
 | 数据 | 仍然只来自 `kron_tree` + 每叶 `kron_get`；画布不写任何文件、不调写工具 |
 | 只读边界 | 移除了 mock 模式的 `Reset` / `New intent` 演示按钮——GUI 不提供 intent 的增删改；编辑在用户 IDE 里做 |
 | 过滤 | 顶部 Filter 命中时高亮，未命中的节点淡出（保留结构，不重排） |
+| 左侧栏联动 | `FILES` / `ARCHIVED` 行可点击：选中对应节点、把画布平移到它居中、并弹出信息卡（earlier 这些行只有 cursor 样式，没有事件） |
+
+### 8.1 子进程调度（弹窗 / 探测）
+
+- GUI 与 CLI 是两个二进制；bridge 为**每个 GUI 实例**只解析一次 CLI 路径（结果缓存，解析失败不缓存，方便补上二进制后重试）。
+- 所有子进程（CLI 探测探针 + 长期 `serve-mcp`）都以 `CREATE_NO_WINDOW` + `HideWindow` 启动。否则双击启动（GUI 无控制台）时 Windows 会为每个子进程新建控制台窗口——表现为「切 Live 弹出好几个窗口」。
+- `serve-mcp` 的 stderr 写入 GUI 可执行文件旁的 `serve-mcp.log`（windowsgui 子系统没有可用 stderr），握手失败可直接查日志。
 
 > 已知限制：画布没有缩放，宽项目需要拖拽查看；节点很多时不做虚拟化（当前项目规模够用）。

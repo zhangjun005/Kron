@@ -88,6 +88,9 @@ function App() {
     const [switchingProject, setSwitchingProject] = useState<string | null>(null);
     const [projectSwitchError, setProjectSwitchError] = useState<string | null>(null);
     const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+    // Selection is owned here so the left-rail rows can drive the canvas.
+    const [selectedIntentId, setSelectedIntentId] = useState<string | null>(null);
+    const [focusRequest, setFocusRequest] = useState<number>(0);
 
     // The projects view reads the portable registry through the Go
     // bridge and remains available in both mock and live display modes.
@@ -332,6 +335,10 @@ function App() {
                     lintLoading={lintLoading}
                     settingsOpen={settingsOpen}
                     onSettingsOpenChange={setSettingsOpen}
+                    onSelectIntent={(id): void => {
+                        setSelectedIntentId(id);
+                        setFocusRequest((n) => n + 1);
+                    }}
                 />
                 <main className="flex-1 flex flex-col min-w-0">
                     <TopBar
@@ -364,6 +371,9 @@ function App() {
                                 data={displayTree}
                                 projectName={dataSource === 'mock' ? activeMockProject.name : liveProjectName}
                                 filter={filter}
+                                selectedId={selectedIntentId}
+                                onSelectedIdChange={setSelectedIntentId}
+                                focusRequest={focusRequest}
                             />
                         )}
                     </div>
@@ -504,6 +514,8 @@ function LeftRail(props: {
     lintLoading: boolean;
     settingsOpen: boolean;
     onSettingsOpenChange: (open: boolean) => void;
+    /** Select an intent in the canvas (left-rail row click). */
+    onSelectIntent: (id: string) => void;
 }): JSX.Element {
     const {
         info,
@@ -535,6 +547,7 @@ function LeftRail(props: {
         lintLoading,
         settingsOpen,
         onSettingsOpenChange,
+        onSelectIntent,
     } = props;
     const [activeView, setActiveView] = useState<
         'explorer' | 'projects' | 'git' | 'tools'
@@ -710,6 +723,16 @@ function LeftRail(props: {
                                     {tree.map((node) => (
                                         <li
                                             key={node.id}
+                                            role="button"
+                                            tabIndex={0}
+                                            title="Show this intent in the canvas"
+                                            onClick={(): void => onSelectIntent(node.id)}
+                                            onKeyDown={(event): void => {
+                                                if (event.key === 'Enter' || event.key === ' ') {
+                                                    event.preventDefault();
+                                                    onSelectIntent(node.id);
+                                                }
+                                            }}
                                             className={[
                                                 'group flex items-center gap-1.5',
                                                 'pl-6 pr-2 py-1 cursor-pointer',
@@ -740,6 +763,16 @@ function LeftRail(props: {
                                         .map((node) => (
                                             <li
                                                 key={node.id}
+                                                role="button"
+                                                tabIndex={0}
+                                                title="Show this intent in the canvas"
+                                                onClick={(): void => onSelectIntent(node.id)}
+                                                onKeyDown={(event): void => {
+                                                    if (event.key === 'Enter' || event.key === ' ') {
+                                                        event.preventDefault();
+                                                        onSelectIntent(node.id);
+                                                    }
+                                                }}
                                                 className={[
                                                     'group flex items-center gap-1.5',
                                                     'pl-6 pr-2 py-1 cursor-pointer',

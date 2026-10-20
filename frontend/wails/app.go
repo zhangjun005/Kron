@@ -69,6 +69,41 @@ type App struct {
 	// project. Once set, every new subprocess is pinned to this project via
 	// serve-mcp -CWD so a project switch cannot leave the GUI on stale data.
 	mcpRoot string
+
+	// cliMu / cliPath / cliErr cache the resolved `kron` CLI path. Resolution
+	// runs a 2-second probe per candidate; without caching every
+	// CallMCPTool (one per intent leaf) would re-run the probe and spawn a
+	// burst of short-lived child processes. A failed resolution is NOT
+	// cached, so the user can build the CLI and retry without restarting.
+	cliMu     sync.Mutex
+	cliPath   string
+	cliErr    error
+	cliCached bool
+
+	// mcpLog is the file that receives the serve-mcp child's stderr. A
+	// windowsgui-subsystem GUI has no usable stderr, so a log file is the
+	// only way to keep handshake diagnostics.
+	mcpLog *os.File
+}
+
+// resolveCLI returns the cached CLI path, resolving it once per app run.
+func (a *App) resolveCLI() (string, error) {
+	a.cliMu.Lock()
+	defer a.cliMu.Unlock()
+	if a.cliCached {
+		return a.cliPath, nil
+	}
+	path, err := resolveServeMCPExecutable()
+	if err != nil {
+		a.cliPath = ""
+		a.cliErr = err
+		a.cliCached = false
+		return "", err
+	}
+	a.cliPath = path
+	a.cliErr = nil
+	a.cliCached = true
+	return path, nil
 }
 
 // NewApp creates a new App application struct.
@@ -97,6 +132,7 @@ func (a *App) shutdown(_ context.Context) {
 // hold mcpMu. Errors are swallowed — at shutdown we are best-effort, and
 // the OS reaps the process on the next tick anyway.
 func (a *App) killLocked() {
+	a.closeMCPLog()
 	if a.mcpCmd == nil || a.mcpCmd.Process == nil {
 		a.mcpStdin = nil
 		a.mcpStdout = nil
@@ -113,6 +149,36 @@ func (a *App) killLocked() {
 	a.mcpInitialized = false
 	a.mcpServerInfo = LiveServerInfo{}
 	a.mcpTools = nil
+}
+
+// mcpStderr returns the writer for the serve-mcp child's stderr. A
+// windowsgui-subsystem GUI has no usable stderr, so diagnostics go to a log
+// file next to the GUI executable (the only place the user can find a failed
+// handshake without launching from a console). Falls back to io.Discard.
+func (a *App) mcpStderr() io.Writer {
+	if a.mcpLog != nil {
+		return a.mcpLog
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return io.Discard
+	}
+	path := filepath.Join(filepath.Dir(exe), "serve-mcp.log")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return io.Discard
+	}
+	a.mcpLog = file
+	return file
+}
+
+// closeMCPLog flushes and closes the serve-mcp log handle. Caller holds mcpMu.
+func (a *App) closeMCPLog() {
+	if a.mcpLog == nil {
+		return
+	}
+	_ = a.mcpLog.Close()
+	a.mcpLog = nil
 }
 
 // KronInfo is the static metadata payload returned by GetKronInfo.
@@ -221,7 +287,7 @@ type LiveServerInfo struct {
 //   - Errors are wrapped at the point of origin and include enough
 //     context for the React side to surface them verbatim.
 func (a *App) ListMCPToolsLive() (ListMCPToolsLiveResult, error) {
-	executable, err := resolveServeMCPExecutable()
+	executable, err := a.resolveCLI()
 	if err != nil {
 		return ListMCPToolsLiveResult{}, err
 	}
@@ -355,6 +421,9 @@ func tryServeMCPCandidate(path string) (string, bool) {
 	cmd.Stdin = strings.NewReader("")
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
+	// Without this, each probe of a console binary pops a console window when
+	// the GUI itself has no console (double-click launch).
+	cmd.SysProcAttr = hiddenProcAttr()
 	_ = cmd.Run()
 	// cmd.Run returns nil on exit 0, *exec.ExitError on non-zero
 	// exit, and a context.DeadlineExceeded error if the 2s
@@ -376,7 +445,11 @@ func (a *App) spawnLocked(executable string) error {
 		args = append(args, "-CWD", a.mcpRoot)
 	}
 	cmd := exec.Command(executable, args...)
-	cmd.Stderr = os.Stderr // serve-mcp writes its own diagnostics to stderr
+	// CREATE_NO_WINDOW + HideWindow: the serve-mcp child is a console binary;
+	// without this, a double-clicked GUI leaves a visible black console window
+	// open for the whole session.
+	cmd.SysProcAttr = hiddenProcAttr()
+	cmd.Stderr = a.mcpStderr()
 	// When no registered project is active, preserve serve-mcp's normal
 	// current_project / working-directory resolution. Project selection
 	// pins the subprocess to the chosen root with -CWD.
@@ -668,7 +741,7 @@ func (a *App) CallMCPTool(name string, argsJSON string) (string, error) {
 		return "", fmt.Errorf("wails: CallMCPTool(%s): args must be a JSON object: %w", name, err)
 	}
 
-	executable, err := resolveServeMCPExecutable()
+	executable, err := a.resolveCLI()
 	if err != nil {
 		return "", err
 	}

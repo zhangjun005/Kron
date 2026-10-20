@@ -29,6 +29,11 @@ interface IntentCanvasProps {
     data: IntentNode[];
     projectName: string;
     filter: string;
+    /** Currently selected node id (controlled by App so the left rail can drive it). */
+    selectedId: string | null;
+    onSelectedIdChange: (id: string | null) => void;
+    /** Increment to ask the canvas to center the selected node (left-rail click). */
+    focusRequest: number;
 }
 
 interface LaidOutNode {
@@ -129,10 +134,10 @@ function countIntents(node: IntentNode): number {
     return node.children.reduce((sum, child) => sum + countIntents(child), 0);
 }
 
-export function IntentCanvas({data, projectName, filter}: IntentCanvasProps): JSX.Element {
+export function IntentCanvas({data, projectName, filter, selectedId, onSelectedIdChange, focusRequest}: IntentCanvasProps): JSX.Element {
     const [pan, setPan] = useState<{x: number; y: number}>({x: 24, y: 16});
-    const [selectedId, setSelectedId] = useState<string | null>(null);
     const [panning, setPanning] = useState<boolean>(false);
+    const containerRef = useRef<HTMLDivElement | null>(null);
     const dragRef = useRef<{startX: number; startY: number; originX: number; originY: number; moved: boolean} | null>(null);
     const panelRef = useRef<HTMLDivElement | null>(null);
 
@@ -155,10 +160,30 @@ export function IntentCanvas({data, projectName, filter}: IntentCanvasProps): JS
         [layout.nodes, selectedId],
     );
 
+    // Center the selected node only when the click came from outside the canvas
+    // (left-rail row). Clicking a node inside the canvas must not move the view.
+    const focusState = useRef<{selectedId: string | null; nodes: LaidOutNode[]}>({
+        selectedId: null,
+        nodes: [],
+    });
+    focusState.current = {selectedId, nodes: layout.nodes};
+    useEffect(() => {
+        const {selectedId: id, nodes} = focusState.current;
+        if (id === null) return;
+        const container = containerRef.current;
+        const node = nodes.find((n) => n.node.id === id);
+        if (container === null || node === undefined) return;
+        const rect = container.getBoundingClientRect();
+        setPan({
+            x: rect.width / 2 - (node.x + NODE_W / 2),
+            y: rect.height / 2 - (node.y + NODE_H / 2),
+        });
+    }, [focusRequest]);
+
     const resetView = useCallback((): void => {
         setPan({x: 24, y: 16});
-        setSelectedId(null);
-    }, []);
+        onSelectedIdChange(null);
+    }, [onSelectedIdChange]);
 
     // Close the info card on outside click / Escape.
     useEffect(() => {
@@ -167,10 +192,10 @@ export function IntentCanvas({data, projectName, filter}: IntentCanvasProps): JS
             const target = event.target as HTMLElement | null;
             if (panelRef.current !== null && target !== null && panelRef.current.contains(target)) return;
             if (target !== null && target.closest('[data-intent-node="true"]') !== null) return;
-            setSelectedId(null);
+            onSelectedIdChange(null);
         };
         const onKeyDown = (event: KeyboardEvent): void => {
-            if (event.key === 'Escape') setSelectedId(null);
+            if (event.key === 'Escape') onSelectedIdChange(null);
         };
         document.addEventListener('pointerdown', onPointerDown);
         document.addEventListener('keydown', onKeyDown);
@@ -198,7 +223,7 @@ export function IntentCanvas({data, projectName, filter}: IntentCanvasProps): JS
             dragRef.current = null;
             setPanning(false);
             // A plain click on empty canvas dismisses the info card.
-            if (drag !== null && !drag.moved) setSelectedId(null);
+            if (drag !== null && !drag.moved) onSelectedIdChange(null);
         };
         window.addEventListener('mousemove', onMove);
         window.addEventListener('mouseup', onUp);
@@ -223,7 +248,7 @@ export function IntentCanvas({data, projectName, filter}: IntentCanvasProps): JS
     };
 
     return (
-        <div className="relative h-full w-full overflow-hidden">
+        <div ref={containerRef} className="relative h-full w-full overflow-hidden">
             {/* Dot-grid background; the grid moves with the canvas so panning
                 feels like moving a board rather than scrolling a list. */}
             <div
@@ -296,12 +321,12 @@ export function IntentCanvas({data, projectName, filter}: IntentCanvasProps): JS
                                 style={{left: laid.x, top: laid.y, width: NODE_W, height: NODE_H}}
                                 onClick={(event): void => {
                                     event.stopPropagation();
-                                    setSelectedId(isSelected ? null : laid.node.id);
+                                    onSelectedIdChange(isSelected ? null : laid.node.id);
                                 }}
                                 onKeyDown={(event): void => {
                                     if (event.key === 'Enter' || event.key === ' ') {
                                         event.preventDefault();
-                                        setSelectedId(isSelected ? null : laid.node.id);
+                                        onSelectedIdChange(isSelected ? null : laid.node.id);
                                     }
                                 }}
                             >
@@ -356,7 +381,7 @@ export function IntentCanvas({data, projectName, filter}: IntentCanvasProps): JS
                                     type="button"
                                     aria-label="Close details"
                                     className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                                    onClick={(): void => setSelectedId(null)}
+                                    onClick={(): void => onSelectedIdChange(null)}
                                 >
                                     <X className="h-3.5 w-3.5"/>
                                 </button>

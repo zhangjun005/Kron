@@ -113,7 +113,14 @@ The bridge searches, in order, for `kron-cli.exe` / `kron-dev.exe` / `kron` / `k
 
 Every candidate is validated with a 2-second `serve-mcp` probe, so a GUI binary named `kron.exe`
 is skipped rather than deadlocking. `kron-cli.exe` is preferred by name because `wails build`
-produces a GUI `kron.exe` too.
+produces a GUI `kron.exe` too. The resolved path is cached for the life of the app (a failed
+resolution is retried later, so you can build the CLI and hit Retry).
+
+Child processes are launched with `CREATE_NO_WINDOW` + `HideWindow`: a double-clicked GUI has no
+console, and without those flags Windows would open a console window per child (visible as
+"several windows pop up when switching to live"). The long-lived `serve-mcp` child writes its
+stderr to `serve-mcp.log` next to the GUI executable — that file is the first place to look when a
+handshake fails.
 
 The CLI binary only needs to be rebuilt when you change the `cmd/kron/serve-mcp/` source tree;
 `wails dev` does not pick up `cmd/kron/` changes automatically (it watches `frontend/wails/`).
