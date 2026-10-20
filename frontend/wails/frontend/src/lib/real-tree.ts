@@ -146,22 +146,22 @@ export async function kronTreeToIntentNodes(
 }
 
 /**
- * Recursive converter. depth is the slug-prefix accumulator so
- * nested children of <slug>/<child> get the right kron_get key
- * (e.g. "g-foo/i-bar"). For the synthetic root depth is "" and
- * we use the node's own slug as-is.
+ * Recursive converter. The wire `slug` is already the full on-disk path
+ * (`auth/jwt`), so `parentSlug` is only a fallback for the degenerate case
+ * where a node arrives without a slug; it must never be prefixed onto a
+ * non-empty slug.
  */
 function convertNode(
     node: McpTreeNode,
     enrichment: Map<string, GetOutput | undefined>,
     parentSlug: string,
 ): IntentNode {
-    // The on-disk slug for this node (full path, with parent
-    // prefix when nested). When parentSlug is non-empty we
-    // concatenate; otherwise the node's own slug is the full
-    // path. Empty slug (synthetic root) is filtered out upstream.
+    // Prefer the wire slug verbatim; fall back to parent + final segment
+    // only when the node has no slug at all.
     const fullSlug =
-        parentSlug === '' ? node.slug : `${parentSlug}/${node.slug || node.name}`;
+        node.slug !== ''
+            ? node.slug
+            : `${parentSlug}/${node.slug || node.name}`;
 
     const kind: IntentKind = node.is_dir ? 'spec' : 'note';
     const status: IntentStatus = mapMcpStatus(node.status);
@@ -217,8 +217,12 @@ function collectLeaves(nodes: McpTreeNode[]): string[] {
     );
     while (stack.length > 0) {
         const {node, parent} = stack.pop()!;
-        const fullSlug =
-            parent === '' ? node.slug : `${parent}/${node.slug || node.name}`;
+        // kron_tree already reports the FULL slug on every node
+        // (`auth/jwt` for a leaf, `auth` for its group — see
+        // mcp-types.ts::TreeNode and tools_schema.go::TreeNode). Do not
+        // concatenate parent + slug again: that produced
+        // `auth/auth/jwt`, whose kron_get always fails.
+        const fullSlug = node.slug !== '' ? node.slug : parent;
         if (node.is_dir) {
             for (const child of node.children ?? []) {
                 stack.push({node: child, parent: fullSlug});

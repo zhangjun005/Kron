@@ -62,6 +62,7 @@ export function IntentTree(props: IntentTreeProps): JSX.Element {
         () => filterTree(data, filter.trim().toLowerCase()),
         [data, filter]
     );
+    const forceOpen = filter.trim() !== '';
 
     return (
         <ScrollArea className="h-full">
@@ -88,7 +89,7 @@ export function IntentTree(props: IntentTreeProps): JSX.Element {
                             </div>
                         ) : (
                             filtered.map((node) => (
-                                <TreeRow key={node.id} node={node} depth={0} demoMode={demoMode}/>
+                                <TreeRow key={node.id} node={node} depth={0} demoMode={demoMode} forceOpen={forceOpen}/>
                             ))
                         )}
                     </div>
@@ -102,9 +103,11 @@ interface TreeRowProps {
     node: IntentNode;
     depth: number;
     demoMode: boolean;
+    /** When a filter is active every matching branch must be visible. */
+    forceOpen: boolean;
 }
 
-function TreeRow({node, depth, demoMode}: TreeRowProps): JSX.Element {
+function TreeRow({node, depth, demoMode, forceOpen}: TreeRowProps): JSX.Element {
     const [open, setOpen] = useState<boolean>(true);
     // Work 1.4.e: per-row IDE-open error state. Cleared on next
     // successful open. Rendered as a tiny destructive line under the
@@ -116,6 +119,15 @@ function TreeRow({node, depth, demoMode}: TreeRowProps): JSX.Element {
     const [demoMessage, setDemoMessage] = useState<string>('');
     const hasChildren = node.children.length > 0;
     const isGroup = node.kind === 'spec' && hasChildren;
+    // While filtering, always expand so a match nested under a group that
+    // the user collapsed earlier is still visible (otherwise the filter
+    // reports matches the user cannot see).
+    const expanded = open || forceOpen;
+    // Directories have no updated_at on the wire; real-tree.ts uses the
+    // epoch as a sentinel, which would render as "57y ago". Treat it as
+    // "no date" instead of showing a bogus one.
+    const updatedMs = new Date(node.updatedAt).getTime();
+    const hasUpdatedAt = Number.isFinite(updatedMs) && updatedMs > 86_400_000;
     const status = statusBadge[node.status];
     const indent = 12 + depth * 18;
 
@@ -177,7 +189,7 @@ function TreeRow({node, depth, demoMode}: TreeRowProps): JSX.Element {
             >
                 <span className="w-4 h-4 flex items-center justify-center text-muted-foreground shrink-0">
                     {hasChildren ? (
-                        open ? (
+                        expanded ? (
                             <ChevronDown className="h-3.5 w-3.5"/>
                         ) : (
                             <ChevronRight className="h-3.5 w-3.5"/>
@@ -228,7 +240,7 @@ function TreeRow({node, depth, demoMode}: TreeRowProps): JSX.Element {
                     )}
                     <span className="hidden md:flex items-center gap-1 text-[11px] text-muted-foreground">
                         {statusDot[node.status]}
-                        {relativeDate(node.updatedAt)}
+                        {hasUpdatedAt ? relativeDate(node.updatedAt) : null}
                     </span>
                     <Badge variant={status.variant} className="text-[10px]">
                         {status.label}
@@ -257,10 +269,10 @@ function TreeRow({node, depth, demoMode}: TreeRowProps): JSX.Element {
                 </div>
             )}
 
-            {hasChildren && open && (
+            {hasChildren && expanded && (
                 <div>
                     {node.children.map((child) => (
-                        <TreeRow key={child.id} node={child} depth={depth + 1} demoMode={demoMode}/>
+                        <TreeRow key={child.id} node={child} depth={depth + 1} demoMode={demoMode} forceOpen={forceOpen}/>
                     ))}
                 </div>
             )}

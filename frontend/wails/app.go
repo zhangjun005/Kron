@@ -18,6 +18,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -795,6 +796,11 @@ func readProjectRegistry(path string) (*projectRegistryDocument, error) {
 		}
 		return nil, fmt.Errorf("wails: read projects.json %q: %w", path, err)
 	}
+	// Windows editors (and PowerShell's `Set-Content -Encoding UTF8` on
+	// PowerShell 5.1) prepend a UTF-8 BOM. encoding/json rejects it with
+	// "invalid character '\ufeff'", so strip it before parsing: the
+	// registry is a portable, user-editable file.
+	data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
 	if err := json.Unmarshal(data, &doc.fields); err != nil {
 		return nil, fmt.Errorf("wails: parse projects.json %q: %w", path, err)
 	}

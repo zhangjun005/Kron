@@ -103,6 +103,13 @@ function App() {
         dataSource === 'live' ? (liveTree ?? []) : tree;
     const showLiveTreeSkeleton: boolean =
         dataSource === 'live' && liveTree === null && liveTreeError === null;
+    // Show the real active project's folder name instead of the literal
+    // "Active project" placeholder. Falls back to the placeholder when the
+    // registry has no current project or holds a bare drive root.
+    const liveProjectName: string = (() => {
+        const parts = (liveProjects?.current ?? '').split(/[\\/]/).filter(Boolean);
+        return parts.length > 0 ? parts[parts.length - 1]! : 'Active project';
+    })();
 
     const refreshLive = useCallback(async (): Promise<void> => {
         setLiveLoading(true);
@@ -180,7 +187,12 @@ function App() {
             const msg = err instanceof Error ? err.message : String(err);
             setLiveTreeError(msg);
             // Keep the previous liveTree on a failed refresh so the
-            // UI does not flicker empty.
+            // UI does not flicker empty — but never leave the mock
+            // counts (11 files / 2 archived) in the left rail while
+            // live data is unavailable: that would present demo data
+            // as if it described the real project.
+            setStats(emptyStats());
+            setLintStats(null);
         } finally {
             setLiveTreeLoading(false);
             setLintLoading(false);
@@ -361,7 +373,7 @@ function App() {
                                 data={displayTree}
                                 filter={filter}
                                 demoMode={dataSource === 'mock'}
-                                projectName={dataSource === 'mock' ? activeMockProject.name : 'Active project'}
+                                projectName={dataSource === 'mock' ? activeMockProject.name : liveProjectName}
                             />
                         )}
                     </div>

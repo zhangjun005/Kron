@@ -111,6 +111,43 @@ Then `wails dev` picks up `kron-cli.exe` automatically. Alternatively, set
 The CLI binary only needs to be rebuilt when you change the `cmd/kron/serve-mcp/` source tree;
 `wails dev` does not pick up `cmd/kron/` changes automatically (it watches `frontend/wails/`).
 
+### Live mode: registry + test project
+
+The GUI starts in **mock** mode. Switch to **live** in Settings → Data source. Live mode needs a
+`projects.json` registry **next to the GUI binary** (`build/bin/projects.json`;
+`$KRON_PROJECTS_JSON_PATH` overrides). Schema is the one `kron register` writes; a UTF-8 BOM is
+tolerated (Windows editors love adding one).
+
+`kron-mcp-test/project` in this repository is the fixture used during merge preparation: two
+intent groups (`auth` / `payments`), real source anchors, and one deliberately dangling anchor
+(`src/broken/orphan.go`) so lint reports `1 error`.
+
+```powershell
+# point the GUI-adjacent registry at the fixture
+Copy-Item kron-mcp-test/install/projects.json frontend/wails/build/bin/projects.json
+
+# or register it through the CLI (writes next to kron-cli.exe, same directory)
+cd kron-mcp-test/project
+..\..\frontend\wails\build\bin\kron-cli.exe register
+```
+
+### Bridge smoke test (no clicking)
+
+`bridge_e2e_test.go` drives the same `App` methods the React side calls — registry read, MCP
+handshake, `kron_tree` / `kron_get` / `kron_lint`, project switch, and the OpenInIDE failure path —
+against a real `kron serve-mcp` subprocess:
+
+```powershell
+$env:KRON_PROJECTS_JSON_PATH = "E:\works\Kron\frontend\wails\build\bin\projects.json"
+go test -tags "desktop production e2e" -run TestAppBridgeE2E -v .
+```
+
+It is behind the `e2e` build tag, so `go vet ./...` and `go test ./...` never touch it.
+
+> Note: mainline `internal/store.ReadProjectsJSON` (CLI / MCP side) does **not** strip a UTF-8 BOM,
+> unlike the GUI bridge. A registry written by PowerShell 5.1 `Set-Content -Encoding UTF8` is
+> readable by the GUI but breaks `kron register` / `kron serve-mcp`.
+
 ## Layout
 
 ```
