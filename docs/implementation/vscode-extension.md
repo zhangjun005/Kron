@@ -23,6 +23,7 @@ initialize。Windows 扩展宿主可将设置指向 `kron.exe` 的绝对路径�
 提示且不启动进程。M4 已通过官方 `@modelcontextprotocol/sdk` 单独启动
 `kron serve-mcp -CWD <workspace-root>`，用 `kron_tree` 提供只读 Explorer 树，并提供刷新命令。
 当前 M4 仅连接第一个 workspace folder；多根 workspace、树节点详情和写操作 UI 仍未实现。
+LSP 语言范围由 `kron.lspLanguages` 配置，默认覆盖主要源码语言和 Markdown。
 
 两条连接都由扩展启动、复用和停止，二者不能互相转发请求。扩展也不直接 import Go 的
 `internal/`，不手写 MCP 或 LSP 的 JSON-RPC。
@@ -91,9 +92,11 @@ assumption 是可被多个 intent 引用的独立文件。界面应先用 `kron_
 
 ## 刷新和多根工作区
 
-每个 workspace folder 独立解析 Kron 根目录，并启动自己的 MCP/LSP 子进程。树节点和 Webview
-消息必须带 workspace 标识，禁止把 A 项目的 slug 发给 B 项目的进程。文件保存、MCP 写成功、
-显式 Refresh 和切回 Webview 时都刷新相关只读数据；不要维护另一份 intent 状态缓存。
+多根 workspace 的目标形态是每个 workspace folder 独立解析 Kron 根目录，并启动自己的 MCP/LSP
+子进程。当前实现只启动第一个 folder，因此其他 folder 暂不提供 Kron 编辑器能力。未来扩展到多根
+时，树节点和 Webview 消息必须带 workspace 标识，禁止把 A 项目的 slug 发给 B 项目的进程。
+文件保存、MCP 写成功、显式 Refresh 和切回 Webview 时都刷新相关只读数据；不要维护另一份 intent
+状态缓存。
 
 ## 验收
 

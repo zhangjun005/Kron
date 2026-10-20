@@ -48,6 +48,28 @@
           "type": "string",
           "default": "kron",
           "description": "Path to the Kron executable. Set an absolute path when kron is not on the extension host PATH."
+        },
+        "kron.lspLanguages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "go",
+            "markdown",
+            "typescript",
+            "javascript",
+            "python",
+            "rust",
+            "java",
+            "c",
+            "cpp",
+            "csharp",
+            "kotlin",
+            "swift",
+            "shellscript"
+          ],
+          "description": "VSCode language IDs that receive Kron hover and definition support."
         }
       }
     }
