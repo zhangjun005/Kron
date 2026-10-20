@@ -188,6 +188,23 @@ function convertNode(
         ? undefined
         : enriched?.intent.source_path;
 
+    // Frontmatter projection for the info card. kron_get returns the full
+    // IntentBody; we surface the fields a reviewer cares about (symbols,
+    // reviewers, assumptions, relations) instead of the raw YAML.
+    const frontmatter = enriched?.intent.frontmatter;
+    const symbols = frontmatter?.symbol;
+    const reviewers = frontmatter?.reviewers;
+    const assumptions = frontmatter?.assumptions?.map((entry) => ({
+        id: entry.id,
+        severity: entry.severity === 'soft' ? ('soft' as const) : ('hard' as const),
+        ...(entry.rationale !== undefined ? {rationale: entry.rationale} : {}),
+        ...(entry.expires_at !== undefined ? {expiresAt: entry.expires_at} : {}),
+        ...(entry.verified_at !== undefined ? {verifiedAt: entry.verified_at} : {}),
+        ...(entry.verified_by !== undefined ? {verifiedBy: entry.verified_by} : {}),
+    }));
+    const references = frontmatter?.references;
+    const dependsOn = frontmatter?.depends_on;
+
     const children: IntentNode[] = (node.children ?? []).map((child) =>
         convertNode(child, enrichment, fullSlug),
     );
@@ -205,6 +222,11 @@ function convertNode(
         // the IntentNode interface exactly.
         ...(summary !== undefined ? {summary} : {}),
         ...(path !== undefined ? {path} : {}),
+        ...(symbols !== undefined && symbols.length > 0 ? {symbols} : {}),
+        ...(reviewers !== undefined && reviewers.length > 0 ? {reviewers} : {}),
+        ...(assumptions !== undefined && assumptions.length > 0 ? {assumptions} : {}),
+        ...(references !== undefined && references.length > 0 ? {references} : {}),
+        ...(dependsOn !== undefined && dependsOn.length > 0 ? {dependsOn} : {}),
         children,
     };
 }

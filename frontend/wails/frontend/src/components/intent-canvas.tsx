@@ -65,33 +65,45 @@ const PAD = 48;
 function layoutTree(root: IntentNode): Layout {
     const nodes: LaidOutNode[] = [];
     const edges: LaidOutEdge[] = [];
-    let rowCursor = 0;
 
-    const visit = (node: IntentNode, depth: number): LaidOutNode => {
+    // Classic two-pass tidy layout: measure each subtree in "slots"
+    // (a leaf is 1 slot; a branch is the sum of its children), then place
+    // children in consecutive slot ranges and center the parent on its own
+    // range. This guarantees that siblings never overlap, including the
+    // tricky case of a leaf sibling next to a multi-leaf branch.
+    const measure = (node: IntentNode): number => {
+        if (node.children.length === 0) return 1;
+        return node.children.reduce((sum, child) => sum + measure(child), 0);
+    };
+
+    const place = (node: IntentNode, depth: number, startSlot: number, slots: number): LaidOutNode => {
         const isBranch = node.children.length > 0;
-        const childLayouts = node.children.map((child) => visit(child, depth + 1));
-        const rawY = isBranch
-            ? (childLayouts[0]!.y + childLayouts[childLayouts.length - 1]!.y) / 2
-            : rowCursor++ * ROW_H;
         const laid: LaidOutNode = {
             node,
             depth,
             x: PAD + depth * COLUMN_W,
-            y: PAD + rawY,
+            y: PAD + (startSlot + slots / 2) * ROW_H,
             isBranch,
         };
         nodes.push(laid);
-        for (const child of childLayouts) edges.push({from: laid, to: child});
+        let childStart = startSlot;
+        for (const child of node.children) {
+            const childSlots = measure(child);
+            const childLaid = place(child, depth + 1, childStart, childSlots);
+            edges.push({from: laid, to: childLaid});
+            childStart += childSlots;
+        }
         return laid;
     };
 
-    const rootLaid = visit(root, 0);
+    const totalSlots = measure(root);
+    const rootLaid = place(root, 0, 0, totalSlots);
     const maxDepth = nodes.reduce((max, n) => Math.max(max, n.depth), rootLaid.depth);
     return {
         nodes,
         edges,
         width: PAD * 2 + maxDepth * COLUMN_W + NODE_W,
-        height: PAD * 2 + Math.max(rowCursor, 1) * ROW_H,
+        height: PAD * 2 + Math.max(totalSlots, 1) * ROW_H,
     };
 }
 
@@ -132,6 +144,39 @@ function matchesFilter(node: IntentNode, query: string): boolean {
 function countIntents(node: IntentNode): number {
     if (node.children.length === 0) return 1;
     return node.children.reduce((sum, child) => sum + countIntents(child), 0);
+}
+
+/** "1 intent" / "3 intents" — the canvas labels groups with this count. */
+function intentsLabel(count: number): string {
+    return `${count} intent${count === 1 ? '' : 's'}`;
+}
+
+/** One row of related-intent chips (references / depends_on). */
+function RelationRow(props: {
+    label: string;
+    slugs: string[];
+    onNavigate: (id: string) => void;
+}): JSX.Element {
+    const {label, slugs, onNavigate} = props;
+    return (
+        <div className="flex flex-wrap items-center gap-1">
+            <span className="text-muted-foreground/70">{label}</span>
+            {slugs.map((slug) => (
+                <button
+                    key={slug}
+                    type="button"
+                    className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] hover:bg-accent hover:text-foreground"
+                    title={`Go to ${slug}`}
+                    onClick={(event): void => {
+                        event.stopPropagation();
+                        onNavigate(slug);
+                    }}
+                >
+                    {slug}
+                </button>
+            ))}
+        </div>
+    );
 }
 
 export function IntentCanvas({data, projectName, filter, selectedId, onSelectedIdChange, focusRequest}: IntentCanvasProps): JSX.Element {
@@ -341,7 +386,7 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
                                     </div>
                                     {laid.isBranch ? (
                                         <div className="text-[10px] text-muted-foreground">
-                                            group · {countIntents(laid.node)} intents
+                                            group · {intentsLabel(countIntents(laid.node))}
                                         </div>
                                     ) : (
                                         <div className="truncate text-[10px] text-muted-foreground">
@@ -365,7 +410,7 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
                             data-intent-panel="true"
                             role="dialog"
                             aria-label={`${selected.node.title} details`}
-                            className="absolute z-20 w-[320px] rounded-xl border border-border bg-popover p-3.5 text-popover-foreground shadow-xl"
+                            className="absolute z-20 w-[360px] max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-popover p-3.5 text-popover-foreground shadow-xl"
                             style={{left: selected.x, top: selected.y + NODE_H + 12}}
                         >
                             <div className="flex items-start gap-2">
@@ -373,7 +418,7 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
                                     <div className="truncate text-sm font-semibold">{selected.node.title}</div>
                                     <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
                                         {selected.isBranch
-                                            ? `${countIntents(selected.node)} intents in this group`
+                                            ? `${intentsLabel(countIntents(selected.node))} in this group`
                                             : selected.node.id}
                                     </div>
                                 </div>
@@ -410,6 +455,90 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
                                     <p className="mt-2 whitespace-pre-wrap break-words text-xs leading-relaxed">
                                         {selected.node.summary ?? 'No description in the body yet.'}
                                     </p>
+
+                                    {selected.node.symbols !== undefined && selected.node.symbols.length > 0 && (
+                                        <div className="mt-2.5">
+                                            <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
+                                                Symbols
+                                            </div>
+                                            <div className="mt-1 flex flex-wrap gap-1">
+                                                {selected.node.symbols.map((symbol) => (
+                                                    <code
+                                                        key={symbol}
+                                                        className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]"
+                                                    >
+                                                        {symbol}
+                                                    </code>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {selected.node.reviewers !== undefined && selected.node.reviewers.length > 0 && (
+                                        <div className="mt-2 text-[11px]">
+                                            <span className="text-muted-foreground/70">Reviewed by </span>
+                                            {selected.node.reviewers.join(', ')}
+                                        </div>
+                                    )}
+
+                                    {selected.node.assumptions !== undefined && selected.node.assumptions.length > 0 && (
+                                        <div className="mt-2.5">
+                                            <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
+                                                Assumptions
+                                            </div>
+                                            <ul className="mt-1 space-y-1">
+                                                {selected.node.assumptions.map((assumption) => (
+                                                    <li
+                                                        key={assumption.id}
+                                                        className="rounded-md border border-border/60 px-2 py-1"
+                                                    >
+                                                        <div className="flex items-center gap-1.5 text-[11px]">
+                                                            <code className="font-mono">{assumption.id}</code>
+                                                            <span
+                                                                className={cn(
+                                                                    'rounded px-1 text-[9px]',
+                                                                    assumption.severity === 'hard'
+                                                                        ? 'bg-destructive/15 text-destructive'
+                                                                        : 'bg-amber-400/15 text-amber-300',
+                                                                )}
+                                                            >
+                                                                {assumption.severity}
+                                                            </span>
+                                                            {assumption.expiresAt !== undefined && (
+                                                                <span className="text-muted-foreground/70">
+                                                                    expires {assumption.expiresAt}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        {assumption.rationale !== undefined && (
+                                                            <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
+                                                                {assumption.rationale}
+                                                            </p>
+                                                        )}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+
+                                    {(selected.node.references !== undefined || selected.node.dependsOn !== undefined) && (
+                                        <div className="mt-2.5 space-y-1 text-[10px]">
+                                            {selected.node.references !== undefined && selected.node.references.length > 0 && (
+                                                <RelationRow
+                                                    label="references"
+                                                    slugs={selected.node.references}
+                                                    onNavigate={onSelectedIdChange}
+                                                />
+                                            )}
+                                            {selected.node.dependsOn !== undefined && selected.node.dependsOn.length > 0 && (
+                                                <RelationRow
+                                                    label="depends_on"
+                                                    slugs={selected.node.dependsOn}
+                                                    onNavigate={onSelectedIdChange}
+                                                />
+                                            )}
+                                        </div>
+                                    )}
                                 </>
                             )}
 

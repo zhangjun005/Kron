@@ -153,7 +153,7 @@ Explorer 主面板不再渲染文件浏览器式的列表树，而是**左→右
 | 布局 | root → 分组目录 → 意图叶子，**从左到右**；分组节点显示目录名与意图数，叶子显示意图标题与 slug |
 | 背景 | 点阵（radial-gradient），随画布平移 |
 | 平移 | 拖拽空白处移动整张画布；`Reset view` 复位。不做缩放（未拍板） |
-| 节点点击 | 在节点**下方**展开信息卡（标题 / slug / 状态 / 更新时间 / 正文描述）；点卡外或右上角 × 关闭 |
+| 节点点击 | 在节点**下方**展开信息卡：标题 / slug / 状态 / 更新时间 / 正文描述 / **符号、Reviewers、Assumptions（severity + rationale + expires_at）、references / depends_on**；点卡外或右上角 × 关闭；relations 芯片可点击跳到目标节点 |
 | 数据 | 仍然只来自 `kron_tree` + 每叶 `kron_get`；画布不写任何文件、不调写工具 |
 | 只读边界 | 移除了 mock 模式的 `Reset` / `New intent` 演示按钮——GUI 不提供 intent 的增删改；编辑在用户 IDE 里做 |
 | 过滤 | 顶部 Filter 命中时高亮，未命中的节点淡出（保留结构，不重排） |
@@ -166,3 +166,8 @@ Explorer 主面板不再渲染文件浏览器式的列表树，而是**左→右
 - `serve-mcp` 的 stderr 写入 GUI 可执行文件旁的 `serve-mcp.log`（windowsgui 子系统没有可用 stderr），握手失败可直接查日志。
 
 > 已知限制：画布没有缩放，宽项目需要拖拽查看；节点很多时不做虚拟化（当前项目规模够用）。
+
+### 8.2 测试夹具（live 模式）
+
+`kron-mcp-test/project`（gitignored）由 [`frontend/wails/scripts/seed-test-project.ps1`](../../frontend/wails/scripts/seed-test-project.ps1)
+生成，覆盖完整 frontmatter schema：`symbol` / `status` / `reviewers` / `assumptions`（B-3 registry 文本与 per-intent severity）/ `references` / `depends_on`，三层树、源码与 Markdown 锚点，外加**有意设计**的 1 error + 1 warning 供错误/警告渲染测试。

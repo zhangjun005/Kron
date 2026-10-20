@@ -4,6 +4,16 @@
 export type IntentKind = 'adr' | 'rfc' | 'spec' | 'note';
 export type IntentStatus = 'draft' | 'review' | 'accepted' | 'stale';
 
+/** Per-intent assumption reference (B-3). Shared text lives in .kron/assumptions/. */
+export interface IntentAssumption {
+    id: string;
+    severity: 'hard' | 'soft';
+    rationale?: string;
+    expiresAt?: string;
+    verifiedAt?: string;
+    verifiedBy?: string;
+}
+
 export interface IntentNode {
     id: string;
     title: string;
@@ -19,6 +29,13 @@ export interface IntentNode {
     // row opens the file in the user's IDE (work 1.4.e "edit-jump-IDE"
     // component, RFC §3.1).
     path?: string;
+    // Frontmatter projection shown in the canvas info card. Populated from
+    // kron_get in live mode; absent for synthetic group nodes.
+    symbols?: string[];
+    reviewers?: string[];
+    assumptions?: IntentAssumption[];
+    references?: string[];
+    dependsOn?: string[];
     children: IntentNode[];
 }
 
