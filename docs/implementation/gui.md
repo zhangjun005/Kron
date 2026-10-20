@@ -174,3 +174,26 @@ Explorer 主面板不再渲染文件浏览器式的列表树，而是**左→右
 
 `testdata/kron-project/`（**已入库**，供 GUI / MCP / LSP / CLI 各模块共用）由 [`frontend/wails/scripts/seed-test-project.ps1`](../../frontend/wails/scripts/seed-test-project.ps1)
 生成，覆盖完整 frontmatter schema：`symbol` / `status` / `reviewers` / `assumptions`（B-3 registry 文本与 per-intent severity）/ `references` / `depends_on`，三层树、源码与 Markdown 锚点，外加**有意设计**的 1 error + 1 warning 供错误/警告渲染测试。
+
+### 8.3 发布态模拟环境（`kron-mcp-test/`，2026-10-20 约定）
+
+**约定**：以后所有「真实发布态」集成测试都在 gitignored 的 `kron-mcp-test/` 进行；环境由[`frontend/wails/scripts/seed-release-env.ps1`](../../frontend/wails/scripts/seed-release-env.ps1) 从 HEAD 重建（可随时删掉重来）。
+
+布局是**一体化**的——GUI、CLI/MCP、registry、被测项目放在一起，直接双击运行，不模拟 `%LOCALAPPDATA%\Programs\kron` / PATH-only 的用户安装：
+
+```
+kron-mcp-test/
+├── app/                 ← 启动这里
+│   ├── Kron-GUI.exe     ← GUI（raw Wails build）
+│   ├── kron.exe         ← CLI + serve-mcp + serve-lsp
+│   ├── projects.json    ← 由 `kron register` 写在 exe 旁
+│   └── serve-mcp.log
+└── project/             ← testdata/kron-project 的副本（含 .kron/）
+```
+
+关键点：
+
+- **`projects.json` 必须和两个 exe 在一起**：GUI 桥读**自己 exe 目录**下的 registry；`kron serve-mcp` 不带 `-CWD` 时走 [`internal/store.ProjectsJSONPath`](../../internal/store/project_registry.go)（同样读 exe 旁的 json），再回退 `os.Getwd()`。
+- 因此 GUI 与 CLI 必须在**同一目录**（否则两份 registry 各说各话）；Windows 大小写不敏感，`Kron.exe` 与 `kron.exe` 不能共存，故 GUI 命名 `Kron-GUI.exe`、CLI 保留发布名 `kron.exe`。
+- **验证脚本**：[`verify-mcp-registry.ps1`](../../frontend/wails/scripts/verify-mcp-registry.ps1) 用 [`mcp-probe`](../../frontend/wails/scripts/mcp-probe/main.go)（Go 手写 stdio 客户端）在「cwd 为无关目录、无 `-CWD`」条件下调 `kron_list`，要求从 exe 旁 registry 解析出 8 条 intent；并把 registry 移走做负向对照（必须失败）。
+- 已验证：GUI 双击（cwd=`app`）→ Live 树正常，spawn 的是 `app\kron.exe serve-mcp -CWD project`；MCP 无 `-CWD` 仍能引用 json；`kron lint` 与 fixture 一致（1 error + 1 warning）。
