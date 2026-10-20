@@ -147,22 +147,31 @@ func (a *App) GetKronInfo() KronInfo {
 
 // ListMCPTools returns the list of MCP tool names the GUI is expected to
 // expose in the overview panel. In work 1.3 / 1.4 this is hard-coded; the
-// live list lives in ListMCPToolsLive.
+// live list lives in ListMCPToolsLive (always prefer that one for display).
+//
+// The names below mirror cmd/kron/serve-mcp/tools_schema.go on master. When
+// that registry changes, this list must follow — it exists only so the mock
+// mode can render a plausible tool inventory without spawning a subprocess.
 func (a *App) ListMCPTools() []string {
 	return []string{
+		"kron_init",
+		"kron_add",
 		"kron_list",
 		"kron_get",
-		"kron_impact",
-		"kron_density",
-		"kron_relations",
-		"kron_stale",
-		"kron_assume_check",
-		"kron_lint",
-		"kron_tree",
-		"kron_add",
 		"kron_update",
 		"kron_delete",
 		"kron_restore",
+		"kron_lint",
+		"kron_tree",
+		"kron_impact",
+		"kron_intent_density",
+		"kron_stale",
+		"kron_assume_check",
+		"kron_assume_list",
+		"kron_assume_get",
+		"kron_assume_create",
+		"kron_assume_update",
+		"kron_assume_delete",
 	}
 }
 

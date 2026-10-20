@@ -39,6 +39,11 @@ Wails 把 `App` 结构体的**导出方法**作为 Go ↔ TS 桥。每个方法�
 
 ### 3.1 `ListProjectsLive()` 设计 (1.4.d)
 
+> **已实现，但与本节描述不同（2026-10-19 合并时标注）**：`kron_list_projects` MCP tool **不存在**，
+> 主仓从未注册过它。实际实现是 Go 端**直读** `projects.json`（路径：`KRON_PROJECTS_JSON_PATH` >
+> 可执行文件同目录），项目切换时原子写回并重启 `serve-mcp`。以本文末尾
+> 「Wails follow-up: live dashboard and project switching」为准；本节保留为 1.4.d 设计原稿。
+
 **目的**: GUI 顶部 / 侧栏显示"已注册项目"列表, 让用户看到机器上所有 Kron 项目 (类似 VSCode "Recent" / "Open Folder" 体验)。
 
 **调用链**:
@@ -84,13 +89,14 @@ type ProjectEntry struct {
 
 | MCP tool | 用途 | 阶段 |
 |---|---|---|
-| `kron_list_projects` | 多项目注册表 (路径 + 时间戳) | 1.4.d (本轮新增) |
 | `kron_tree` | 单项目意图目录树 | 1.4.c 已用 |
 | `kron_get` | 意图详情 (按需) | 1.4.c 预留 |
-| `kron_lint` | 锚点 + frontmatter 校验 | 后续 (健康度聚合阶段再用) |
-| `kron_impact` / `kron_density` / `kron_stale` / `kron_assume_check` | AI 主动消费 | 后续 |
+| `kron_lint` | 锚点 + frontmatter 校验 | 1.4.d 已用（lint 计数） |
+| `kron_impact` / `kron_intent_density` / `kron_stale` / `kron_assume_check` | AI 主动消费 | 后续 |
+| ~~`kron_list_projects`~~ | ~~多项目注册表~~ | **未实现**：主仓无此 tool；实际直读 `projects.json`（见 §3.1 顶部标注与末尾 follow-up） |
 
-> 本轮**只**新增 `kron_list_projects` 的 GUI 调用, 不动主仓 internal/store / serve-mcp Go 代码.
+> 本轮**不**改主仓 internal/store / serve-mcp Go 代码。`projects.json` 是 GUI 的**项目清单**（决定打开哪些项目），
+> 不属 intent 数据；intent / assumption 仍然只经 `serve-mcp`。
 
 ---
 

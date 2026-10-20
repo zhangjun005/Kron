@@ -25,6 +25,11 @@ Wails 是跨项目的整体预览器。它回答“有哪些项目、各项目�
 项目从 GUI 中关闭时停止该子进程。GUI 只通过 MCP SDK 调用工具，不能 import Go 的
 `internal/` 或调用 `serve-lsp`。
 
+**唯一例外是 `projects.json`**：它是 GUI 的**项目清单**（决定打开哪些项目、当前项目是哪个），
+不属于 intent / assumption 数据。GUI 直接读它、在用户切换项目时原子写回，然后以
+`-CWD <project-root>` 重启 `serve-mcp`；intent / assumption 仍然 100% 经 `serve-mcp`。
+Go ↔ TS 桥方法与所用 MCP 工具清单见 [`gui.md`](./gui.md)。
+
 首批界面使用只读工具：`kron_list`、`kron_get`、`kron_tree`、`kron_impact`、
 `kron_intent_density`、`kron_stale`、`kron_lint`、`kron_assume_list`、
 `kron_assume_get` 和 `kron_assume_check`。MCP 的返回值是协议边界：GUI 不自行扫描
