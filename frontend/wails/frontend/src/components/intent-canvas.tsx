@@ -23,7 +23,7 @@ import {
     X,
 } from 'lucide-react';
 import {cn} from '@/lib/utils';
-import type {IntentNode, IntentStatus} from '@/lib/mock';
+import type {IntentNode, IntentStatus} from '@/lib/intent-types';
 
 interface IntentCanvasProps {
     data: IntentNode[];

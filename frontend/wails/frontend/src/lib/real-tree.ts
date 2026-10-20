@@ -1,10 +1,10 @@
 // Kron GUI — kron_tree → IntentNode adapter (work 1.4.c).
 //
-// The mock IntentNode shape (src/lib/mock.ts) was designed for the
+// The IntentNode shape (src/lib/intent-types.ts) was designed for the
 // 1.3-era demo and carries fields kron_tree does not surface
 // (kind, updatedAt, summary). To keep the existing IntentTree
 // component (src/components/intent-tree.tsx) untouched, we adapt
-// the real wire shape into the mock shape here, fetching kron_get
+// the real wire shape into the UI shape here, fetching kron_get
 // for each leaf to fill in updatedAt and a body-derived summary.
 //
 // Mapping rules (documented; the iron rule is "always round-trip,
@@ -19,23 +19,23 @@
 //                          projection. See follow-up 1.4.d.)
 //   IntentNode.status   = mapMcpStatus(TreeNode.status)
 //   IntentNode.updatedAt= from kron_get.frontmatter.updated_at
-//                          (ISO 8601 string, as the mock expects)
+//                          (ISO 8601 string)
 //   IntentNode.summary  = first non-empty paragraph of kron_get.body
 //   IntentNode.children = recursively converted
 //
-// We do not touch src/lib/mock.ts so the mock fallback path keeps
+// The conversion never mutates the wire payload, so the
 // working unchanged.
 
-import type {IntentKind, IntentNode, IntentStatus} from '@/lib/mock';
+import type {IntentKind, IntentNode, IntentStatus} from '@/lib/intent-types';
 import type {GetOutput, TreeNode as McpTreeNode, TreeOutput} from '@/lib/mcp-types';
 import {CallMCPTool} from '../../wailsjs/go/main/App';
 
 /**
- * Convert MCP status string to the mock's status enum.
+ * Convert MCP status string to the UI status enum.
  *
  * MCP / kron_get frontmatter uses:
  *   "draft" | "active" | "superseded"
- * The mock UI uses:
+ * The UI uses:
  *   "draft" | "review" | "accepted" | "stale"
  *
  * Mapping:
@@ -45,7 +45,7 @@ import {CallMCPTool} from '../../wailsjs/go/main/App';
  *                                  state lands on the wire we
  *                                  collapse active→accepted)
  *   "superseded"  -> "stale"     (closest semantic match in the
- *                                  mock palette)
+ *                                  UI palette)
  *   anything else -> "draft"     (defensive default; never throws)
  */
 export function mapMcpStatus(raw: string | undefined): IntentStatus {
@@ -67,7 +67,7 @@ export function mapMcpStatus(raw: string | undefined): IntentStatus {
  * readable snippet. Returns undefined when the body has no such
  * line, so the consumer can choose whether to render a summary row.
  *
- * Why "first line, not first paragraph": the mock summaries are
+ * Why "first line, not first paragraph": intent summaries are
  * one-liners ("Single static binary, fast cold start, …"). A
  * paragraph slice would surface the long first body paragraph and
  * blow out the row width.
@@ -84,7 +84,7 @@ export function summaryFromBody(body: string | undefined): string | undefined {
         if (trimmed.startsWith('>')) continue;
         if (trimmed.startsWith('-') || trimmed.startsWith('*')) continue;
         if (trimmed.startsWith('```')) continue;
-        // Cap at 120 chars to match the mock's typical summary width.
+        // Cap at 120 chars for the canvas card width.
         if (trimmed.length > 120) {
             return trimmed.slice(0, 117) + '…';
         }
@@ -94,13 +94,13 @@ export function summaryFromBody(body: string | undefined): string | undefined {
 }
 
 /**
- * Recursively convert a kron_tree TreeNode into the mock's
+ * Recursively convert a kron_tree TreeNode into the UI's
  * IntentNode shape, fetching kron_get for each leaf to fill in
  * updatedAt and summary.
  *
  * The synthetic root (slug="", name="", is_dir=true) is unwrapped:
  * its children become the top-level IntentNode[] returned to the
- * caller. This matches the mock's array-of-top-level-groups shape.
+ * caller. This matches the UI's array-of-top-level-groups shape.
  *
  * Per-leaf kron_get calls are bounded by Promise.allSettled so one
  * failing fetch does not poison the whole tree. Leaves that fail

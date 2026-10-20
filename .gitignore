@@ -21,6 +21,10 @@ go.work.sum
 
 # Project-specific
 .kron/
+# …except the committed integration fixture. Other modules (GUI / MCP / LSP /
+# CLI tests) share this project, so its .kron data must be versioned.
+!testdata/kron-project/.kron/
+!testdata/kron-project/.kron/**
 KRON/.kron-context/
 kron-internal/
 

@@ -6,7 +6,6 @@ export function CallMCPTool(arg1:string,arg2:string):Promise<string>;
 
 export function GetKronInfo():Promise<main.KronInfo>;
 
-export function ListMCPTools():Promise<Array<string>>;
 
 export function ListMCPToolsLive():Promise<main.ListMCPToolsLiveResult>;
 

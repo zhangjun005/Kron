@@ -10,10 +10,6 @@ export function GetKronInfo() {
   return window['go']['main']['App']['GetKronInfo']();
 }
 
-export function ListMCPTools() {
-  return window['go']['main']['App']['ListMCPTools']();
-}
-
 export function ListMCPToolsLive() {
   return window['go']['main']['App']['ListMCPToolsLive']();
 }

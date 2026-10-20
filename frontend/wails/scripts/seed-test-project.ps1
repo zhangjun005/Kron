@@ -1,4 +1,8 @@
-# Seeds the GUI live-mode test project (default: kron-mcp-test/project).
+# Seeds the shared integration fixture at testdata/kron-project.
+#
+# The fixture is committed to git so every module (GUI, MCP, LSP, CLI tests)
+# can use the same project. This script is the reproducible source of truth for
+# its content; re-running it overwrites the fixture.
 #
 # The fixture deliberately exercises the *whole* intent schema, not just
 # created_by/updated_at:
@@ -12,15 +16,11 @@
 #     something to render: 1 error (dangling anchor) + 1 warning (severity
 #     override soft-vs-hard on auth/session).
 #
-# The directory is gitignored on purpose (RFC 2026-10-15 §2.1: the E2E test
-# workspace is external to the main repo), so this script is the source of
-# truth for the fixture content.
-#
 # Usage:
 #   powershell -NoProfile -File frontend/wails/scripts/seed-test-project.ps1
 #   powershell -NoProfile -File ... -Root D:\tmp\kron-fixture
 param(
-    [string]$Root = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')) 'kron-mcp-test\project')
+    [string]$Root = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')) 'testdata\kron-project')
 )
 
 $ErrorActionPreference = 'Stop'

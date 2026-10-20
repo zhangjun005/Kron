@@ -3,18 +3,18 @@
 // Bridge end-to-end test for the Wails GUI.
 //
 // It drives the same App methods the React frontend calls, against a real
-// `kron serve-mcp` subprocess and a real registry file. Run it from
-// frontend/wails/ (the bridge resolves the CLI relative to the cwd):
+// `kron serve-mcp` subprocess and the shared integration fixture committed at
+// <repo>/testdata/kron-project. Run it from frontend/wails/:
 //
-//	$env:KRON_PROJECTS_JSON_PATH = "E:\works\Kron\frontend\wails\build\bin\projects.json"
 //	go test -tags "desktop production e2e" -run TestAppBridgeE2E -v .
 //
-// The registry must point at a Kron project (kron-mcp-test/project is the
-// fixture used during merge preparation).
+// No environment setup is required: the test writes a throwaway projects.json
+// in t.TempDir() and points the bridge at it via KRON_PROJECTS_JSON_PATH.
 package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,9 +22,24 @@ import (
 )
 
 func TestAppBridgeE2E(t *testing.T) {
-	if os.Getenv("KRON_PROJECTS_JSON_PATH") == "" {
-		t.Skip("set KRON_PROJECTS_JSON_PATH to the GUI-adjacent projects.json")
+	fixture, err := filepath.Abs(filepath.Join("..", "..", "testdata", "kron-project"))
+	if err != nil {
+		t.Fatalf("resolve fixture path: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(fixture, ".kron", "intents")); err != nil {
+		t.Skipf("integration fixture missing at %s: %v", fixture, err)
+	}
+
+	registry := filepath.Join(t.TempDir(), "projects.json")
+	body := fmt.Sprintf(
+		`{"current_project":%q,"projects":[{"path":%q}]}`,
+		fixture, fixture,
+	)
+	if err := os.WriteFile(registry, []byte(body), 0o644); err != nil {
+		t.Fatalf("write temp registry: %v", err)
+	}
+	t.Setenv("KRON_PROJECTS_JSON_PATH", registry)
+
 	app := NewApp()
 	t.Cleanup(func() {
 		app.mcpMu.Lock()

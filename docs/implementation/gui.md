@@ -32,7 +32,6 @@ Wails 把 `App` 结构体的**导出方法**作为 Go ↔ TS 桥。每个方法�
 | 方法 | 入参 | 返回 | 阶段 | 备注 |
 |---|---|---|---|---|
 | `GetKronInfo()` | — | `KronInfo` | 1.3 skeleton | 静态元数据; 不调子进程 |
-| `ListMCPTools()` | — | `[]string` | 1.3 skeleton | **硬编码** 13 tool 名 (mock 模式用);**不**调子进程 |
 | `ListMCPToolsLive()` | — | `ListMCPToolsLiveResult` | 1.4.b | spawn `kron serve-mcp` + 三消息握手 + 缓存 serverInfo / tools |
 | `CallMCPTool(name, argsJSON)` | tool 名 + JSON 字符串 | `string` (首个 content block 的 text) | 1.4.c | 通用 `tools/call`; 复用 1.4.b 的子进程 |
 | **`ListProjectsLive()`** | — | `ListProjectsLiveResult` | **1.4.d (本 RFC 范围)** | 走 `kron_list_projects` MCP tool, 复用现有子进程 |
@@ -129,10 +128,10 @@ This section supersedes the 1.4.d deferrals above for the Wails GUI only.
 
 - `ListProjectsLive()` reads the RFC 2026-10-13 `projects.json` beside the GUI executable. This is the documented GUI exception for the registry file; it does not import `internal/` or call a tool that the MCP server does not register.
 - When `current_project` is absent or invalid, the GUI displays the most recently opened registered project as the default without writing the registry. A user click on **Switch** transactionally updates `current_project` and `last_opened`, then restarts `serve-mcp` with `-CWD <project-root>`.
-- The live explorer and counts come from `kron_tree`; lint counts come from `kron_lint`. They describe the selected project only. If there is no active project, no mock counts or tree are presented as live data.
+- The live explorer and counts come from `kron_tree`; lint counts come from `kron_lint`. They describe the selected project only. If there is no active project, the main pane shows the no-active-project state instead of any placeholder data.
 - The Projects view reports registry loading/read errors and switch errors. The main pane distinguishes loading, no active project, connection/tree errors, and an empty real tree. Refresh retries the live calls.
 - `KRON_PROJECTS_JSON_PATH` is an optional local override for development. Production uses the executable directory as the registry location.
-- Mock mode has separate frontend-only project fixtures: switching samples changes the displayed tree, counts, and lint summary without reading or writing `projects.json` or starting MCP. It includes an empty project state and expandable groups, and is strictly read-only (no add/reset affordances).
+- There is no mock/demo data source any more: the GUI always reads `projects.json` and calls `kron serve-mcp`. The shared integration fixture at `testdata/kron-project/` is opened like any other registered project.
 
 ## 7 与 RFC §9.1 交付物对应
 
@@ -155,11 +154,11 @@ Explorer 主面板不再渲染文件浏览器式的列表树，而是**左→右
 | 平移 | 拖拽空白处移动整张画布；`Reset view` 复位。不做缩放（未拍板） |
 | 节点点击 | 在节点**下方**展开信息卡：标题 / slug / 状态 / 更新时间 / 正文描述 / **符号、Reviewers、Assumptions（severity + rationale + expires_at）、references / depends_on**；点卡外或右上角 × 关闭；relations 芯片可点击跳到目标节点 |
 | 数据 | 仍然只来自 `kron_tree` + 每叶 `kron_get`；画布不写任何文件、不调写工具 |
-| 只读边界 | 移除了 mock 模式的 `Reset` / `New intent` 演示按钮——GUI 不提供 intent 的增删改；编辑在用户 IDE 里做 |
+| 只读边界 | GUI 不提供 intent 的增删改（无 `Reset` / `New intent` 之类入口）；编辑在用户 IDE 里做 |
 | 过滤 | 顶部 Filter 命中时高亮，未命中的节点淡出（保留结构，不重排） |
 | 跨意图关系 | `references`（软）画**虚线细箭头**、`depends_on`（硬）画**实线粗箭头**；两者都是节点间的横向关系，不是父子层级边；端点不在当前树中的关系不画；画布左下角有图例 |
 | 左侧栏 | `FILES` 是**完整递归树**（文件夹可展开/折叠到叶子，叶子点击选中并居中画布）；`ARCHIVED` 汇总 stale 叶子；`ASSUMPTIONS` 是独立的假设区 |
-| 假设展示 | 数据来自 `kron_assume_list`（live）或内置 mock；行内显示 id + `hard/soft` 徽章，展开后显示 registry 文本、`expires_at` / `verified_at` / `verified_by`，以及 **referenced by** 的意图芯片（从树的 per-intent `assumptions[]` 反推），点击芯片跳到画布节点 |
+| 假设展示 | 数据来自 `kron_assume_list`；行内显示 id + `hard/soft` 徽章，展开后显示 registry 文本、`expires_at` / `verified_at` / `verified_by`，以及 **referenced by** 的意图芯片（从树的 per-intent `assumptions[]` 反推），点击芯片跳到画布节点 |
 
 ### 8.1 子进程调度（弹窗 / 探测）
 
@@ -171,5 +170,5 @@ Explorer 主面板不再渲染文件浏览器式的列表树，而是**左→右
 
 ### 8.2 测试夹具（live 模式）
 
-`kron-mcp-test/project`（gitignored）由 [`frontend/wails/scripts/seed-test-project.ps1`](../../frontend/wails/scripts/seed-test-project.ps1)
+`testdata/kron-project/`（**已入库**，供 GUI / MCP / LSP / CLI 各模块共用）由 [`frontend/wails/scripts/seed-test-project.ps1`](../../frontend/wails/scripts/seed-test-project.ps1)
 生成，覆盖完整 frontmatter schema：`symbol` / `status` / `reviewers` / `assumptions`（B-3 registry 文本与 per-intent severity）/ `references` / `depends_on`，三层树、源码与 Markdown 锚点，外加**有意设计**的 1 error + 1 warning 供错误/警告渲染测试。
