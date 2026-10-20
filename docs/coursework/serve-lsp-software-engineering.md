@@ -2,7 +2,9 @@
 
 > 课程用途：记录 `feat/serve-lsp` 分支从需求边界、设计决策、异常处理、接口契约到验证的工程过程。本文结合分支现有实现与测试撰写；“已验证”只表示有对应测试或本地检查证据，不代表所有编辑器环境均已验收。
 >
-> 实现规格以 [`docs/implementation/lsp.md`](../implementation/lsp.md) 为准；架构边界以 [`architecture.md`](../abstractDesign/architecture.md) 为准；重要决策见 [`2026-10-07-lsp-sdk.md`](../rfc/2026-10-07-lsp-sdk.md) 与 [`2026-10-12-lsp-decisions.md`](../rfc/2026-10-12-lsp-decisions.md)。
+> 实现规格以 [`docs/implementation/lsp.md`](../implementation/lsp.md) 为准；架构边界以 [`architecture.md`](../abstractDesign/architecture.md) 为准；重要决策见 [`2026-10-07-lsp-sdk.md`](../rfc/archive/2026-10-07-lsp-sdk.md) 与 [`2026-10-12-lsp-decisions.md`](../rfc/archive/2026-10-12-lsp-decisions.md)（均已于 2026-10-19 归档）。
+>
+> **2026-10-19 合并后订正**：分支已合入 `master`（合并提交 `22348eb`）。两处与最终交付不一致：① CLI `trash` / `restore` 已按架构 §1.1 最小命令集**回退**（`8fef1e6`），仅在 MCP 保留 `kron_delete` / `kron_restore`；② `didOpen` / `didChange` / `didClose` 仍是 no-op，而 `initialize` 声明了文本同步——该缺口在 [`lsp.md`](../implementation/lsp.md) §0 / §2.4 与 [`merge-issues-2026-10-19.md`](../implementation/merge-issues-2026-10-19.md) 中记录。本文以下保留分支时点的记录，相关行已就地标注。
 
 ## 1. 项目目标与课程侧重点
 
@@ -28,7 +30,8 @@
 - 初始化并声明文本同步、hover、definition 能力。
 - 从源文件锚点定位 intent，hover 展示意图摘要，definition 跳转到意图 Markdown 文件。
 - VSCode 扩展启动 LSP 子进程，并提供只读意图树（MCP 子进程能力）。
-- CLI `trash` / `restore` 与 store 写入串行化属于本分支的相关交付，也纳入分支工作记录；它们不是 LSP 的接口依赖。
+- store 写入串行化属于本分支的相关交付，也纳入分支工作记录；它不是 LSP 的接口依赖。
+- CLI `trash` / `restore` 曾随本分支实现，但**合并时已回退**（见文首订正），不计入最终交付。
 
 ### 3.2 系统边界
 
@@ -59,7 +62,7 @@
 | FR-4 | 文本打开/变更/关闭通知按声明的同步能力被接受 | Must / 期望型 | 编辑器不会因已声明却未实现的通知而超时断连 |
 | FR-5 | VSCode 扩展按工作区启动可配置路径的 Kron LSP 子进程 | Should / 期望型 | 默认可发现 `kron`，配置 `kron.serverPath` 可覆盖；启动错误可诊断 |
 | FR-6 | VSCode 意图树通过 MCP 只读加载 | Should / 期望型 | 可刷新并展示意图结构；服务错误可反馈且不影响 LSP 子进程 |
-| FR-7 | CLI 提供 intent 软删除和恢复 | Should / 期望型 | `trash` / `restore` 状态变化可重复验证；非法状态给出可理解错误 |
+| FR-7 | CLI 提供 intent 软删除和恢复（**合并时回退，未交付**） | 原 Should / 期望型 | 实现与测试曾入分支；因违反架构 §1.1「CLI 只四命令」被撤（`8fef1e6`），软删/恢复保留在 MCP `kron_delete` / `kron_restore` |
 | FR-8 | 同一 intent 的跨 Writer/进程变更串行化 | Must / 期望型 | 并发互补更新无丢失；等待锁的子进程能在锁释放后完成 |
 
 ## 5. 质量需求（每项功能至少两个方面）
@@ -74,7 +77,7 @@
 | FR-4 文本同步 | 通知处理不应进行全量昂贵扫描或阻塞协议循环 | 声明的同步通知均有处理入口，异常请求不导致服务退出 | 能力契约检查、通知测试、长序列稳定性测试 | v1.3 每次查询读盘减少缓存一致性复杂度，但牺牲部分热路径性能 |
 | FR-5 扩展启动 | 子进程应在数秒内启动；启动失败应快速反馈 | 可配置二进制路径；工作区切换需正确传入根目录 | TS 编译、Extension Host smoke、缺少二进制/无工作区测试 | 自动发现更易用但环境差异大；保留显式路径设置以提高可控性 |
 | FR-6 意图树 | 树刷新应在一般项目规模下数秒内完成（目标） | MCP 不可用时提供错误状态，不应使 LSP 能力失效 | 扩展 smoke、刷新失败模拟、人工检查树节点 | 独立 MCP 子进程增加资源占用，但保持协议层职责隔离 |
-| FR-7 软删除/恢复 | 单文件操作目标 <100ms | 不覆盖已存在目标；非法状态明确失败；操作可恢复 | CLI 单测、状态边界测试、临时目录集成测试 | 拒绝覆盖降低数据丢失风险，但可能要求用户先手动处理冲突 |
+| FR-7 软删除/恢复 | 单文件操作目标 <100ms | 不覆盖已存在目标；非法状态明确失败；操作可恢复 | CLI 单测、状态边界测试、临时目录集成测试（**该行已不适用**：CLI 入口已回退，能力留在 MCP） | 拒绝覆盖降低数据丢失风险，但可能要求用户先手动处理冲突 |
 | FR-8 并发变更 | 无竞争时锁开销目标 <20ms；竞争时等待而非忙循环 | 同 intent 更新串行化；进程异常后 OS 锁释放 | 并发测试、子进程锁测试、Windows/macOS/Linux CI | 串行锁降低并发吞吐，但避免更新丢失；不同 intent 可并行 |
 
 ## 6. 异常处理与边界规则
@@ -91,7 +94,7 @@
 | MCP 子进程失败 | 非核心辅助功能故障 | 意图树显示失败并允许重试；LSP hover/definition 独立可用 | 扩展故障隔离测试 |
 | 同一 intent 被多个进程同时写入 | 并发边界 | 使用稳定 sidecar OS 锁顺序执行，避免丢失更新 | 跨 Writer/子进程锁测试、三平台 CI |
 | 不同 intent 并发写入 | 并发边界 | 按 slug 独立锁，不要求全局串行 | 并发测试 |
-| `trash` 目标已存在或恢复源不存在 | 状态冲突 | 拒绝破坏性覆盖，返回可理解错误 | CLI 状态测试 |
+| `trash` 目标已存在或恢复源不存在 | 状态冲突 | 拒绝破坏性覆盖，返回可理解错误 | CLI 状态测试（**已不适用**：CLI 入口 2026-10-19 回退） |
 
 ## 7. 团队项目接口契约
 
@@ -120,14 +123,14 @@
 
 | 验证层级 | 方法 | 当前可引用证据 | 状态/限制 |
 |---|---|---|---|
-| 单元测试 | hover、definition、CLI 状态和 store 并发边界 | `cmd/kron/serve-lsp/*_test.go`、`cmd/kron/cli/cli_test.go`、`internal/store/writer_test.go` | 分支包含对应测试；全仓测试需在干净环境完整重跑 |
+| 单元测试 | hover、definition、store 并发边界 | `cmd/kron/serve-lsp/*_test.go`（29 项）、`internal/store/writer_test.go` | 2026-10-19 随合并复核通过；CLI 测试已随 `trash`/`restore` 回退移除 |
 | 集成测试 | LSP 请求经真实 parser/store 返回结果 | `serve-lsp` 测试与 `.d-test` 手工驱动器 | 覆盖协议核心路径；编辑器内 hover/F12 尚未完整确认 |
 | 客户端冒烟 | VSCode Extension Host 启动 LSP/MCP 并刷新意图树 | `docs/tracking/homofluctus.md` 记录启动、激活及初次刷新 | 树节点交互、刷新后行为及多工作区未完全验收 |
-| 静态检查 | `go vet ./...` | 最近一次本地执行退出码为 0 | Go telemetry 权限警告仍输出；环境需进一步清理后重跑 |
-| 格式检查 | `gofmt -l .` | 最近一次没有文件名输出 | 通过 |
-| 全量测试 | `go test ./...` | 最近一次显示 CLI、LSP 包通过 | 命令未完整结束，不能记为全通过；须在干净可写的 Go telemetry/cache 环境重跑 |
+| 静态检查 | `go vet ./...` | 2026-10-19 本地执行无输出（退出码 0） | 通过 |
+| 格式检查 | `gofmt -l .` | 2026-10-19 复核：Windows `core.autocrlf=true` 下该命令会把全仓 CRLF 文件全部列出（假阳性）；同一文件转 LF 后 gofmt 判定干净 | 本机该命令**不能**作为格式证据；须在 LF 工作区或 CI 跑 |
+| 全量测试 | `go test ./...` | 2026-10-19 完整跑完，所有包 `ok`（`serve-mcp` ≈33s；`TestCacheEffect` 已改为 `KRON_RUN_CACHE_EFFECT=1` 才运行） | 通过 |
 | 平台验证 | Windows/macOS/Linux store 测试 | `.github/workflows/store-platform.yml` | 以远端 CI 结果为准；本地未验证三平台 |
-| 差异检查 | `git diff --check` | 记录于工作过程 | 文档修改后通过；提交前应再次确认 |
+| 差异检查 | `git diff --check` | 2026-10-19 提交前复核 | 通过 |
 
 **课程验收判定规则**：只有命令完整退出码为 0，或明确记录人工验收步骤及结果，才标记为通过；启动了但未结束、仅部分包返回、CI 尚未完成，均标记为待验证。
 
@@ -140,6 +143,8 @@
 
 ## 10. 交付记录与未完成项
 
-分支已交付 LSP 核心、VSCode 扩展骨架和只读意图树、CLI 软删除/恢复、同意图跨进程锁及平台测试工作流。当前证据仍显示以下事项不能标为完成：完整 `go test ./...` 结果、最新主分支基线刷新、hover/F12 的最终人工验收、树节点交互/多工作区验收及 Marketplace 发布前的许可证/账号确认。
+分支已交付 LSP 核心（hover / definition / 生命周期，29 项测试）、VSCode 扩展骨架与只读意图树、同意图跨进程锁及平台测试工作流；原 CLI 软删除/恢复已按架构边界回退（`8fef1e6`）。分支已合入 `master`（`22348eb`）。
+
+当前证据仍显示以下事项不能标为完成：LSP 未保存文档同步缺口（`didOpen` / `didChange` / `didClose` 仍是 no-op，见 [`lsp.md`](../implementation/lsp.md) §0）、hover / F12 的编辑器内人工验收、树节点交互与多工作区验收、入库 `.vsix` 早于 `kron.lspLanguages` 改动需重新打包、Marketplace 发布前的许可证/账号确认。
 
 本文件是课程过程记录，不会把上述未完成事项隐去，也不改变项目的架构或运行契约。

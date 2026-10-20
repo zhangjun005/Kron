@@ -146,7 +146,7 @@ Kron 的核心是**数据格式 + 协议**，不是一个二进制。同一份�
 > **关键原则**：
 > 1. **协议访问层 = 3 个**（CLI / MCP / LSP）。Kron 主仓 `cmd/kron/` 下 commit 这 3 个。
 > 2. **客户端层在 Kron 主仓 `frontend/`**（2026-10-09 拍板）。VSCode 扩展 / Wails / Cursor 客户端**源码**进主仓 `frontend/vscode/` / `frontend/wails/`；**不**直接 import `internal/`、**不** import 协议访问层。`.gitignore` 已覆盖 build 产物（`frontend/*/node_modules/` / `frontend/*/dist/` 等），不污染 git。
-> 3. **(2026-10-08 拍板)** **MCP 进程寿命 = stdio 父进程寿命**。每个 client (VSCode 扩展 / Wails GUI / AI 工具) 各自 spawn 一个 `kron serve-mcp`, 各自复用, 各自 kill。**一个项目可能同时存在 N 个 MCP 实例** (N = client 数), 并发安全靠 `internal/store` 文件锁 (`flock` per-file), **不**靠 MCP 协议层 / OS 进程隔离 / 单例 daemon。**不**开独立 GUI 接口层——GUI 是**用户**用的, 不是**协议**。详见 [`docs/rfc/2026-10-08-mcp-lifecycle.md`](../rfc/2026-10-08-mcp-lifecycle.md)。
+> 3. **(2026-10-08 拍板)** **MCP 进程寿命 = stdio 父进程寿命**。每个 client (VSCode 扩展 / Wails GUI / AI 工具) 各自 spawn 一个 `kron serve-mcp`, 各自复用, 各自 kill。**一个项目可能同时存在 N 个 MCP 实例** (N = client 数), 并发安全靠 `internal/store` 文件锁 (`flock` per-file), **不**靠 MCP 协议层 / OS 进程隔离 / 单例 daemon。**不**开独立 GUI 接口层——GUI 是**用户**用的, 不是**协议**。详见 [`docs/rfc/2026-10-08-mcp-lifecycle.md`](../rfc/archive/2026-10-08-mcp-lifecycle.md)。
 > 4. **LSP 是编辑器侧 hover 预览专用**（`textDocument/hover` + `textDocument/definition`）。VSCode 扩展既走 serve-mcp（业务能力）也起 serve-lsp 子进程（编辑器 UI 集成）。
 > 5. **客户端层互相不依赖**。Wails **不** import VSCode 扩展；VSCode 扩展**不** import Wails。它们**独立**通过协议访问层拿能力。
 
@@ -354,8 +354,8 @@ func (s *Store) WriteIntent(caller string, slug string, intent *model.Intent) er
 | 导入迁移、`config.toml` 字段扩展 | v1 仅 `intents_dir` | — |
 | `kron add` stdin / 外部模板支持 | 脚手架职责，复杂输入留给编辑器或 GUI | — |
 | `kron lint` `--path` 自定义扫描根 | 全仓 + 黑名单足够 | — |
-| **Wails GUI** (客户端层) | **(2026-10-08 变更) 移到客户端层；多项目概览 + 意图树预览 (轻)，不进 serve-gui 子进程；详细见 [`docs/rfc/2026-10-07-gui-stack.md`](../../docs/rfc/2026-10-07-gui-stack.md) §1.1 (SUPERSEDED) + 待重写 [`docs/rfc/2026-10-08-gui-layer.md`](../../docs/rfc/2026-10-08-gui-layer.md)** | — |
-| **LSP server** (`kron serve-lsp`) | **stub (3-of-3 协议访问层骨架, 包 `lsp`); 实施按 [`docs/rfc/2026-10-07-lsp-sdk.md`](../../docs/rfc/2026-10-07-lsp-sdk.md) §3 + [`docs/rfc/2026-10-08-lsp-client.md`](../../docs/rfc/2026-10-08-lsp-client.md) 拍板; 加 `go.lsp.dev/protocol` 走 explicit approval** | — |
+| **Wails GUI** (客户端层) | **(2026-10-08 变更) 移到客户端层；多项目概览 + 意图树预览 (轻)，不进 serve-gui 子进程；详细见 [`docs/rfc/2026-10-09-gui-ide-plan.md`](../rfc/2026-10-09-gui-ide-plan.md) (草案) + [`docs/implementation/gui-client.md`](../implementation/gui-client.md)** | — |
+| **LSP server** (`kron serve-lsp`) | **v1.3 已实现并合入 master**（hover / definition + 生命周期，8 个方法 override；当前状态与已知缺口见 [`docs/implementation/lsp.md`](../implementation/lsp.md) §0）。原「v1 范围外 / stub」定位已由 [`docs/rfc/archive/2026-10-07-lsp-sdk.md`](../rfc/archive/2026-10-07-lsp-sdk.md) §3 + [`docs/rfc/archive/2026-10-08-lsp-client.md`](../rfc/archive/2026-10-08-lsp-client.md) 拍板推进落地 | — |
 | **VSCode 扩展** (客户端层) | **客户端层；在 Kron 主仓 `frontend/vscode/`；拼 JSON 走 serve-mcp (与 AI 共用) + spawn serve-lsp 拿 hover/go-def** | — |
 | **Cursor / 其他 VSCode 兼容 IDE** | **(2026-10-08 新增) 复用 VSCode 扩展集成；客户端层独立项目** | — |
 | **hard-delete / GC** | 软删除 + `.kron/.trash/` 足够 | — |

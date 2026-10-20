@@ -1,11 +1,14 @@
 # 分支实现状态记录（2026-10-18）
 
+> **2026-10-19 后续**：`feat/serve-lsp` 已合入 `master`（合并提交 `22348eb`），本文所述「合并前仍需处理」已按合并记录处置；
+> `feat/wails-skeleton` 仍独立，未合并。当前 LSP 状态以 [`lsp.md`](./lsp.md) §0 为准。
+
 本文记录对两个伙伴分支的只读验收结果。记录基于远程分支当前提交，不代表这些分支已合并到 `master`。
 
 ## `feat/serve-lsp`
 
 - 最新提交：`7c3c030 feat(serve-lsp): v1.3 hardening — textDocumentSync, errors.Is, logf/notify, stdio smoke`
-- 与当前 `origin/master` 有共同历史；相对主线为 31 个领先提交、9 个落后提交。
+- 与当时 `origin/master` 有共同历史；相对主线为 **9 个领先提交、31 个落后提交**（原文写成「31 领先 / 9 落后」，方向写反，2026-10-19 订正）。
 - 已实现 LSP 服务端：`initialize`、`shutdown`、`exit`、`textDocument/hover`、`textDocument/definition`，以及 `didOpen`、`didChange`、`didClose` 协议处理。
 - 锚点解析通过 `parser.AnchorsForFile` 读取当前文件，按光标所在行匹配 `@kron:intent <slug>`。
 - Hover 返回 intent slug、status 和正文首段；正文最多 200 个 rune，并保持 UTF-8 有效。

@@ -205,6 +205,9 @@ A (requirements.md)  ──►  D (business.md)  ──►  B (architecture.md)
 > **2026-10-09 LSP/客户端层初始化**: `cmd/kron/serve-lsp/` (3-of-3 协议访问层骨架, 包 `lsp`, **不**含 go.lsp.dev/protocol — 该 dep 仍需 explicit approval) + `frontend/` (客户端层实施目录, 2026-10-09 修订: **进主仓**, 各客户端在 `frontend/wails/` / `frontend/vscode/` 子目录; 不再是 README 占位). LSP 实施 + 客户端骨架填充由 `docs/process/new-access-layer.md` §3 流程触发, **不**预排"v1.x 阶段".
 >
 > **2026-10-09 客户端方案 RFC**: [`docs/rfc/2026-10-09-gui-ide-plan.md`](../rfc/2026-10-09-gui-ide-plan.md) 新建 (草案). 拍板 GUI = Wails 整体预览 only / IDE = VSCode 扩展功能最全 (LSP+sidebar+webview) / 关系图走 shadcn 原生 Chart (v0.14+) / **客户端层进主仓 `frontend/`** (2026-10-09 修订: 不再独立建仓, 各客户端在 `frontend/wails/` / `frontend/vscode/` 子目录). 旧 RFC `2026-10-07-gui-stack.md` 头部状态**保留** SUPERSEDED.
+>
+> **2026-10-19 RFC 收拾 + LSP 状态收口**: 9 份已完成 RFC 移入 [`docs/rfc/archive/`](../rfc/archive/README.md)（其中 `2026-10-04-mcp-sdk-{selection,adoption}` 是 2026-10-09 已登记但本次才实际移入）；2 份作废 RFC 软删入 [`.deprecated/2026-10-19-rfc-cleanup/`](../../.deprecated/2026-10-19-rfc-cleanup/)（逐字节重复的 `2026-10-12-lsp-decision-points`、决定被推翻的 `2026-10-16-cli-soft-delete`）。活跃 RFC 与状态真相入口见 [`docs/rfc/README.md`](../rfc/README.md)。
+> 同时订正上文 **2026-10-09 LSP/客户端层初始化** 条中已被取代的判断：`serve-lsp` 已不是骨架，`go.lsp.dev/protocol` 已入 `go.mod` 且批准依据为 `2026-10-07-lsp-sdk.md` §3（[`pending-decisions.md`](../process/pending-decisions.md) 标记 Resolved）；LSP 当前状态只在 [`docs/implementation/lsp.md`](../implementation/lsp.md) §0 声明。
 
 ---
 

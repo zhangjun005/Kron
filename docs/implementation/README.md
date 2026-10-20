@@ -40,8 +40,8 @@
   工具列表里 `kron_stale` 默认 90 天的描述写在 `lint.StaleDaysDefault` 之外无引用。
 - `ide-interaction.md` — `textDocument/publishDiagnostics` 标 `⏳ v1.4+` 但 `kron_lint` A-class
   已可发（`lint.Run` 输出 + 客户端渲染），缺位更准。
-- `lsp.md` — 全文件是 v1.3 拍板下的实施假设；`serve-lsp` 实际**未**实施（`cmd/kron/serve-lsp/`
-  目录不存在）；本文件描述的 hover/definition handler 是设计稿，不是落地代码。
+- `lsp.md` — 已重写为**现行实施规格**（2026-10-19）：`cmd/kron/serve-lsp/` 已实现并合入 master（29 个测试），
+  文件描述的 hover/definition handler 就是落地代码。实现状态与已知缺口以该文件 §0 为准。
 - `testing.md` — `os.Chdir(tmp)` 写法在 Go 1.27 上不阻塞但与 testify best practice 冲突；
   CI 门禁表里漏 `go vet ./...`（architecture.md 铁律 #4）。
 
@@ -54,8 +54,8 @@
 
 | 文档 | 状态 | 触发条件 |
 |---|---|---|
-| [`lsp.md`](./lsp.md) | ✅ 活跃 | LSP 职责、位置语义与实施边界；实际协议实现仍须走 `new-access-layer.md` |
+| [`lsp.md`](./lsp.md) | ✅ 活跃（**唯一 LSP 状态入口**） | LSP 职责、位置语义、实施边界与 §0 实现状态 |
 | [`vscode-extension.md`](./vscode-extension.md) | ✅ 活跃 | `.vsix` 职责、MCP/LSP 双进程与人类编辑闭环 |
 | [`gui-client.md`](./gui-client.md) | ✅ 活跃 | Wails 整体预览职责与 MCP 只读边界 |
 | `mcp.md` (MCP 协议实现细节) | 🔜 待重写 | 与 `lsp.md` 同批——按 `docs/process/new-internal-api.md` 流程触发 |
-| `status-2026-10-09.md` (现状快照) | ✅ 活跃 | internal + CLI/MCP/LSP 适配情况 + 协议层硬约束；user 2026-10-09 拍板 |
+| `status-2026-10-09.md` (现状快照) | 🗒️ **历史快照**（2026-10-09，非现状） | internal + CLI/MCP/LSP 适配情况 + 协议层硬约束；LSP 章节已过期，现状看 `lsp.md` §0 |

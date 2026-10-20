@@ -1,22 +1,37 @@
 # LSP Access Layer
 
 > Source of truth (architecture): [`docs/abstractDesign/architecture.md`](../abstractDesign/architecture.md) §〇 铁律 + §一 访问层
-> Source of truth (tech selection): [`docs/rfc/2026-10-07-lsp-sdk.md`](../rfc/2026-10-07-lsp-sdk.md)
-> Source of truth (client layer boundary): [`docs/rfc/2026-10-08-lsp-client.md`](../rfc/2026-10-08-lsp-client.md)
+> Source of truth (tech selection): [`docs/rfc/2026-10-07-lsp-sdk.md`](../rfc/archive/2026-10-07-lsp-sdk.md)
+> Source of truth (client layer boundary): [`docs/rfc/2026-10-08-lsp-client.md`](../rfc/archive/2026-10-08-lsp-client.md)
 > Source of truth (caller-injection change): [`docs/tracking/homofluctus.md`](../tracking/homofluctus.md) 10-12 决策点
 
 This document is the LSP **access layer** specification. The Go entry point is `cmd/kron/serve-lsp/` (package `lsp`); the package implements the LSP server-side protocol over stdio.
 
 ---
 
+## 0 实现状态 (2026-10-19)
+
+本文件是 LSP 实现状态的**唯一入口**；其他文档只引用本文件，不重复声明 LSP 状态。
+
+| 项 | 现状 |
+|---|---|
+| 代码 | **已实现并合入 master**（`d234e0a` → `7c3c030` → 合并 `22348eb`）。`cmd/kron/serve-lsp/` 6 个文件，override 8 个方法 |
+| 已验证 | `go test ./cmd/kron/serve-lsp/` 29 项全绿；`go vet ./...` 干净；`frontend/vscode` 的 `tsc` 通过 |
+| 缺口 ① 文档同步 | `Initialize` 声明 `OpenClose=true` / `Change=Full`，但 `didOpen` / `didChange` / `didClose` 不保存文本（见 §2.4）。**当前实际语义 = 每次请求从磁盘重读**；未保存的编辑内容不参与 hover/definition |
+| 缺口 ② 无真 stdio e2e | 只有进程内 `TestRun_EmptyStdin` / `TestRun_UnknownArgs`；没有像 [`serve-mcp/e2e/`](../../cmd/kron/serve-mcp/e2e/e2e_stdio_test.go) 那样 spawn 真实二进制、跑 Content-Length 握手的测试 |
+| 缺口 ③ 无信号处理 | `Run()` 用 `context.Background()`（`cmd/kron/serve-lsp/main.go:53`），stdin 不关闭时 Ctrl+C 不退出；`serve-mcp` 已有 `signal.NotifyContext` |
+| 未验收 | 未在真实编辑器 Extension Host 中人工验收 hover / F12；无 Marketplace 发布 |
+
+---
+
 ## 1 能力清单 (capabilities v1.3)
 
-The server registers 5 LSP methods. All other methods are explicitly "not implemented" by embedding `protocol.UnimplementedServer`.
+The server overrides 8 LSP methods. All other methods are explicitly "not implemented" by embedding `protocol.UnimplementedServer`.
 
 | Method | Direction | Capability advertised in `Initialize` |
 |---|---|---|
 | `initialize` | request | n/a (handshake) |
-| `initialized` | notification | (no-op, required by spec) |
+| `initialized` | notification | (not overridden; `UnimplementedServer` no-ops it, required by spec) |
 | `shutdown` | request | n/a |
 | `exit` | notification | n/a |
 | `textDocument/didOpen` | notification | `TextDocumentSync.OpenClose = true` |
@@ -190,6 +205,7 @@ This three-field shape mirrors the design rationale in [`cmd/kron/serve-mcp/serv
 | `textDocument/hover` | `TestHover_NonNotFoundError_LogsAndReturnsNil` | frontmatter corruption → logf fires, h = nil |
 | `textDocument/hover` | `TestHover_RealParserEndToEnd` | real parser + store + render path |
 | `textDocument/hover` | `TestHover_RealParser_NotOnAnchor` | real parser off-anchor |
+| `textDocument/hover` | `TestHover_RealParser_AbsolutePath_NormalisedFilePath` | absolute input path → repo-relative anchor `FilePath` |
 | `textDocument/hover` | `TestHover_LongBodyTruncated` | 300-CJK body → "…" suffix, UTF-8 valid |
 | `textDocument/hover` | `TestHover_RepeatedInvocation` | 1000× stability (P2-4) |
 | `textDocument/definition` | `TestDefinition_OnAnchor` | fakeAnchors path |
@@ -199,9 +215,10 @@ This three-field shape mirrors the design rationale in [`cmd/kron/serve-mcp/serv
 | `shutdown` | `TestShutdown_NoError` | clean shutdown |
 | `exit` | `TestExit_NotifiesZero` | `exitFn(0)` invoked |
 | `exit` | `TestExit_NoExitFn_NoError` | zero-value `exitFn` does not panic |
+| (internal) | `TestAnchorsForFile_NormalisedFilePath` | 绝对路径输入 → 仓库相对 `FilePath` |
 | (internal) | `TestSummarizeBody_*` (5 tests in `hover_test.go`) | helper unit tests |
 
-**Total: 28 tests** as of v1.3 (vs. 8 at v1.3 stub). All pass under `go test ./cmd/kron/serve-lsp/...`.
+**Total: 29 tests** as of v1.3（由 `serve-lsp` stub 时期的 0 项增至 29 项）。All pass under `go test ./cmd/kron/serve-lsp/...`.
 
 ### 4.1 Test fixtures
 
@@ -216,10 +233,10 @@ Direct struct construction (`&server{...}`) is used for tests that need a custom
 
 ## 5 RFC 链接 + 决策点
 
-- **SDK selection**: [`docs/rfc/2026-10-07-lsp-sdk.md`](../rfc/2026-10-07-lsp-sdk.md) — `go.lsp.dev/protocol v1.0.1` + `go.lsp.dev/jsonrpc2 v1.0.1` + `go.lsp.dev/uri v1.0.1`.
-- **Client layer split**: [`docs/rfc/2026-10-08-lsp-client.md`](../rfc/2026-10-08-lsp-client.md) — VSCode extension (lives in `frontend/extensions/vscode/`) consumes `kron serve-lsp` and `kron serve-mcp` as stdio subprocesses. This server does not import any client-layer concern.
+- **SDK selection**: [`docs/rfc/archive/2026-10-07-lsp-sdk.md`](../rfc/archive/2026-10-07-lsp-sdk.md) — `go.lsp.dev/protocol v1.0.1` + `go.lsp.dev/jsonrpc2 v1.0.1` + `go.lsp.dev/uri v1.0.1`. RFC 已归档，§3 拍板已兑现。
+- **Client layer split**: [`docs/rfc/archive/2026-10-08-lsp-client.md`](../rfc/archive/2026-10-08-lsp-client.md) — VSCode extension (lives in `frontend/vscode/`) consumes `kron serve-lsp` and `kron serve-mcp` as stdio subprocesses. This server does not import any client-layer concern. 现行边界见 [`architecture.md`](../abstractDesign/architecture.md) §〇·五·1 + `AGENTS.md` §7。
 - **caller-injection change**: [`docs/tracking/homofluctus.md`](../tracking/homofluctus.md) 10-12 决策点 §7 — new access layer code does not call `model.WithCaller`; `internal/` does not read ctx caller.
-- **Dep approval status**: `go.lsp.dev/protocol` and friends are listed in `go.mod` but flagged in [`docs/process/pending-decisions.md`](../process/pending-decisions.md) (P2-3) as awaiting explicit human approval per AGENTS.md §3 red line. Removal is NOT planned — the PR keeps the deps and the marker; reverting costs more than the marker.
+- **Dep approval status**: **已解决**。`go.lsp.dev/*` 三个依赖已入 `go.mod`；批准依据是 [`docs/rfc/archive/2026-10-07-lsp-sdk.md`](../rfc/archive/2026-10-07-lsp-sdk.md) §3，[`docs/process/pending-decisions.md`](../process/pending-decisions.md) 的 `LSP-SDK-DEP` 条目已标记 Resolved。
 
 ## 6 开发边界
 

@@ -43,7 +43,7 @@ internal/ API 改动 PR 必填 §"调用方清单" / §"RFC 链接"
 
 - [ ] `cmd/kron/cli/`
 - [ ] `cmd/kron/serve-mcp/`
-- [ ] `cmd/kron/serve-lsp/` (3-of-3 协议访问层, 当前 stub; 实施按 `docs/rfc/2026-10-07-lsp-sdk.md` + `docs/rfc/2026-10-08-lsp-client.md`)
+- [ ] `cmd/kron/serve-lsp/` (3-of-3 协议访问层; v1.3 已实现 hover / definition + 生命周期，当前状态见 `docs/implementation/lsp.md` §0)
 - [ ] **不适用** (本 PR 不动访问层 — 解释: ____)
 
 ## internal/ 接口面 (新加 / 改 API 时必填)
