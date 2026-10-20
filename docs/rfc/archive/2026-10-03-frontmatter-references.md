@@ -4,7 +4,7 @@
 
 | 字段 | 值 |
 |---|---|
-| **状态** | **已落地 (Implemented) + 已归档 (2026-10-06 移入 `docs/rfc/archive/`)** — commit `a373828 feat(frontmatter): add references + depends_on per RFC 2026-10-03` (2026-10-03)；后续 `ea186a8 feat(serve-mcp): polish tools_list_get + relations edge cases` 打磨边缘 case。本 RFC 顶栏更新滞后，参考 [`../2026-10-04-mcp-sdk-adoption.md` §10 第 350 行](../2026-10-04-mcp-sdk-adoption.md) 的归档标注。 |
+| **状态** | **已落地 (Implemented) + 已归档 (2026-10-06 移入 `docs/rfc/archive/`)** — commit `a373828 feat(frontmatter): add references + depends_on per RFC 2026-10-03` (2026-10-03)；后续 `ea186a8 feat(serve-mcp): polish tools_list_get + relations edge cases` 打磨边缘 case。本 RFC 顶栏更新滞后，参考 [`../2026-10-04-mcp-sdk-adoption.md` §10 第 350 行](./2026-10-04-mcp-sdk-adoption.md) 的归档标注。 |
 | **作者** | AI assistant, 经 zh-jun 委托 |
 | **创建日期** | 2026-10-03 |
 | **目标版本** | v1.2 — **已落地** (2026-10-03) |
@@ -34,7 +34,7 @@ Kron 的 intent 之间目前**没有结构化的引用关系字段**。意图之
 
 ### 1.3 现实证据: `references-snapshot.md` 自身的反面教材
 
-[`docs/process/references-snapshot.md`](../../.deprecated/2026-10-08-doc-cleanup/references-snapshot.md) 是一个**因为 markdown 链接不可靠而被迫存在的文件** (注: 该文件 2026-10-08 软删, 本反面教材论述**仍**有效):
+[`docs/process/references-snapshot.md`](../../../.deprecated/2026-10-08-doc-cleanup/references-snapshot.md) 是一个**因为 markdown 链接不可靠而被迫存在的文件** (注: 该文件 2026-10-08 软删, 本反面教材论述**仍**有效):
 
 - 2026-09-26 生成的快照,**§4.1 / §4.2 连续两个小节标记"待重生成"**
 - §五 提出"写个 regen 脚本"——5 周后仍未落地,只能手工跑 `rg`
@@ -237,7 +237,7 @@ depends_on:                                  # 硬依赖 —— 理解本 intent
 
 ### 7.1 不加字段,只让 markdown 链接被 `kron_impact` 解析
 
-**否决理由**:与 `references-snapshot.md` (2026-10-08 软删入 [`.deprecated/`](../../.deprecated/2026-10-08-doc-cleanup/references-snapshot.md)) 反面教材同样的根本问题——markdown 链接**不是结构化**:
+**否决理由**:与 `references-snapshot.md` (2026-10-08 软删入 [`.deprecated/`](../../../.deprecated/2026-10-08-doc-cleanup/references-snapshot.md)) 反面教材同样的根本问题——markdown 链接**不是结构化**:
 - `[auth/jwt](auth/jwt.md)` 与 `[other label](auth/jwt.md)` 工具无法分辨"是否有意图引用"
 - 链接 target 改名 / 文件移动 → silent broken,直到 lint 显式跑
 - AI 生成时容易忘(正文链接 vs 字段,后者机器可消费)
@@ -272,9 +272,9 @@ depends_on:                                  # 硬依赖 —— 理解本 intent
 
 ## 9. 参考 (References)
 
-- [`docs/abstractDesign/intent-structure.md`](../abstractDesign/intent-structure.md) §三 (frontmatter schema 真理)
-- [`docs/abstractDesign/architecture.md`](../abstractDesign/architecture.md) §〇铁律 #6, §七 (范围外清单)
-- [`docs/process/migrate.md`](../process/migrate.md) (本 RFC 必须遵循的流程)
-- [`docs/process/references-snapshot.md`](../../.deprecated/2026-10-08-doc-cleanup/references-snapshot.md) (本 RFC 引用的现实反面教材, 2026-10-08 软删)
-- [`docs/process/lint-rule.md`](../process/lint-rule.md) (新增 lint 规则时的流程)
+- [`docs/abstractDesign/intent-structure.md`](../../abstractDesign/intent-structure.md) §三 (frontmatter schema 真理)
+- [`docs/abstractDesign/architecture.md`](../../abstractDesign/architecture.md) §〇铁律 #6, §七 (范围外清单)
+- [`docs/process/migrate.md`](../../process/migrate.md) (本 RFC 必须遵循的流程)
+- [`docs/process/references-snapshot.md`](../../../.deprecated/2026-10-08-doc-cleanup/references-snapshot.md) (本 RFC 引用的现实反面教材, 2026-10-08 软删)
+- [`docs/process/lint-rule.md`](../../process/lint-rule.md) (新增 lint 规则时的流程)
 - 历史对话: agent-transcripts/359581c1...jsonl L111-112 (前次提议 references/depends_on 的实现,后因 off-limits 未落地)

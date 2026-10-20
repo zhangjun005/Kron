@@ -2,7 +2,8 @@
 
 | 字段 | 值 |
 |---|---|
-| **状态** | **待组长拍板**（§二/§三 已按铁律执行，仅需知悉） |
+| **状态** | **待组长拍板 → 决策已全部落地 + 已归档 (2026-10-19)**：§1 `go.lsp.dev/*` 依赖入 `go.mod`（批准依据见 [`pending-decisions.md`](../../process/pending-decisions.md) 的 LSP-SDK-DEP Resolved 条）；§2 `parser.AnchorsForFile` 已实开（`4a2781d`）；LSP v1.3 已合入 master。本文件仅作历史决策记录。 |
+| **归档** | 2026-10-19 — 移入 `docs/rfc/archive/`；当前实施看 [`docs/implementation/lsp.md`](../../implementation/lsp.md) |
 | **负责人** | @HomoFluctus |
 | **分支** | `feat/serve-lsp` |
 | **目标版本** | v1.3 |

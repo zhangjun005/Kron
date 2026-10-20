@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| **状态** | **草案 (2026-10-08, zhangjun005 拍板启动)** |
+| **状态** | **草案 (2026-10-08, zhangjun005 拍板启动) → 已实施 + 已归档 (2026-10-19)**：客户端层分工已进 [`architecture.md`](../../abstractDesign/architecture.md) §〇·五·1 + `AGENTS.md` §7；`serve-lsp` 与 `frontend/vscode/` 已合入 master。本文件仅作历史决策记录。 |
 | **作者** | AI assistant, 经 zhangjun005 委托 |
 | **创建日期** | 2026-10-08 |
 | **目标版本** | v1.3 (与 `2026-10-07-lsp-sdk.md` 同步) |
@@ -211,7 +211,7 @@ func (s *server) anchorSlugAt(td *protocol.TextDocumentPositionParams) (string, 
 - **新**访问层代码 (含本 RFC 拍板的 `serve-lsp`) **不**调 `model.WithCaller` 注入
 - `internal/` **不**依赖 ctx 上的 caller key 做行为分支
 - 原因: `context.Context` 注入身份属性**不便于开发** (调试栈不直观 / 单元测试需额外包装 / 类型安全弱)
-- 详见 [`docs/abstractDesign/architecture.md`](../abstractDesign/architecture.md) §2.3
+- 详见 [`docs/abstractDesign/architecture.md`](../../abstractDesign/architecture.md) §2.3
 
 **实施影响**: `cmd/kron/serve-lsp/main.go` **不**写 `ctx = model.WithCaller(ctx, model.CallerLSP)`, 直接 `cmd.Context()` 传入 `store.Load` / `parser.AnchorsForFile`. `ctx` 仍保留**用于取消 / 超时传播** (与 store/parser 函数签名兼容).
 

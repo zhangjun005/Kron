@@ -2,19 +2,19 @@
 
 | 字段 | 值 |
 |---|---|
-| **状态** | **已拍板 (2026-10-14, zhangjun005 拍板定稿:不预设 `version`/`settings` 子节;精简版 3.5 天;取代 multi-project-registry §2.2;待 PR 实施)** |
+| **状态** | **已拍板 (2026-10-14) → 已实施 + 已归档 (2026-10-19)**：精简版 schema（`current_project` + `projects[{path, added_at, last_opened}]`，无 `version`/`settings`）已随 `33de13e` / `3cfc7d8` / `84cf93c` / `c4ba92a` 落地。本文件仅作历史决策记录。 |
 | **作者** | AI assistant, 经 zhangjun005 委托 |
 | **创建日期** | 2026-10-14 |
 | **目标版本** | v1.3+ |
-| **实施时机** | 与 [`2026-10-13-multi-project-registry.md`](./2026-10-13-multi-project-registry.md) 同步实施（最后发布时再做）|
-| **补充** | [`2026-10-13-multi-project-registry.md` §2.2](./2026-10-13-multi-project-registry.md)（projects.json 基本结构 — **本文拍板的最终版本取代**）|
+| **实施时机** | 与 [`2026-10-13-multi-project-registry.md`](../2026-10-13-multi-project-registry.md) 同步实施（最后发布时再做）|
+| **补充** | [`2026-10-13-multi-project-registry.md` §2.2](../2026-10-13-multi-project-registry.md)（projects.json 基本结构 — **本文拍板的最终版本取代**）|
 | **取代** | multi-project-registry.md §2.2 + 撤回本文档之前 16:30 那版的 `version` / `settings` 占位 |
 
 ---
 
 ## 1 动机
 
-[`2026-10-13-multi-project-registry.md` §2.2](./2026-10-13-multi-project-registry.md) 拍板了 `projects.json` 的**最小** schema。但**没**拍：
+[`2026-10-13-multi-project-registry.md` §2.2](../2026-10-13-multi-project-registry.md) 拍板了 `projects.json` 的**最小** schema。但**没**拍：
 
 1. **CLI / MCP / LSP / GUI 的配置字段**放哪？`config.toml` 架构 §3.5 拍板**只**放 `intents_dir`, 那"其他配置"**放哪**？
 2. **schema 将来扩充**时的兼容策略（forward + backward）？
@@ -118,7 +118,7 @@ WriteProjectsJSON(path, registry):
 
 ### 2.4 原子写
 
-走 `internal/store/writer.go:writeFileAtomic` 既有模式（[`writer.go:478-503`](../../internal/store/writer.go)）：
+走 `internal/store/writer.go:writeFileAtomic` 既有模式（[`writer.go:478-503`](../../../internal/store/writer.go)）：
 
 - 临时文件 `.projects.json.tmp-<rand>` → `f.Sync()` → `os.Rename`
 - 同一目录, 同一文件系统, `rename` 原子
@@ -126,7 +126,7 @@ WriteProjectsJSON(path, registry):
 
 ### 2.5 跨平台路径获取
 
-走 [`2026-10-13-multi-project-registry.md` §2.1](./2026-10-13-multi-project-registry.md) 已拍板的"`os.Executable()` 同目录"：
+走 [`2026-10-13-multi-project-registry.md` §2.1](../2026-10-13-multi-project-registry.md) 已拍板的"`os.Executable()` 同目录"：
 
 | OS | 路径 |
 |---|---|
@@ -136,11 +136,11 @@ WriteProjectsJSON(path, registry):
 
 **不**走 `KRON_PROJECTS_PATH` env。**不**走 `~/.config/kron/`。**不**走 `%APPDATA%`。
 
-理由：单文件可移植 (拷 U 盘 / 移动硬盘整体带走)，符合 GUI 1-zip-装一切 ([`2026-10-13-gui-distribution-manual-install.md` §2.1](./2026-10-13-gui-distribution-manual-install.md))。
+理由：单文件可移植 (拷 U 盘 / 移动硬盘整体带走)，符合 GUI 1-zip-装一切 ([`2026-10-13-gui-distribution-manual-install.md` §2.1](../2026-10-13-gui-distribution-manual-install.md))。
 
 ### 2.6 GUI 暴露面
 
-GUI 读 / 写 `projects.json` 的**唯一**职责：**项目列表**（[multi-project-registry §2.5](./2026-10-13-multi-project-registry.md)）：
+GUI 读 / 写 `projects.json` 的**唯一**职责：**项目列表**（[multi-project-registry §2.5](../2026-10-13-multi-project-registry.md)）：
 
 | 场景 | 字段 |
 |---|---|
@@ -200,7 +200,7 @@ GUI **不**监听文件（不 poll, 不 inotify）。
 | 改 frontmatter schema | ❌ 不改 |
 | 改 intents/assumptions 数据架构 | ❌ 不改 |
 | 改 5 铁律 + 8 import 边界 | ❌ 不改 |
-| GUI 进 Kron 主仓 `frontend/` | ⚠️ 仅占位 README (走 [multi-project-registry §1](../rfc/2026-10-13-multi-project-registry.md) — v1.3 骨架期) |
+| GUI 进 Kron 主仓 `frontend/` | ⚠️ 仅占位 README (走 [multi-project-registry §1](../2026-10-13-multi-project-registry.md) — v1.3 骨架期) |
 | `internal/` import `cmd/kron/` | ❌ 不让 |
 | `cmd/kron/<sub>/` 互调 | ❌ 不让 |
 
@@ -210,12 +210,12 @@ GUI **不**监听文件（不 poll, 不 inotify）。
 
 | 现有 RFC | 关系 |
 |---|---|
-| [`2026-10-13-multi-project-registry.md`](./2026-10-13-multi-project-registry.md) | **本 RFC 取代其 §2.2**（schema 拍板的最终版）。其他章节（§2.1 路径 / §2.3 register / §2.4 自动注册 / §2.5 GUI 读取 / §2.6 list-projects / §2.7 current_project / §2.8 resolveMCPRoot）**保持** |
-| [`2026-10-13-gui-distribution-manual-install.md`](./2026-10-13-gui-distribution-manual-install.md) | **不**改 (分发链路独立) |
-| [`2026-10-09-gui-ide-plan.md`](./2026-10-09-gui-ide-plan.md) | **不**改 (GUI 多项目概览是 `projects[]` 渲染, 走本 RFC) |
+| [`2026-10-13-multi-project-registry.md`](../2026-10-13-multi-project-registry.md) | **本 RFC 取代其 §2.2**（schema 拍板的最终版）。其他章节（§2.1 路径 / §2.3 register / §2.4 自动注册 / §2.5 GUI 读取 / §2.6 list-projects / §2.7 current_project / §2.8 resolveMCPRoot）**保持** |
+| [`2026-10-13-gui-distribution-manual-install.md`](../2026-10-13-gui-distribution-manual-install.md) | **不**改 (分发链路独立) |
+| [`2026-10-09-gui-ide-plan.md`](../2026-10-09-gui-ide-plan.md) | **不**改 (GUI 多项目概览是 `projects[]` 渲染, 走本 RFC) |
 | [`2026-10-07-lsp-sdk.md`](./2026-10-07-lsp-sdk.md) | **不**改 (LSP SDK 引入**后**才开新 RFC 拍 LSP 配置) |
-| [`2026-10-10-frontend-ui-stack.md`](./2026-10-10-frontend-ui-stack.md) | **不**改 (UI 渲染独立) |
-| [`docs/abstractDesign/architecture.md` §3.5](../abstractDesign/architecture.md) | **不**改 (`config.toml` 拍板保持) |
+| [`2026-10-10-frontend-ui-stack.md`](../2026-10-10-frontend-ui-stack.md) | **不**改 (UI 渲染独立) |
+| [`docs/abstractDesign/architecture.md` §3.5](../../abstractDesign/architecture.md) | **不**改 (`config.toml` 拍板保持) |
 
 ---
 

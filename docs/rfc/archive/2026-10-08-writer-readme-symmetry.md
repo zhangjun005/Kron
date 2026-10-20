@@ -127,4 +127,4 @@ CLI 校验顺序：
 ## 7 相关 RFC
 
 - [`2026-10-08-intent-tree-api.md`](2026-10-08-intent-tree-api.md) §3.1 A1 拍板（Read 侧已兑现；本 RFC 兑现 Write 侧）
-- [`2026-10-08-path-conventions.md`](2026-10-08-path-conventions.md) §2.1 锁定 `model.IntentPath` 是纯 string concat
+- [`2026-10-08-path-conventions.md`](../2026-10-08-path-conventions.md) §2.1 锁定 `model.IntentPath` 是纯 string concat

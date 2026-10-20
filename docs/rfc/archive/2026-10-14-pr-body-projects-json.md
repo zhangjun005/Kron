@@ -1,6 +1,8 @@
+> **已归档 (2026-10-19)** — 这是 `projects.json` 交付的 PR body 存档，不是 RFC；仅作历史记录。
+
 ## RFC 拍板
 
-[docs/rfc/2026-10-14-projects-json-schema-extension.md](docs/rfc/2026-10-14-projects-json-schema-extension.md) §2 拍板的最终 schema, 配 [docs/rfc/2026-10-13-multi-project-registry.md §2.8](docs/rfc/2026-10-13-multi-project-registry.md) 的 resolveMCPRoot fallback 优先级.
+[docs/rfc/2026-10-14-projects-json-schema-extension.md](./2026-10-14-projects-json-schema-extension.md) §2 拍板的最终 schema, 配 [docs/rfc/2026-10-13-multi-project-registry.md §2.8](../2026-10-13-multi-project-registry.md) 的 resolveMCPRoot fallback 优先级.
 
 ## 改动 (3 sub-commits)
 
@@ -29,4 +31,4 @@
 
 ## Plan
 
-[docs/rfc/2026-10-14-projects-json-schema-extension.md](docs/rfc/2026-10-14-projects-json-schema-extension.md)
+[docs/rfc/2026-10-14-projects-json-schema-extension.md](./2026-10-14-projects-json-schema-extension.md)

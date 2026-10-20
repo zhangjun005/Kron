@@ -64,7 +64,7 @@
 - **工作量**：~1 天
 - **关联流程**：`docs/process/mcp-tool.md`（Prompts 算 protocol-level 资源，类似 tools/resources 走同一流程）
 
-**2026-10-14 落地**（zhangjun005 拍板改名 + RFC [`2026-10-14-mcp-prompts.md`](../rfc/2026-10-14-mcp-prompts.md)）：
+**2026-10-14 落地**（zhangjun005 拍板改名 + RFC [`2026-10-14-mcp-prompts.md`](../rfc/archive/2026-10-14-mcp-prompts.md)）：
 - 3 个真名 = `kron-implement` / `kron-drift-check` / `kron-review`（替代原 `kron-assumption-audit` / `kron-stale-report` / `kron-review`）
 - `server.AddPrompt` × 3（go-sdk v1.1 已支持, 无新 dep）
 - handler 内部走 `internal/` 直接（不调 `kron_*` tool, 避免 server 内部 RPC 自身）

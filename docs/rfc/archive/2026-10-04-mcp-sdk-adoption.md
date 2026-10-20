@@ -1,8 +1,10 @@
 # MCP 官方 SDK 接入实施计划 (v1.2)
 
 > **状态:已落地** — commit `55820ed refactor(serve-mcp): adopt official go-sdk` (2026-10-04) + 后续 `36070e1 docs(architecture): propose sinking serve-mcp business logic to internal` + `cafb75a/aa560ec/aeb5fc6` P0/P1/P2 sink 链完成业务层下沉。
+>
+> **已归档 (2026-10-19)** — 移入 `docs/rfc/archive/`；本文件仅作历史决策记录，当前实施细节看 [`docs/implementation/`](../../implementation/) 与 `internal/`。
 > 关联:`docs/rfc/2026-10-04-mcp-sdk-selection.md`(决策理由，**已采纳**)、
->       [`docs/rfc/2026-10-04-mcp-protocol-redesign.md`](../../.deprecated/2026-10-08-doc-cleanup/2026-10-04-mcp-protocol-redesign.md)(被推翻的手写方案 — **SUPERSEDED, 2026-10-08 软删**)、[`docs/process/mcp-protocol.md`](../../.deprecated/2026-10-08-doc-cleanup/mcp-protocol.md)(差距清单 — **2026-10-08 软删**, SDK 已自动补全协议层)
+>       [`docs/rfc/2026-10-04-mcp-protocol-redesign.md`](../../../.deprecated/2026-10-08-doc-cleanup/2026-10-04-mcp-protocol-redesign.md)(被推翻的手写方案 — **SUPERSEDED, 2026-10-08 软删**)、[`docs/process/mcp-protocol.md`](../../../.deprecated/2026-10-08-doc-cleanup/mcp-protocol.md)(差距清单 — **2026-10-08 软删**, SDK 已自动补全协议层)
 > 实施日期:2026-10-04 起
 
 ---
@@ -263,7 +265,7 @@ func registerLint(server *mcp.Server) {
 - `docs/implementation/mcp.md` §4 协议与部署:重写为 "uses modelcontextprotocol/go-sdk; 12 工具通过 `mcp.AddTool` 注册"
 - `docs/how-it-works.md` §5:更新示例
 - `README.md`:加 Claude Desktop / Cursor 接入片段
-- 归档 (历史): `docs/rfc/2026-10-04-mcp-protocol-redesign.md` 加 header "SUPERSEDED by RFC 2026-10-04-mcp-sdk-adoption.md" (后于 2026-10-08 移入 [`.deprecated/`](../../.deprecated/2026-10-08-doc-cleanup/))
+- 归档 (历史): `docs/rfc/2026-10-04-mcp-protocol-redesign.md` 加 header "SUPERSEDED by RFC 2026-10-04-mcp-sdk-adoption.md" (后于 2026-10-08 移入 [`.deprecated/`](../../../.deprecated/2026-10-08-doc-cleanup/))
 - 保留:`docs/rfc/2026-10-04-mcp-sdk-selection.md`(决策理由)
 - 新增:`docs/rfc/2026-10-04-mcp-sdk-adoption.md`(本文)
 
@@ -348,7 +350,7 @@ vs 原 RFC 5 commits 手写计划:~10.5h → **节省 ~5h**
 | 文件 | 状态 |
 |---|---|
 | `docs/rfc/2026-10-03-frontmatter-references.md` | 归档(commit a373828 已落地) |
-| `docs/rfc/2026-10-04-mcp-protocol-redesign.md` | SUPERSEDED(本文取代; 2026-10-08 软删入 [`.deprecated/`](../../.deprecated/2026-10-08-doc-cleanup/2026-10-04-mcp-protocol-redesign.md)) |
+| `docs/rfc/2026-10-04-mcp-protocol-redesign.md` | SUPERSEDED(本文取代; 2026-10-08 软删入 [`.deprecated/`](../../../.deprecated/2026-10-08-doc-cleanup/2026-10-04-mcp-protocol-redesign.md)) |
 | `docs/rfc/2026-10-04-mcp-sdk-selection.md` | 决策记录(保留) |
 | `docs/rfc/2026-10-04-mcp-sdk-adoption.md` | **本文**(实施计划) |
 | `docs/process/mcp-protocol.md` | 2026-10-08 软删入 `.deprecated/` (SDK 已自动补全协议层) |

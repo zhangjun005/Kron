@@ -33,7 +33,7 @@
 | 新 MCP 工具 | [`docs/process/mcp-tool.md`](docs/process/mcp-tool.md) |
 | 改 frontmatter schema | [`docs/process/migrate.md`](docs/process/migrate.md) |
 | 加 CI 检查 | [`docs/process/ci-enforcement.md`](docs/process/ci-enforcement.md) |
-| assumptions 数据架构 (B 独立文件, v1.3+) | [`docs/rfc/2026-10-08-assumptions-standalone.md`](docs/rfc/2026-10-08-assumptions-standalone.md)（已落地, **不**需要跑迁移脚本） |
+| assumptions 数据架构 (B 独立文件, v1.3+) | [`docs/rfc/archive/2026-10-08-assumptions-standalone.md`](docs/rfc/archive/2026-10-08-assumptions-standalone.md)（已落地并归档, **不**需要跑迁移脚本） |
 | 新增访问层 (serve-lsp / serve-gui / 新协议) | **先开 RFC** [`docs/rfc/`](docs/rfc/) 拍板; 拍板**后**走对应 `docs/process/*` |
 
 > 流程图见 [`docs/process/README.md`](docs/process/README.md) 文档地图.
@@ -95,7 +95,7 @@ PR 含: 测试 + `docs/` 同步 (真理改 → `abstractDesign/`; 流程改 → 
 | Tech stack table (MCP / LSP / Wails SDK 选型) | [`docs/rfc/*-sdk.md`](docs/rfc/) (各 RFC 拍板) |
 | Architecture iron rules #1-8 摘要 | [`architecture.md`](docs/abstractDesign/architecture.md) §〇 |
 | Things off-limits 14 条摘要 | [`architecture.md`](docs/abstractDesign/architecture.md) §〇 + [`docs/process/*.md`](docs/process/) |
-| Access layers (CLI / MCP / LSP) 枚举 | [`architecture.md`](docs/abstractDesign/architecture.md) §一 + [`2026-10-08-lsp-client.md`](docs/rfc/2026-10-08-lsp-client.md) |
+| Access layers (CLI / MCP / LSP) 枚举 | [`architecture.md`](docs/abstractDesign/architecture.md) §一 + [`2026-10-08-lsp-client.md`](./docs/rfc/archive/2026-10-08-lsp-client.md) |
 | Coding standards (no any / errors wrap / ...) | `go-style` / `ts-style` skill (`.cursor/skills/`) |
 | Workflow (Before writing code 5 步) | `docs/process/README.md` 文档地图 |
 
@@ -105,7 +105,7 @@ PR 含: 测试 + `docs/` 同步 (真理改 → `abstractDesign/`; 流程改 → 
 
 ## 7 客户端层 (Client Layer) 分工 (2026-10-09)
 
-按 [`architecture.md` §〇·五·1 + §0 铁律 #9](../docs/abstractDesign/architecture.md), 客户端层 (VSCode 扩展 / Wails GUI / Cursor / 其他 IDE / Web) **不**进 Kron 主仓, **只**通过协议访问层 (CLI / MCP / LSP) 调能力. 客户端层**之间**也**不**互相 import.
+按 [`architecture.md` §〇·五·1 + §0 铁律 #9](../docs/abstractDesign/architecture.md), 客户端层 (VSCode 扩展 / Wails GUI / Cursor / 其他 IDE / Web) **进** Kron 主仓 `frontend/` 各自子目录（2026-10-09 修订）, 但**只**通过协议访问层 (CLI / MCP / LSP) 调能力, **不**直接 import `internal/`. 客户端层**之间**也**不**互相 import.
 
 ### 7.1 职责分工 (人 2026-10-09 拍板)
 

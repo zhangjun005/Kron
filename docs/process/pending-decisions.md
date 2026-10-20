@@ -18,4 +18,4 @@ If new items appear, add them here with the same shape: **Raised** (date + sourc
 
 ### `LSP-SDK-DEP` — go.lsp.dev dependencies in `go.mod`
 
-Resolved by [`2026-10-07-lsp-sdk.md`](../rfc/2026-10-07-lsp-sdk.md) §3, which explicitly states that the RFC is the approval for the selected LSP SDK dependencies. The pending entry incorrectly said approval was still outstanding.
+Resolved by [`2026-10-07-lsp-sdk.md`](../rfc/archive/2026-10-07-lsp-sdk.md) §3, which explicitly states that the RFC is the approval for the selected LSP SDK dependencies. The pending entry incorrectly said approval was still outstanding.

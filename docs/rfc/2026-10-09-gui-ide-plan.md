@@ -90,7 +90,7 @@
 
 ## 3 GUI 端 — Wails v2 (整体预览 only)
 
-> 完整拍板见 [`docs/rfc/archive/2026-10-07-gui-stack.md` §2](../docs/rfc/archive/2026-10-07-gui-stack.md)（Wails v2 + Go ↔ TS 桥 + 单二进制产物，本 RFC 沿用）。
+> 完整拍板见 [`docs/rfc/archive/2026-10-07-gui-stack.md` §2](./archive/2026-10-07-gui-stack.md)（Wails v2 + Go ↔ TS 桥 + 单二进制产物，本 RFC 沿用）。
 
 ### 3.1 职责范围
 
@@ -200,7 +200,7 @@ VSCode 扩展的 `package.json` `contributes` 字段**同时**声明 LSP / 侧�
 |---|---|---|
 | Wails GUI | Wails v2 + Go ↔ TS 桥 (TS 端 React + shadcn/ui) | 旧 RFC 拍, **不**重复论证 |
 | VSCode 扩展 | `vscode-languageclient` + `@modelcontextprotocol/sdk` + React 18 + Vite 5 + shadcn/ui | 旧 RFC 拍; **不**预设图表库（关系图走 VSCode webview + shadcn 原生 Chart 或按需扩展） |
-| LSP server (Kron Go 主仓) | `go.lsp.dev/protocol v3.17+` ([`docs/rfc/2026-10-07-lsp-sdk.md` §3](./2026-10-07-lsp-sdk.md) 已拍) | 旧 RFC 拍, **不**重复 |
+| LSP server (Kron Go 主仓) | `go.lsp.dev/protocol v3.17+` ([`docs/rfc/2026-10-07-lsp-sdk.md` §3](./archive/2026-10-07-lsp-sdk.md) 已拍) | 旧 RFC 拍, **不**重复 |
 
 **AGENTS.md §3 红线重申**: 任何**新** top-level dep 进 Kron Go 主仓 (`go.mod`) 走 explicit approval；客户端层代码**在**主仓 `frontend/`（TS/React/Vite/shadcn/ui），其 dep 走 npm + vsce 流程，**不**走 Go explicit approval 路径。客户端层**不** import `cmd/kron/` Go 代码（只通过 stdio JSON-RPC 通信）。
 
@@ -243,7 +243,7 @@ VSCode 扩展的 `package.json` `contributes` 字段**同时**声明 LSP / 侧�
 
 ## 9 实施路径 (拍板后**不**立刻开工, 按 process 走)
 
-按 [`docs/process/new-access-layer.md`](../docs/process/new-access-layer.md) §3 7 个交付物. 客户端层**进**主仓 `frontend/`, §3 中"骨架放 `cmd/kron/serve-<layer>/`"这步**不适用**; 改为"主仓 `frontend/` 骨架 + 拍板 SDK 选型 + 写 RFC".
+按 [`docs/process/new-access-layer.md`](../process/new-access-layer.md) §3 7 个交付物. 客户端层**进**主仓 `frontend/`, §3 中"骨架放 `cmd/kron/serve-<layer>/`"这步**不适用**; 改为"主仓 `frontend/` 骨架 + 拍板 SDK 选型 + 写 RFC".
 
 ### 9.1 Wails GUI
 

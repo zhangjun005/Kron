@@ -153,12 +153,12 @@ Reverse anchors per intent:
 
 | 文档 | 关系 |
 |---|---|
-| [`intent-structure.md` §一](../abstractDesign/intent-structure.md) | 本 RFC §2.1 §2.2 §2.4 后, §一扩写 |
-| [`frontmatter-references.md` (已归档)](./archive/2026-10-03-frontmatter-references.md) | 不冲突: 那是**意图间**结构化字段; 本 RFC 是**外部 MD**反向锚点 |
-| [`view-call-tree-intent.md`](../abstractDesign/view-call-tree-intent.md) | §2 受本 RFC 影响 (incoming_anchors 增 kind 维度) |
-| [`implementation/mcp.md`](../implementation/mcp.md) §4 | §2.5 实施后, 同步扩 |
-| [`internal-pkg.md`](../process/internal-pkg.md) | 不触发 — `internal/lint` 已存在, 本 RFC 是**加规则**, 不**新包** |
-| [`new-internal-api.md`](../process/new-internal-api.md) | 不触发 — `ScanMarkdownAnchors` 是新**函数**不是新包 |
+| [`intent-structure.md` §一](../../abstractDesign/intent-structure.md) | 本 RFC §2.1 §2.2 §2.4 后, §一扩写 |
+| [`frontmatter-references.md` (已归档)](./2026-10-03-frontmatter-references.md) | 不冲突: 那是**意图间**结构化字段; 本 RFC 是**外部 MD**反向锚点 |
+| [`view-call-tree-intent.md`](../../abstractDesign/view-call-tree-intent.md) | §2 受本 RFC 影响 (incoming_anchors 增 kind 维度) |
+| [`implementation/mcp.md`](../../../.deprecated/2026-10-09-process-cleanup/mcp.md) §4 | §2.5 实施后, 同步扩 |
+| [`internal-pkg.md`](../../process/internal-pkg.md) | 不触发 — `internal/lint` 已存在, 本 RFC 是**加规则**, 不**新包** |
+| [`new-internal-api.md`](../../process/new-internal-api.md) | 不触发 — `ScanMarkdownAnchors` 是新**函数**不是新包 |
 
 ---
 

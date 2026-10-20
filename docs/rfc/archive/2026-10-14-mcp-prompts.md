@@ -2,19 +2,19 @@
 
 | 字段 | 值 |
 |---|---|
-| **状态** | **已拍板 (2026-10-14, zhangjun005 拍板定稿;见 §8 拍板确认;待 PR 实施)** |
+| **状态** | **已拍板 (2026-10-14) → 已实施 + 已归档 (2026-10-19)**：三个 prompt（`kron-implement` / `kron-drift-check` / `kron-review`）已随 `9e5e22b` 落地。本文件仅作历史决策记录。 |
 | **作者** | AI assistant, 经 zhangjun005 委托 |
 | **创建日期** | 2026-10-14 |
 | **目标版本** | v1.3+ |
 | **实施时机** | 与 [`2026-10-14-projects-json-schema-extension.md`](./2026-10-14-projects-json-schema-extension.md) 同步 (最后发布时再做) |
-| **补充** | [`docs/mcp/missing-capabilities.md` §C-2](../mcp/missing-capabilities.md) (候选模板 + 风险评估) + [`docs/mcp/plan-2026-10-13-mcp-completeness.md` §3.1](../mcp/plan-2026-10-13-mcp-completeness.md) (协议层缺口) |
+| **补充** | [`docs/mcp/missing-capabilities.md` §C-2](../../mcp/missing-capabilities.md) (候选模板 + 风险评估) + [`docs/mcp/plan-2026-10-13-mcp-completeness.md` §3.1](../../mcp/plan-2026-10-13-mcp-completeness.md) (协议层缺口) |
 | **取代** | — (新议题) |
 
 ---
 
 ## 1 动机
 
-[`docs/mcp/plan-2026-10-13-mcp-completeness.md` §3.1](../mcp/plan-2026-10-13-mcp-completeness.md) 拍板 MCP 协议层 **Prompts** 能力**未声明**, 候选模板来自 `missing-capabilities.md §C-2`:
+[`docs/mcp/plan-2026-10-13-mcp-completeness.md` §3.1](../../mcp/plan-2026-10-13-mcp-completeness.md) 拍板 MCP 协议层 **Prompts** 能力**未声明**, 候选模板来自 `missing-capabilities.md §C-2`:
 
 | 原候选名 | 拍板 |
 |---|---|
@@ -98,7 +98,7 @@ func HandleKronImplementPrompt(
 
 ### 2.3 协议层 — capabilities 自动推断
 
-go-sdk v1.1 `ServerOptions` **无** `Capabilities` 字段 (与 [`backlog.md` G-4 §4](../mcp/backlog.md) 拍板一致). 走 SDK 自动推断:
+go-sdk v1.1 `ServerOptions` **无** `Capabilities` 字段 (与 [`backlog.md` G-4 §4](../../mcp/backlog.md) 拍板一致). 走 SDK 自动推断:
 
 - 注册 `AddPrompt` → `ServerCapabilities.Prompts = &PromptCapabilities{ListChanged: true}` (SDK 内部)
 - `initialize` 响应**自动**包含 `prompts: { listChanged: true }`
@@ -210,11 +210,11 @@ go-sdk v1.1 `ServerOptions` **无** `Capabilities` 字段 (与 [`backlog.md` G-4
 
 | 现有文件 | 关系 |
 |---|---|
-| [`docs/mcp/plan-2026-10-13-mcp-completeness.md` §3.1](../mcp/plan-2026-10-13-mcp-completeness.md) | **本 RFC 是其落地**: §3.1 候选模板 → §2.1 真名 + arguments |
-| [`docs/mcp/missing-capabilities.md` §C-2](../mcp/missing-capabilities.md) | **不**重复论证; 本 RFC 引用其风险评估 + 实现伪码, §C-2 标完成 |
-| [`docs/mcp/kron-implementation.md`](../mcp/kron-implementation.md) | **本 RFC 实施时**追加 §4.3.8/9/10 + §一 文件清单 |
-| [`docs/mcp/backlog.md`](../mcp/backlog.md) | **不**重复 (本 RFC 走流程拍板, **不**走 backlog 跟踪) |
-| [`docs/process/mcp-tool.md`](../process/mcp-tool.md) | **流程 doc §2 引用 `docs/implementation/mcp.md` 不存在**; 本 RFC **不**走 mcp-tool.md 流程 (Prompts 走 RFC 拍板, 流程 doc **之后**改) |
+| [`docs/mcp/plan-2026-10-13-mcp-completeness.md` §3.1](../../mcp/plan-2026-10-13-mcp-completeness.md) | **本 RFC 是其落地**: §3.1 候选模板 → §2.1 真名 + arguments |
+| [`docs/mcp/missing-capabilities.md` §C-2](../../mcp/missing-capabilities.md) | **不**重复论证; 本 RFC 引用其风险评估 + 实现伪码, §C-2 标完成 |
+| [`docs/mcp/kron-implementation.md`](../../mcp/kron-implementation.md) | **本 RFC 实施时**追加 §4.3.8/9/10 + §一 文件清单 |
+| [`docs/mcp/backlog.md`](../../mcp/backlog.md) | **不**重复 (本 RFC 走流程拍板, **不**走 backlog 跟踪) |
+| [`docs/process/mcp-tool.md`](../../process/mcp-tool.md) | **流程 doc §2 引用 `docs/implementation/mcp.md` 不存在**; 本 RFC **不**走 mcp-tool.md 流程 (Prompts 走 RFC 拍板, 流程 doc **之后**改) |
 
 ---
 

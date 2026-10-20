@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| **状态** | 草案 (Proposed) — 待 zhangjun005 拍板 |
+| **状态** | 草案 (Proposed) → **已落地 + 已归档 (2026-10-19)**：§2.1 进程寿命已进 architecture §一；§2.2 per-intent sidecar flock 已实装（`5f8abb2` + `2798717`）。本文件仅作历史决策记录。 |
 | **作者** | AI assistant, 经 zhangjun005 委托 |
 | **创建日期** | 2026-10-08 |
 | **目标版本** | v1.0 (架构拍板) + v1.1 (并发锁实现) |
@@ -171,11 +171,11 @@ sidecar 文件在进程退出后保留，只释放 OS 锁，不删除文件；�
 
 | 文档 | 关系 |
 |---|---|
-| [`docs/abstractDesign/architecture.md`](../abstractDesign/architecture.md) §一 | **本 RFC §2 拍板后**, 增补 "MCP 进程寿命 = stdio 父进程寿命" 一段 |
-| [`docs/implementation/mcp.md`](../implementation/mcp.md) §5 (GUI API 边界 — 已 2026-10-08 作废) | §6 (新): "MCP 寿命与并发" — 本 RFC §2 简化版 |
-| [`docs/process/cli-flag.md`](../process/cli-flag.md) | **不**触发 — 本 RFC **不**新增 `--path` flag |
-| [`docs/process/new-internal-api.md`](../process/new-internal-api.md) | **触发** — `internal/store` flock API 是"2 个访问层 (MCP + CLI) 共享", 必走 RFC |
-| [`docs/process/pending-decisions.md`](../process/pending-decisions.md) | 关 F1 ("一个项目一个 MCP 怎么管?") — 拍板**已**定, 转 Phase 2 实施 |
+| [`docs/abstractDesign/architecture.md`](../../abstractDesign/architecture.md) §一 | **本 RFC §2 拍板后**, 增补 "MCP 进程寿命 = stdio 父进程寿命" 一段 |
+| [`docs/implementation/mcp.md`](../../../.deprecated/2026-10-09-process-cleanup/mcp.md) §5 (GUI API 边界 — 已 2026-10-08 作废) | §6 (新): "MCP 寿命与并发" — 本 RFC §2 简化版 |
+| [`docs/process/cli-flag.md`](../../process/cli-flag.md) | **不**触发 — 本 RFC **不**新增 `--path` flag |
+| [`docs/process/new-internal-api.md`](../../process/new-internal-api.md) | **触发** — `internal/store` flock API 是"2 个访问层 (MCP + CLI) 共享", 必走 RFC |
+| [`docs/process/pending-decisions.md`](../../process/pending-decisions.md) | 关 F1 ("一个项目一个 MCP 怎么管?") — 拍板**已**定, 转 Phase 2 实施 |
 
 ---
 
