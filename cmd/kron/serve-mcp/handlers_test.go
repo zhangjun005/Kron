@@ -839,6 +839,42 @@ func TestIntentDensity_EmptyRepo(t *testing.T) {
 	assert.Equal(t, 0, r.TotalAnchors)
 }
 
+// TestIntentDensity_DanglingAnchorDoesNotInflateCoverage pins the coverage
+// partition: IntentsWithAnchors counts intents covered by an anchor, not
+// anchor slugs. A dangling anchor (slug with no intent file) previously
+// inflated IntentsWithAnchors to len(withAnchor), so
+// with-anchors + without-anchors exceeded TotalIntents (observed with
+// kron-mcp-test/project: 6 + 3 > 8).
+func TestIntentDensity_DanglingAnchorDoesNotInflateCoverage(t *testing.T) {
+	dir := initRepo(t)
+	addIntent(t, dir, "auth/jwt", "", "")
+	addIntent(t, dir, "auth/session", "", "")
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "src"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "src", "jwt.go"),
+		[]byte("// @kron:intent auth/jwt\npackage src\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "src", "broken.go"),
+		[]byte("// @kron:intent ghost/intent\npackage src\n"), 0o644))
+
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_intent_density",
+		Arguments: map[string]any{},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	var r IntentDensityOutput
+	require.NoError(t, structuredInto(res, &r))
+	assert.Equal(t, 2, r.TotalIntents)
+	assert.Equal(t, 2, r.TotalAnchors, "code anchors include the dangling one")
+	assert.Equal(t, 1, r.Coverage.IntentsWithAnchors,
+		"only auth/jwt is covered; ghost/intent is not an intent")
+	assert.Equal(t, []string{"auth/session"}, r.Coverage.IntentsWithoutAnchors)
+	assert.Equal(t, r.TotalIntents,
+		r.Coverage.IntentsWithAnchors+len(r.Coverage.IntentsWithoutAnchors),
+		"coverage fields must partition TotalIntents")
+}
+
 // TestIntentDensity_CountsMarkdownAnchors locks RFC
 // 2026-10-08-md-anchors.md §2.5: the TotalAnchors and
 // IntentsWithAnchors aggregates must include markdown anchors

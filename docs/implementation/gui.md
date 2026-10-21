@@ -131,7 +131,7 @@ This section supersedes the 1.4.d deferrals above for the Wails GUI only.
 - The live explorer and counts come from `kron_tree`; lint counts come from `kron_lint`. They describe the selected project only. If there is no active project, the main pane shows the no-active-project state instead of any placeholder data.
 - The Projects view reports registry loading/read errors and switch errors. The main pane distinguishes loading, no active project, connection/tree errors, and an empty real tree. Refresh retries the live calls.
 - `KRON_PROJECTS_JSON_PATH` is an optional local override for development. Production uses the executable directory as the registry location.
-- There is no mock/demo data source any more: the GUI always reads `projects.json` and calls `kron serve-mcp`. The shared integration fixture at `testdata/kron-project/` is opened like any other registered project.
+- There is no mock/demo data source any more: the GUI always reads `projects.json` and calls `kron serve-mcp`. The shared integration fixture at `kron-mcp-test/project/` is opened like any other registered project.
 
 ## 7 与 RFC §9.1 交付物对应
 
@@ -172,5 +172,30 @@ Explorer 主面板不再渲染文件浏览器式的列表树，而是**左→右
 
 ### 8.2 测试夹具（live 模式）
 
-`testdata/kron-project/`（**已入库**，供 GUI / MCP / LSP / CLI 各模块共用）由 [`frontend/wails/scripts/seed-test-project.ps1`](../../frontend/wails/scripts/seed-test-project.ps1)
+`kron-mcp-test/project/`（**已入库**，供 GUI / MCP / LSP / CLI 各模块共用）由 [`frontend/wails/scripts/seed-test-project.ps1`](../../frontend/wails/scripts/seed-test-project.ps1)
 生成，覆盖完整 frontmatter schema：`symbol` / `status` / `reviewers` / `assumptions`（B-3 registry 文本与 per-intent severity）/ `references` / `depends_on`，三层树、源码与 Markdown 锚点，外加**有意设计**的 1 error + 1 warning 供错误/警告渲染测试。
+
+### 8.3 发布态模拟环境（`kron-mcp-test/`，2026-10-20 约定）
+
+**约定**：以后所有「真实发布态」集成测试都在入库的 `kron-mcp-test/` 进行；其中 exe、registry 和日志仍由[`frontend/wails/scripts/seed-release-env.ps1`](../../frontend/wails/scripts/seed-release-env.ps1) 从 HEAD 重建（可随时删掉重来）。
+
+布局是**一体化**的——GUI、CLI/MCP、registry、被测项目放在一起，直接双击运行，不模拟 `%LOCALAPPDATA%\Programs\kron` / PATH-only 的用户安装：
+
+```
+kron-mcp-test/
+├── app/                 ← 启动这里
+│   ├── Kron-GUI.exe     ← GUI（raw Wails build）
+│   ├── kron.exe         ← CLI + serve-mcp + serve-lsp
+│   ├── projects.json    ← 由 `kron register` 写在 exe 旁
+│   └── serve-mcp.log
+└── project/             ← 入库的测试项目（含 .kron/）
+```
+
+关键点：
+
+- **`projects.json` 必须和两个 exe 在一起**：GUI 桥读**自己 exe 目录**下的 registry；`kron serve-mcp` 不带 `-CWD` 时走 [`internal/store.ProjectsJSONPath`](../../internal/store/project_registry.go)（同样读 exe 旁的 json），再回退 `os.Getwd()`。
+- 因此 GUI 与 CLI 必须在**同一目录**（否则两份 registry 各说各话）；Windows 大小写不敏感，`Kron.exe` 与 `kron.exe` 不能共存，故 GUI 命名 `Kron-GUI.exe`、CLI 保留发布名 `kron.exe`。
+- **验证脚本**：[`verify-mcp-registry.ps1`](../../frontend/wails/scripts/verify-mcp-registry.ps1) 用 [`mcp-probe`](../../frontend/wails/scripts/mcp-probe/main.go)（Go 手写 stdio 客户端）在「cwd 为无关目录、无 `-CWD`」条件下调 `kron_list`，要求从 exe 旁 registry 解析出 8 条 intent；并把 registry 移走做负向对照（必须失败）。
+- 已验证：GUI 双击（cwd=`app`）→ Live 树正常，spawn 的是 `app\kron.exe serve-mcp -CWD project`；MCP 无 `-CWD` 仍能引用 json；`kron lint` 与 fixture 一致（1 error + 1 warning）。
+- **测试隔离**：SDK 客户端脚本会通过 `KRON_PROJECTS_JSON_PATH` 指向临时 registry 再启动子进程——`kron_init` 会写「exe 旁的 `projects.json`」，若不隔离就会把 GUI 的 `current_project` 指到测试临时目录（2026-10-20 实际踩过：目录删除后 GUI 打开即报 `serve-mcp closed stdout before responding`）。跑完校验 `app/projects.json` hash 不变。
+- **真实客户端验证**：`node frontend/wails/scripts/mcp-sdk-client.mjs` 用官方 `@modelcontextprotocol/sdk`（v1.30，客户端与 VSCode/Cursor/Claude 兼容层同源）走完整客户端路径：initialize → tools/list（18 个带 schema）→ 读工具 → 写工具（temp fixture 副本）→ tool error 的 `isError` 语义，9 项断言全 PASS。这补的是"第三方 SDK 客户端兼容性"，与手写帧 probe 互补。

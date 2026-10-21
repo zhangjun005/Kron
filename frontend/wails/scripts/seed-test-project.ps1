@@ -1,4 +1,4 @@
-# Seeds the shared integration fixture at testdata/kron-project.
+# Seeds the shared integration fixture at kron-mcp-test/project.
 #
 # The fixture is committed to git so every module (GUI, MCP, LSP, CLI tests)
 # can use the same project. This script is the reproducible source of truth for
@@ -20,7 +20,7 @@
 #   powershell -NoProfile -File frontend/wails/scripts/seed-test-project.ps1
 #   powershell -NoProfile -File ... -Root D:\tmp\kron-fixture
 param(
-    [string]$Root = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')) 'testdata\kron-project')
+    [string]$Root = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')) 'kron-mcp-test\project')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -263,6 +263,7 @@ Write-Fixture '.kron/assumptions/single-region.md' @'
 id: single-region
 text: 服务只部署在单个 region，不存在跨区复制延迟与时钟漂移
 default_severity: hard
+status: active
 created_by: "@zhangjun005"
 updated_at: "2026-10-01T08:00:00Z"
 expires_at: "2027-01-01"
@@ -279,6 +280,7 @@ Write-Fixture '.kron/assumptions/idempotency-key.md' @'
 id: idempotency-key
 text: 支付网关按客户端提供的幂等键去重，重复请求返回首次结果
 default_severity: hard
+status: active
 created_by: "@zhangjun005"
 updated_at: "2026-10-01T08:00:00Z"
 verified_at: "2026-10-15"
