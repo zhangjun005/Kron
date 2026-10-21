@@ -1,4 +1,4 @@
-# Seeds the shared integration fixture at testdata/kron-project.
+# Seeds the shared integration fixture at kron-mcp-test/project.
 #
 # The fixture is committed to git so every module (GUI, MCP, LSP, CLI tests)
 # can use the same project. This script is the reproducible source of truth for
@@ -20,7 +20,7 @@
 #   powershell -NoProfile -File frontend/wails/scripts/seed-test-project.ps1
 #   powershell -NoProfile -File ... -Root D:\tmp\kron-fixture
 param(
-    [string]$Root = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')) 'testdata\kron-project')
+    [string]$Root = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')) 'kron-mcp-test\project')
 )
 
 $ErrorActionPreference = 'Stop'

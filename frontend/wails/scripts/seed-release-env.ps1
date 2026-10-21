@@ -9,7 +9,7 @@
 #   │   ├── kron.exe             CLI + serve-mcp + serve-lsp (one binary)
 #   │   ├── projects.json        registry written by `kron register` (exe dir)
 #   │   └── README.txt
-#   ├── project/                 project under test (copy of testdata/kron-project)
+#   ├── project/                 project under test (committed fixture)
 #   └── ...                      (scripts / clients live beside these)
 #
 # Why the GUI is not named Kron.exe next to kron.exe: Windows' filesystem is
@@ -41,20 +41,26 @@ if ($WorkDir -eq '') {
 }
 $App = Join-Path $WorkDir 'app'
 $Project = Join-Path $WorkDir 'project'
-$Fixture = Join-Path $RepoRoot 'testdata\kron-project'
+$Fixture = Join-Path $RepoRoot 'kron-mcp-test\project'
 
 if (-not (Test-Path $Fixture)) {
-    throw "fixture not found: $Fixture (expected the committed testdata/kron-project)"
+    throw "fixture not found: $Fixture (expected the committed kron-mcp-test/project)"
 }
 # Never let a stale dev override leak into the release-like env: the whole
 # point is that the registry next to the executables is the one being used.
 Remove-Item Env:\KRON_PROJECTS_JSON_PATH -ErrorAction SilentlyContinue
 
 # ---- 1. project under test -------------------------------------------------
-if (Test-Path $Project) {
-    Remove-Item $Project -Recurse -Force
+# The default release environment keeps the committed fixture at
+# kron-mcp-test/project. A custom -WorkDir gets an isolated copy instead.
+$sameProject = [IO.Path]::GetFullPath($Project).TrimEnd('\') -eq
+    [IO.Path]::GetFullPath($Fixture).TrimEnd('\')
+if (-not $sameProject) {
+    if (Test-Path $Project) {
+        Remove-Item $Project -Recurse -Force
+    }
+    Copy-Item $Fixture $Project -Recurse
 }
-Copy-Item $Fixture $Project -Recurse
 foreach ($stale in @('app', 'install', 'bin', 'logs')) {
     $full = Join-Path $WorkDir $stale
     if (Test-Path $full) {

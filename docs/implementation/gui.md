@@ -131,7 +131,7 @@ This section supersedes the 1.4.d deferrals above for the Wails GUI only.
 - The live explorer and counts come from `kron_tree`; lint counts come from `kron_lint`. They describe the selected project only. If there is no active project, the main pane shows the no-active-project state instead of any placeholder data.
 - The Projects view reports registry loading/read errors and switch errors. The main pane distinguishes loading, no active project, connection/tree errors, and an empty real tree. Refresh retries the live calls.
 - `KRON_PROJECTS_JSON_PATH` is an optional local override for development. Production uses the executable directory as the registry location.
-- There is no mock/demo data source any more: the GUI always reads `projects.json` and calls `kron serve-mcp`. The shared integration fixture at `testdata/kron-project/` is opened like any other registered project.
+- There is no mock/demo data source any more: the GUI always reads `projects.json` and calls `kron serve-mcp`. The shared integration fixture at `kron-mcp-test/project/` is opened like any other registered project.
 
 ## 7 与 RFC §9.1 交付物对应
 
@@ -172,12 +172,12 @@ Explorer 主面板不再渲染文件浏览器式的列表树，而是**左→右
 
 ### 8.2 测试夹具（live 模式）
 
-`testdata/kron-project/`（**已入库**，供 GUI / MCP / LSP / CLI 各模块共用）由 [`frontend/wails/scripts/seed-test-project.ps1`](../../frontend/wails/scripts/seed-test-project.ps1)
+`kron-mcp-test/project/`（**已入库**，供 GUI / MCP / LSP / CLI 各模块共用）由 [`frontend/wails/scripts/seed-test-project.ps1`](../../frontend/wails/scripts/seed-test-project.ps1)
 生成，覆盖完整 frontmatter schema：`symbol` / `status` / `reviewers` / `assumptions`（B-3 registry 文本与 per-intent severity）/ `references` / `depends_on`，三层树、源码与 Markdown 锚点，外加**有意设计**的 1 error + 1 warning 供错误/警告渲染测试。
 
 ### 8.3 发布态模拟环境（`kron-mcp-test/`，2026-10-20 约定）
 
-**约定**：以后所有「真实发布态」集成测试都在 gitignored 的 `kron-mcp-test/` 进行；环境由[`frontend/wails/scripts/seed-release-env.ps1`](../../frontend/wails/scripts/seed-release-env.ps1) 从 HEAD 重建（可随时删掉重来）。
+**约定**：以后所有「真实发布态」集成测试都在入库的 `kron-mcp-test/` 进行；其中 exe、registry 和日志仍由[`frontend/wails/scripts/seed-release-env.ps1`](../../frontend/wails/scripts/seed-release-env.ps1) 从 HEAD 重建（可随时删掉重来）。
 
 布局是**一体化**的——GUI、CLI/MCP、registry、被测项目放在一起，直接双击运行，不模拟 `%LOCALAPPDATA%\Programs\kron` / PATH-only 的用户安装：
 
@@ -188,7 +188,7 @@ kron-mcp-test/
 │   ├── kron.exe         ← CLI + serve-mcp + serve-lsp
 │   ├── projects.json    ← 由 `kron register` 写在 exe 旁
 │   └── serve-mcp.log
-└── project/             ← testdata/kron-project 的副本（含 .kron/）
+└── project/             ← 入库的测试项目（含 .kron/）
 ```
 
 关键点：

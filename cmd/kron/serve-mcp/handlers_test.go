@@ -844,7 +844,7 @@ func TestIntentDensity_EmptyRepo(t *testing.T) {
 // anchor slugs. A dangling anchor (slug with no intent file) previously
 // inflated IntentsWithAnchors to len(withAnchor), so
 // with-anchors + without-anchors exceeded TotalIntents (observed with
-// testdata/kron-project: 6 + 3 > 8).
+// kron-mcp-test/project: 6 + 3 > 8).
 func TestIntentDensity_DanglingAnchorDoesNotInflateCoverage(t *testing.T) {
 	dir := initRepo(t)
 	addIntent(t, dir, "auth/jwt", "", "")

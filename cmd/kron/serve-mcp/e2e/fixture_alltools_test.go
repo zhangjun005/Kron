@@ -1,6 +1,6 @@
 // Fixture-driven MCP smoke test: drives all 18 registered tools over the real
 // stdio JSON-RPC transport against a COPY of the shared integration fixture at
-// <repo>/testdata/kron-project. The copy is important: write tools (add /
+// <repo>/kron-mcp-test/project. The copy is important: write tools (add /
 // update / delete / restore / assume_*) mutate the project, and the committed
 // fixture must stay pristine.
 //
@@ -90,7 +90,7 @@ func copyFixture(t *testing.T, src, dst string) {
 }
 
 func TestE2E_SharedFixtureAllTools(t *testing.T) {
-	fixture := filepath.Join(repoRoot(t), "testdata", "kron-project")
+	fixture := filepath.Join(repoRoot(t), "kron-mcp-test", "project")
 	if _, err := os.Stat(filepath.Join(fixture, ".kron", "intents")); err != nil {
 		t.Skipf("shared fixture missing at %s: %v", fixture, err)
 	}

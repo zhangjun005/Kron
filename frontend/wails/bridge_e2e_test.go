@@ -4,7 +4,7 @@
 //
 // It drives the same App methods the React frontend calls, against a real
 // `kron serve-mcp` subprocess and the shared integration fixture committed at
-// <repo>/testdata/kron-project. Run it from frontend/wails/:
+// <repo>/kron-mcp-test/project. Run it from frontend/wails/:
 //
 //	go test -tags "desktop production e2e" -run TestAppBridgeE2E -v .
 //
@@ -22,7 +22,7 @@ import (
 )
 
 func TestAppBridgeE2E(t *testing.T) {
-	fixture, err := filepath.Abs(filepath.Join("..", "..", "testdata", "kron-project"))
+	fixture, err := filepath.Abs(filepath.Join("..", "..", "kron-mcp-test", "project"))
 	if err != nil {
 		t.Fatalf("resolve fixture path: %v", err)
 	}

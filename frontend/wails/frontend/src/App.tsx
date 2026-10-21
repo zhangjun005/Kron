@@ -54,7 +54,7 @@ interface RailAssumption {
 
 // The GUI always talks to a real `kron serve-mcp` subprocess (via the Go
 // bridge). There is no built-in demo data: the shared integration fixture
-// lives at testdata/kron-project and is opened like any other project.
+// lives at kron-mcp-test/project and is opened like any other project.
 
 function App() {
     const [booted, setBooted] = useState<boolean>(false);
