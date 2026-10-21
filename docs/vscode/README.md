@@ -43,4 +43,3 @@
 2. 在 VSCode Extension Development Host 中验证无 workspace、错误 `serverPath`、启动握手、hover、F12、MCP 树刷新和扩展停机；
 3. 用当前源码重新打包 VSIX，检查包内 `extension.js`、依赖和 `package.json` 版本；
 4. 再决定是否扩展多根 workspace、编辑表单、诊断和 completion。
-

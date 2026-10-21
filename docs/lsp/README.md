@@ -42,4 +42,3 @@ VSCode 扩展已能启动两个独立子进程：`serve-lsp` 负责编辑器语�
 
 - `docs/implementation/lsp.md` 中仍有 `frontend/extensions/vscode/` 的旧路径，应改为 `frontend/vscode/`。
 - `docs/how-it-works.md` 仍写着 v1 不交付 LSP server，和当前代码状态不一致，应改成“已交付基础 LSP，仍有同步和验收缺口”。
-
