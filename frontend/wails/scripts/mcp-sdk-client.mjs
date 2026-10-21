@@ -141,7 +141,20 @@ async function main() {
 
         await call('kron_stale', {});
         await call('kron_impact', {slug: 'auth/jwt'});
-        await call('kron_intent_density', {});
+        const density = await call('kron_intent_density', {});
+        {
+            const covered = density.coverage.intents_with_anchors;
+            const uncovered = density.coverage.intents_without_anchors.length;
+            // Coverage must partition the intents: a dangling anchor
+            // (src/broken/orphan.go -> does/not/exist) must not inflate the
+            // with-anchors count (fixture: 5 covered + 3 uncovered = 8).
+            const ok = covered === 5
+                && uncovered === 3
+                && covered + uncovered === density.total_intents;
+            (ok ? pass : fail)(
+                `kron_intent_density -> covered=${covered} uncovered=${uncovered} total=${density.total_intents}`,
+            );
+        }
         const assumptions = await call('kron_assume_list', {});
         (assumptions.assumptions.length === 2 ? pass : fail)(`kron_assume_get/list -> ${assumptions.assumptions.length} assumptions`);
         await call('kron_assume_get', {id: 'single-region'});

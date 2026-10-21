@@ -263,6 +263,7 @@ Write-Fixture '.kron/assumptions/single-region.md' @'
 id: single-region
 text: 服务只部署在单个 region，不存在跨区复制延迟与时钟漂移
 default_severity: hard
+status: active
 created_by: "@zhangjun005"
 updated_at: "2026-10-01T08:00:00Z"
 expires_at: "2027-01-01"
@@ -279,6 +280,7 @@ Write-Fixture '.kron/assumptions/idempotency-key.md' @'
 id: idempotency-key
 text: 支付网关按客户端提供的幂等键去重，重复请求返回首次结果
 default_severity: hard
+status: active
 created_by: "@zhangjun005"
 updated_at: "2026-10-01T08:00:00Z"
 verified_at: "2026-10-15"

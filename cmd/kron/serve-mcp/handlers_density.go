@@ -89,11 +89,18 @@ func HandleIntentDensity(ctx context.Context, _ *mcp.CallToolRequest, _ IntentDe
 		orphans = []string{}
 	}
 
+	// IntentsWithAnchors counts INTENTS covered by at least one anchor, not
+	// anchor slugs: anchors may point at a slug with no intent file (dangling
+	// anchor), and len(withAnchor) would then exceed TotalIntents while still
+	// disagreeing with IntentsWithoutAnchors. The two coverage fields must
+	// partition TotalIntents.
+	coveredIntents := len(all) - len(withoutAnchor)
+
 	return nil, IntentDensityOutput{
 		TotalIntents: len(all),
 		TotalAnchors: len(codeAnchors) + len(markdownAnchors),
 		Coverage: Coverage{
-			IntentsWithAnchors:    len(withAnchor),
+			IntentsWithAnchors:    coveredIntents,
 			IntentsWithoutAnchors: withoutAnchor,
 		},
 		FilesWithoutIntent: orphans,

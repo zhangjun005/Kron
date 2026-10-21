@@ -2,6 +2,7 @@
 id: idempotency-key
 text: 支付网关按客户端提供的幂等键去重，重复请求返回首次结果
 default_severity: hard
+status: active
 created_by: "@zhangjun005"
 updated_at: "2026-10-01T08:00:00Z"
 verified_at: "2026-10-15"
