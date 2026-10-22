@@ -23,33 +23,40 @@ const DEFAULT_LSP_LANGUAGES = [
 
 const LspLanguagesSchema = z.array(z.string().min(1))
 
-let languageClient: client.LanguageClient | undefined
+let languageClients: client.LanguageClient[] = []
 let intentTree: InstanceType<typeof intentTreeModule.IntentTreeProvider> | undefined
 
-/** Starts kron serve-lsp for the first workspace and completes LSP initialize. */
+/** Starts independent Kron protocol clients for every workspace folder. */
 async function activate(context: vscode.ExtensionContext): Promise<void> {
-  const workspace = vscode.workspace.workspaceFolders?.[0]
-  if (!workspace) {
+  const workspaces = vscode.workspace.workspaceFolders ?? []
+  if (workspaces.length === 0) {
     void vscode.window.showWarningMessage('Kron requires an open workspace folder to start its language server.')
     return
   }
   const configuredPath = vscode.workspace.getConfiguration('kron').get<string>('serverPath', 'kron')
-  const serverOptions: client.ServerOptions = {
-    run: { command: configuredPath, args: ['serve-lsp', '-CWD', workspace.uri.fsPath] },
-    debug: { command: configuredPath, args: ['serve-lsp', '-CWD', workspace.uri.fsPath] },
-  }
   const configuredLanguages = vscode.workspace
     .getConfiguration('kron')
     .get<unknown>('lspLanguages', DEFAULT_LSP_LANGUAGES)
   const parsedLanguages = LspLanguagesSchema.safeParse(configuredLanguages)
   const lspLanguages = parsedLanguages.success ? parsedLanguages.data : [...DEFAULT_LSP_LANGUAGES]
-  const clientOptions: client.LanguageClientOptions = {
-    documentSelector: lspLanguages.map((language) => ({ scheme: 'file', language })),
+  for (const workspace of workspaces) {
+    const serverOptions: client.ServerOptions = {
+      run: { command: configuredPath, args: ['serve-lsp', '-CWD', workspace.uri.fsPath] },
+      debug: { command: configuredPath, args: ['serve-lsp', '-CWD', workspace.uri.fsPath] },
+    }
+    const clientOptions: client.LanguageClientOptions = {
+      documentSelector: lspLanguages.map((language) => ({
+        scheme: 'file',
+        language,
+        pattern: `${workspace.uri.path.replace(/\/$/, '')}/**`,
+      })),
+    }
+    const languageClient = new client.LanguageClient(`kron-${workspace.uri.toString()}`, 'Kron', serverOptions, clientOptions)
+    await languageClient.start()
+    languageClients.push(languageClient)
   }
-  languageClient = new client.LanguageClient('kron', 'Kron', serverOptions, clientOptions)
-  await languageClient.start()
 
-  intentTree = new intentTreeModule.IntentTreeProvider(configuredPath, workspace.uri.fsPath)
+	intentTree = new intentTreeModule.IntentTreeProvider(configuredPath, workspaces)
   context.subscriptions.push(
     vscode.window.createTreeView('kron.intents', { treeDataProvider: intentTree }),
     vscode.commands.registerCommand('kron.refreshIntents', async () => {
@@ -71,8 +78,8 @@ async function activate(context: vscode.ExtensionContext): Promise<void> {
 
 /** Stops the Kron language server when the extension host shuts down. */
 async function deactivate(): Promise<void> {
-  await languageClient?.stop()
-  languageClient = undefined
+	await Promise.all(languageClients.map((languageClient) => languageClient.stop()))
+	languageClients = []
   intentTree?.dispose()
   intentTree = undefined
 }

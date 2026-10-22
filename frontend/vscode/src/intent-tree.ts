@@ -37,22 +37,50 @@ class IntentTreeProvider implements vscode.TreeDataProvider<IntentItem>, vscode.
   private readonly changed = new vscode.EventEmitter<IntentItem | undefined | null | void>()
   readonly onDidChangeTreeData = this.changed.event
   private root: TreeNode | undefined
-  private readonly mcpClient: client.Client
   private readonly ready: Promise<void>
+  private readonly mcpClients: client.Client[]
+  private readonly workspaces: readonly vscode.WorkspaceFolder[]
 
-  constructor(command: string, cwd: string) {
-    this.mcpClient = new client.Client({ name: 'kron-vscode', version: '0.0.1' })
-    const transport = new stdio.StdioClientTransport({ command, args: ['serve-mcp', '-CWD', cwd] })
-    this.ready = this.mcpClient.connect(transport)
+  constructor(command: string, workspaces: readonly vscode.WorkspaceFolder[]) {
+    this.workspaces = workspaces
+    this.mcpClients = workspaces.map((workspace) => new client.Client({ name: `kron-vscode-${workspace.uri.toString()}`, version: '0.0.1' }))
+    this.ready = Promise.all(this.mcpClients.map(async (mcpClient, index) => {
+      const workspace = workspaces[index]
+      if (workspace === undefined) throw new Error('workspace/client pairing is inconsistent')
+      const transport = new stdio.StdioClientTransport({ command, args: ['serve-mcp', '-CWD', workspace.uri.fsPath] })
+      await mcpClient.connect(transport)
+    })).then(() => undefined)
   }
 
   async refresh(): Promise<void> {
     await this.ready
-    const result = await this.mcpClient.callTool({ name: 'kron_tree', arguments: {} })
-    if (result.isError === true || result.structuredContent === undefined) {
-      throw new Error('kron_tree returned no structured result')
+    const roots = await Promise.all(this.mcpClients.map(async (mcpClient) => {
+      const result = await mcpClient.callTool({ name: 'kron_tree', arguments: {} })
+      if (result.isError === true || result.structuredContent === undefined) {
+        throw new Error('kron_tree returned no structured result')
+      }
+      return TreeResultSchema.parse(result.structuredContent).root
+    }))
+    if (this.workspaces.length === 1) {
+      this.root = roots[0]
+    } else {
+      this.root = {
+        slug: 'workspace-roots',
+        name: 'Workspaces',
+        is_dir: true,
+        children: roots.map((root, index) => {
+          const workspace = this.workspaces[index]
+          if (workspace === undefined) throw new Error('workspace/tree pairing is inconsistent')
+          return {
+            slug: workspace.uri.toString(),
+            name: workspace.name,
+            title: workspace.name,
+            is_dir: true,
+            children: root.children ?? [],
+          }
+        }),
+      }
     }
-    this.root = TreeResultSchema.parse(result.structuredContent).root
     this.changed.fire()
   }
 
@@ -68,7 +96,7 @@ class IntentTreeProvider implements vscode.TreeDataProvider<IntentItem>, vscode.
 
   dispose(): void {
     this.changed.dispose()
-    void this.mcpClient.close()
+    for (const mcpClient of this.mcpClients) void mcpClient.close()
   }
 }
 

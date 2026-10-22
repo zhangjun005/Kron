@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"sync"
 
 	"go.lsp.dev/protocol"
 
@@ -24,6 +25,8 @@ type server struct {
 	protocol.UnimplementedServer
 	reader  *store.Reader
 	anchors anchorFinder
+	docMu   sync.RWMutex
+	docs    map[string]openDocument
 
 	// logf is the side-channel used to surface non-protocol events
 	// (frontmatter corruption, I/O errors, dangling paths) to the
@@ -48,6 +51,11 @@ type server struct {
 	exitFn func(code int)
 }
 
+type openDocument struct {
+	text    string
+	version int32
+}
+
 // anchorFinder extracts the line-level anchors in a single source file.
 // It is the injection seam for the internal anchor scanner: Run()
 // wires parser.AnchorsForFile (internal/parser/anchors.go) as the
@@ -66,26 +74,13 @@ type anchorFinder func(ctx context.Context, filePath string) ([]model.Anchor, er
 // actually implements. The SDK targets LSP 3.18 (a superset of the 3.17
 // the RFC pinned); hover and definition behave identically across both.
 //
-// TextDocumentSync is set to Full so the editor treats the server as
-// "I want the full document on every open / change" — without this,
-// most editors (VSCode, Neovim) refuse to keep the document open
-// against the server and the file content seen by hover/definition
-// can lag the editor's view. v1.3 forwards the content read by
-// parser.AnchorsForFile directly (no cache), so Full is fine and
-// simpler than Incremental.
-//
-// AllSave is left at its zero value (false) because v1.3 does not
-// act on save notifications; DocumentSave is opt-in per the LSP
-// spec and the default is "don't send didSave".
+// The server synchronizes full document contents so queries see unsaved edits.
 func (s *server) Initialize(ctx context.Context, params *protocol.InitializeParams) (*protocol.InitializeResult, error) {
 	syncKind := protocol.TextDocumentSyncKindFull
 	openClose := true
 	return &protocol.InitializeResult{
 		Capabilities: protocol.ServerCapabilities{
-			TextDocumentSync: &protocol.TextDocumentSyncOptions{
-				OpenClose: &openClose,
-				Change:    &syncKind,
-			},
+			TextDocumentSync:   &protocol.TextDocumentSyncOptions{OpenClose: &openClose, Change: &syncKind},
 			HoverProvider:      protocol.Boolean(true),
 			DefinitionProvider: protocol.Boolean(true),
 		},
@@ -96,27 +91,42 @@ func (s *server) Initialize(ctx context.Context, params *protocol.InitializePara
 	}, nil
 }
 
-// DidOpen, DidChange, DidClose are the three document-synchronization
-// notifications declared by TextDocumentSync. v1.3 reads the file
-// from disk on every hover/definition (no in-memory cache), so the
-// notifications are no-ops — but the methods MUST be present on the
-// server (vs left to UnimplementedServer) so the editor sees the
-// capabilities the Initialize result declared are actually being
-// served. If the server declares TextDocumentSync and silently
-// ignores the notifications, the editor disconnects after the
-// first timeout.
-//
-// ctx is captured for v1.4+ cancellation hooks. v1.3 takes no
-// action, so the parameters are otherwise unused.
 func (s *server) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocumentParams) error {
+	s.docMu.Lock()
+	defer s.docMu.Unlock()
+	if s.docs == nil {
+		s.docs = make(map[string]openDocument)
+	}
+	s.docs[params.TextDocument.URI.String()] = openDocument{text: params.TextDocument.Text, version: params.TextDocument.Version}
 	return nil
 }
 
 func (s *server) DidChange(ctx context.Context, params *protocol.DidChangeTextDocumentParams) error {
+	if len(params.ContentChanges) == 0 {
+		return nil
+	}
+	whole, ok := params.ContentChanges[len(params.ContentChanges)-1].(*protocol.TextDocumentContentChangeWholeDocument)
+	if !ok {
+		return nil
+	}
+	s.docMu.Lock()
+	defer s.docMu.Unlock()
+	if s.docs == nil {
+		s.docs = make(map[string]openDocument)
+	}
+	key := params.TextDocument.URI.String()
+	current, ok := s.docs[key]
+	if ok && params.TextDocument.Version < current.version {
+		return nil
+	}
+	s.docs[key] = openDocument{text: whole.Text, version: params.TextDocument.Version}
 	return nil
 }
 
 func (s *server) DidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) error {
+	s.docMu.Lock()
+	defer s.docMu.Unlock()
+	delete(s.docs, params.TextDocument.URI.String())
 	return nil
 }
 
@@ -172,7 +182,17 @@ func defaultAnchorsForFile(root string) anchorFinder {
 // line = anchor line", so we need every anchor entry preserved
 // (parser.AnchorsForFile contract — RFC 2026-10-08-md-anchors §4.4).
 func (s *server) anchorSlugAt(ctx context.Context, td *protocol.TextDocumentPositionParams) (string, bool) {
-	anchors, err := s.anchors(ctx, td.TextDocument.URI.FsPath())
+	path := td.TextDocument.URI.FsPath()
+	s.docMu.RLock()
+	doc, open := s.docs[td.TextDocument.URI.String()]
+	s.docMu.RUnlock()
+	var anchors []model.Anchor
+	var err error
+	if open {
+		anchors, err = parser.AnchorsFromText(s.reader.Root, path, doc.text)
+	} else {
+		anchors, err = s.anchors(ctx, path)
+	}
 	if err != nil {
 		return "", false
 	}

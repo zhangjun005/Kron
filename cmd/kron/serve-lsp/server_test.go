@@ -389,37 +389,57 @@ func TestDefinition_NonNotFoundError_LogsAndReturnsNil(t *testing.T) {
 	require.NotEmpty(t, logged)
 }
 
-// --- P0-2: TextDocumentSync 验证 -------------------------------------
+// --- Capabilities ----------------------------------------------------
 
-func TestInitialize_DeclaresTextDocumentSync(t *testing.T) {
+func TestInitialize_DeclaresFullTextDocumentSync(t *testing.T) {
 	s := newTestServer(t)
 	res, err := s.Initialize(context.Background(), &protocol.InitializeParams{})
 	require.NoError(t, err)
 	require.NotNil(t, res)
 
 	opts, ok := res.Capabilities.TextDocumentSync.(*protocol.TextDocumentSyncOptions)
-	require.True(t, ok, "TextDocumentSync must be *TextDocumentSyncOptions, not a bare kind")
-	require.NotNil(t, opts)
+	require.True(t, ok)
 	require.NotNil(t, opts.OpenClose)
-	assert.True(t, *opts.OpenClose, "OpenClose must be true so editors send didOpen/didClose")
+	assert.True(t, *opts.OpenClose)
 	require.NotNil(t, opts.Change)
-	assert.Equal(t, protocol.TextDocumentSyncKindFull, *opts.Change,
-		"v1.3 must use Full sync (no in-memory cache yet)")
+	assert.Equal(t, protocol.TextDocumentSyncKindFull, *opts.Change)
 }
 
-func TestDidOpen_NoOp(t *testing.T) {
+func TestDocumentSnapshotLifecycleAndUnsavedQueries(t *testing.T) {
 	s := newTestServer(t)
-	assert.NoError(t, s.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{}))
-}
+	uri := uri.File(filepath.Join(s.reader.Root, "main.go"))
+	params := &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: uri, Text: "// @kron:intent unsaved\n", Version: 1}}
+	require.NoError(t, s.DidOpen(context.Background(), params))
+	h, err := s.Hover(context.Background(), hoverParams(uri.FsPath(), 0))
+	require.NoError(t, err)
+	assert.Nil(t, h, "unsaved anchor should be parsed but missing intent has no hover")
 
-func TestDidChange_NoOp(t *testing.T) {
-	s := newTestServer(t)
-	assert.NoError(t, s.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{}))
-}
+	change := &protocol.DidChangeTextDocumentParams{TextDocument: protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uri}, Version: 2}, ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: "// @kron:intent auth-jwt\n"}}}
+	require.NoError(t, s.DidChange(context.Background(), change))
+	h, err = s.Hover(context.Background(), hoverParams(uri.FsPath(), 0))
+	require.NoError(t, err)
+	require.NotNil(t, h)
+	assert.Contains(t, h.Contents.(*protocol.MarkupContent).Value, "auth-jwt")
+	definition, err := s.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: hoverParams(uri.FsPath(), 0).TextDocumentPositionParams})
+	require.NoError(t, err)
+	locations, ok := definition.(protocol.LocationSlice)
+	require.True(t, ok)
+	require.Len(t, locations, 1)
+	assert.Contains(t, locations[0].URI.FsPath(), "auth-jwt.md")
 
-func TestDidClose_NoOp(t *testing.T) {
-	s := newTestServer(t)
-	assert.NoError(t, s.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{}))
+	stale := *change
+	stale.TextDocument.Version = 1
+	stale.ContentChanges = []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: "// @kron:intent unsaved\n"}}
+	require.NoError(t, s.DidChange(context.Background(), &stale))
+	h, err = s.Hover(context.Background(), hoverParams(uri.FsPath(), 0))
+	require.NoError(t, err)
+	require.NotNil(t, h)
+	assert.Contains(t, h.Contents.(*protocol.MarkupContent).Value, "auth-jwt")
+
+	require.NoError(t, s.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{TextDocument: protocol.TextDocumentIdentifier{URI: uri}}))
+	h, err = s.Hover(context.Background(), hoverParams(uri.FsPath(), 0))
+	require.NoError(t, err)
+	assert.Nil(t, h, "closed document must fall back to disk content")
 }
 
 // --- P2-1: Exit 注入 + 测试 ------------------------------------------

@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 
 	"go.lsp.dev/jsonrpc2"
@@ -36,6 +37,8 @@ import (
 // genuine transport failure occurs. Logs go to errOut so stdout stays
 // pure LSP frames.
 func Run(args []string, in io.Reader, out, errOut io.Writer) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
 	root, err := resolveRoot(args)
 	if err != nil {
 		fmt.Fprintln(errOut, "kron serve-lsp:", err)
@@ -49,8 +52,9 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 
 	s := NewServer(reader)
 
-	stream := jsonrpc2.NewHeaderStream(&stdioRWC{in: in, out: out})
-	ctx, conn, client := protocol.NewServer(context.Background(), s, stream)
+	rwc := &stdioRWC{in: in, out: out}
+	stream := jsonrpc2.NewHeaderStream(rwc)
+	ctx, conn, client := protocol.NewServer(ctx, s, stream)
 	_ = ctx    // logf/notify resolve Client via protocol.ClientFromContext on each call
 	_ = client //
 
@@ -84,7 +88,13 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 
 	// Block until the connection terminates (parent closes stdin, or an
 	// exit notification). conn.Err reports nil for a clean end of stream.
-	<-conn.Done()
+	select {
+	case <-conn.Done():
+	case <-ctx.Done():
+		_ = rwc.Close()
+		<-conn.Done()
+		return nil
+	}
 	return conn.Err()
 }
 
@@ -98,7 +108,12 @@ type stdioRWC struct {
 
 func (s *stdioRWC) Read(p []byte) (int, error)  { return s.in.Read(p) }
 func (s *stdioRWC) Write(p []byte) (int, error) { return s.out.Write(p) }
-func (s *stdioRWC) Close() error                { return nil }
+func (s *stdioRWC) Close() error {
+	if closer, ok := s.in.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
+}
 
 // resolveRoot parses the optional "-CWD <root>" flag pair, matching
 // serve-mcp's flag surface so editors spawn both subcommands the same

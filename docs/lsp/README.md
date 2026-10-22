@@ -9,26 +9,19 @@
 
 `cmd/kron/serve-lsp/` 已合入主分支，能通过 stdio 提供基础的 `initialize`、`hover`、`definition`、`shutdown` 和 `exit`。服务端通过 `internal/parser` 扫描 `// @kron:intent <slug>`，再通过 `internal/store` 读取 intent Markdown。
 
-VSCode 扩展已能启动两个独立子进程：`serve-lsp` 负责编辑器语义能力，`serve-mcp` 负责只读意图树。当前扩展只连接第一个 workspace folder。
+VSCode 扩展对每个激活时已打开的 workspace folder 启动独立的 `serve-lsp` 与 `serve-mcp` 子进程；多根意图树按 workspace 分组。运行期间动态增删 workspace folder 尚未实现。
 
-## 当前阻塞点
+## 当前进展与剩余验收
 
-服务端在 `initialize` 中声明了全文文档同步（`OpenClose=true`、`Change=Full`），但 `didOpen`、`didChange`、`didClose` 仍是空操作。Hover 和 definition 每次从磁盘读取，因此未保存的编辑不会参与解析。
+服务端声明全文文档同步，并按 URI 维护打开文档的快照。Hover 和 definition 对打开文件使用快照中的当前内容；未打开文件从磁盘读取。保存前的编辑也会参与查询。
 
-这不会阻止已保存文件上的 hover 和跳转，但会造成编辑器内结果滞后。后续必须二选一：
-
-1. 实现按 URI 保存的文档快照，处理全文变更，并让 hover/definition 优先读取快照；
-2. 在实现快照前撤销同步能力声明，明确 LSP 只读取磁盘上的已保存内容。
-
-当前更适合先采用第 2 种，保持 v1 的只读范围清晰；如果要支持未保存内容，第 1 种应作为独立实现任务，并补 parser 从内存文本扫描的接口和并发测试。
+快照按文档版本拒绝过期变更，并在 `didClose` 时删除。真实 stdio e2e 覆盖 Content-Length 握手、Hover、Definition 与正常退出；`Run()` 已处理 Ctrl+C 取消。Ctrl+S 前后仍需在 Extension Host 验证编辑中的锚点立即影响 Hover/F12，关闭文件后使用磁盘内容。
 
 ## 仍需验证
 
-- 真实 Content-Length stdio 客户端启动、握手、请求和退出流程；
 - VSCode Extension Host 中的 hover 与 F12 人工验收；
-- `Ctrl+S` 前后 hover/definition 行为；
-- Ctrl+C 或父进程退出时 `serve-lsp` 的进程收尾；
-- 多根 workspace 行为；当前只使用第一个 workspace folder。
+- Ctrl+S 前后 hover/definition 行为；
+- 多根 workspace 的编辑器内行为与树刷新仍需在 Extension Host 手动验收；启动时已为每个 folder 建立独立客户端。
 
 ## 交接入口
 
@@ -40,5 +33,5 @@ VSCode 扩展已能启动两个独立子进程：`serve-lsp` 负责编辑器语�
 
 ## 文档清理项
 
-- `docs/implementation/lsp.md` 中仍有 `frontend/extensions/vscode/` 的旧路径，应改为 `frontend/vscode/`。
-- `docs/how-it-works.md` 仍写着 v1 不交付 LSP server，和当前代码状态不一致，应改成“已交付基础 LSP，仍有同步和验收缺口”。
+- `docs/implementation/lsp.md` 中 `frontend/extensions/vscode/` 已统一为 `frontend/vscode/`。
+- `docs/how-it-works.md` 已更新为基础 LSP 与 VSCode 扩展骨架已交付，未保存内容同步及编辑器内验收仍有缺口。
