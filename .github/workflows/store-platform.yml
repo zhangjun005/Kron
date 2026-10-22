@@ -1,13 +1,28 @@
 name: Store platform tests
 
+# 非门禁（2026-10-22 决定）：PR 上不再跑这个检查，合并前不阻塞。
+# 保留的用途：push 到 master 后、或需要时手动触发，验证 internal/store 在
+# macOS / Linux / Windows 上的真实行为（本机只有 Windows，测不到 flock 分支）。
+#
+# 变更原因与代价见 docs/process/ci-enforcement.md §1。
+
 on:
   push:
-  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+# 连推时取消上一轮，避免多轮排队（尤其 macOS arm64 容量紧张）。
+concurrency:
+  group: store-platform-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   store:
     name: internal/store (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # 卡住时最多耗 15 分钟；默认是 360 分钟。
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:

@@ -49,6 +49,7 @@
 - **改** package 路径 / 改 package 名
 - `go generate` / reflection — 需 `// why` 注释 + 人类 review
 - 强推 (force-push) / 改 shared branch 历史
+- **改** CI 门禁 (`.github/workflows/*` 的触发条件 / matrix / 检查项, 或增删 required status checks) — **只** `@zhangjun005` 有资格 (2026-10-22; 硬性落实 = GitHub ruleset `protect-master`, 见 [`ci-enforcement.md`](docs/process/ci-enforcement.md) §1.1)
 - **加**新 CLI 子命令 (架构 §1.1 只允许 `init` / `add` / `lint` / `serve-mcp`; `serve-lsp` / `serve-gui` v1.3+ 走 RFC)
 - **加** `config.toml` 字段 (零配置, 架构 §3.5)
 - 改 **frontmatter schema** (走 `migrate.md`)
@@ -79,7 +80,7 @@ PR 含: 测试 + `docs/` 同步 (真理改 → `abstractDesign/`; 流程改 → 
 
 - **不**猜 — **问**人
 - **不**双份维护 — `docs/` 是真理, AGENTS.md **不**复制
-- **不**在 AGENTS.md 加**新**流程 / **新**红线 — 直接走 `docs/process/` 开 PR 改
+- **不**在 AGENTS.md 加**新**流程 / **新**红线 — 直接走 `docs/process/` 开 PR 改（例外：仓库治理 / 门禁调整权类规则由 repo owner `@zhangjun005` 直接写入；2026-10-22 起）
 - **人命 > 文档实施计划** — 任何 "可以以后做" / "建议 v1.5 评估" / "RFC 拍板后再说" 的实施提案, **先**问人**是否**真的**要**纳入; 默认**不**主动加, 默认**不**主动提. 文档实施计划是**辅助**, **不**是任务清单. 人类说"以后再考虑" = 删, 不是留 todo.
 - **慎给阶段性实施提案** — 任何"v1.3+ 拍板 / v1.4+ 评估 / v1.5 收口"等分阶段实施提案**显著拉高**实施成本: (a) 制造跟踪债 (b) 给后续 PR 强加"该实现 X" 的隐性承诺 (c) 与"plan-first, **不**是 stage-first" 流程纪律冲突. 拍板时**只**说"现在做不做" + "做哪个", **不**说"分 3 阶段" / "先骨架后填充". 例外: 架构 §7 已有 "不做的事" 表, 那**不**算提案, **不**重写.
 

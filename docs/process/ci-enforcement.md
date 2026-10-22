@@ -7,14 +7,46 @@
 
 ## 1 已有 CI 检查（已实现）
 
+> ⚠ **2026-10-22 核对**：仓库里只有 `.github/workflows/store-platform.yml` 一个 workflow，
+> **不存在** `.github/workflows/ci.yml`。下面前三行实际是「本机手动 + PR 模板 checklist」级别，
+> 没有 CI 自动执行，`位置` 列已改正为实情。
+
 | 规则 | 检查命令 | 门禁条件 | 位置 |
 |---|---|---|---|
-| Go vet | `go vet ./...` | 0 errors | `.github/workflows/ci.yml` |
-| Go format | `gofmt -l .` | 0 files | `.github/workflows/ci.yml` |
-| Go tests | `go test ./...` | 0 failures | `.github/workflows/ci.yml` |
+| Go vet | `go vet ./...` | 0 errors | 本机手动 + PR 模板 checklist（**无** workflow） |
+| Go format | `gofmt -l .` | 0 files | 本机手动 + PR 模板 checklist（**无** workflow） |
+| Go tests | `go test ./...` | 0 failures | 本机手动 + PR 模板 checklist（**无** workflow） |
 | Import boundary | `grep -r "internal/cli" cmd/` | 0 matches | 手动或 CI script |
 | Import boundary | `grep -r "cmd/kron/" internal/` | 0 matches | 手动或 CI script |
-| Store platform tests | `go test ./internal/store` | Windows / macOS / Linux 均通过 | `.github/workflows/store-platform.yml` |
+| Store platform tests | `go test ./internal/store` | 三平台均通过 | `.github/workflows/store-platform.yml` — **非门禁**（2026-10-22 起）：PR 不跑，仅 `push: master` 或 `workflow_dispatch` 手动跑 |
+
+### 1.1 门禁调整权（2026-10-22）
+
+**规则源 = [`AGENTS.md`](../../AGENTS.md) §3 红线**「改 CI 门禁 … 只 `@zhangjun005` 有资格」。
+本节只记录**怎么硬性落实**，不重复红线正文。
+
+覆盖范围：改 `.github/workflows/*` 的触发条件 / matrix / 检查步骤，以及增删「必需检查
+（required status checks）」。
+
+这条规则**不能只靠文档自律**，因为 write 协作者在 GitHub Web 上可以直接编辑 workflow 文件。
+硬性约束必须落在 GitHub 设置上（`@zhangjun005` 是唯一 repo admin）：
+
+| 目标 | GitHub 设置 |
+|---|---|
+| 设置本身只有你能改 | 分支保护 / ruleset / 协作者管理都要求 **admin**；`write` 改不了 |
+| 别人改 workflow 必须经你批准 | `master` 上开 `Require a pull request` + `Require review from Code Owners`（`CODEOWNERS` 的 `* @zhangjun005` 已覆盖 `.github/workflows/`） |
+| 你自己能直接改 | ruleset 的 **bypass list 只放 Repository admin** |
+| 禁止直推 / 强推 / 删分支 | ruleset 加 `Block force pushes` + `Restrict deletions` |
+| 外部 PR 不自动跑 workflow | Settings → Actions → Fork pull request workflows → Require approval |
+
+> 事实核对（2026-10-22，用 `GET /rulesets` + `GET /rules/branches/master` + `/collaborators` 查）：
+> ruleset **`protect-master`**（id 25624728, `active`, `~DEFAULT_BRANCH`）已生效，`master.protected=true`；
+> 实际生效的 rules = `deletion` + `non_fast_forward` + `pull_request`
+> （`required_approving_review_count=1`, `require_code_owner_review=true`,
+> `dismiss_stale_reviews_on_push=true`）；bypass = `RepositoryRole/Repository admin`
+> （`bypass_mode=always`）。协作者：`@zhangjun005`(admin) / `@lanyue811`(write) / `@HomoFluctus`(write)。
+> **ruleset 未设置 required status checks** —— 所以与本节「Store platform tests 非门禁」不冲突，
+> 不会出现 `Expected — waiting for status to be reported`。
 
 ---
 
