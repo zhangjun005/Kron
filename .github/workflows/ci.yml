@@ -1,0 +1,99 @@
+name: CI
+
+# 门禁范围（2026-10-22 决定）：
+#   平台：只 Windows —— 维护者只用 Windows，Linux / macOS 暂不考虑
+#   检查：gofmt + build + vet + import 边界 + 重点包测试
+#   测试：只跑领域核心包，**不跑** 全量 `go test ./...`
+#         （cmd/kron/serve-mcp 单包就 32s，e2e 另计，属于"全量"那一档）
+#
+# 规则清单（什么是门禁、什么是盲区）：docs/process/ci-enforcement.md
+# 运行手册（怎么跑、怎么看、怎么手动触发）：docs/process/github-actions.md
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+# 同一分支连推时取消上一轮，避免排队堆积
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify (windows-latest)
+    runs-on: windows-latest
+    # 卡住时最多 15 分钟（GitHub 默认 360）
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # gofmt 要求 LF；.gitattributes 已强制 eol=lf，windows runner 上也会得到 LF。
+      # 只扫真实代码目录：kron-mcp-test/ 下是 fixture（各自独立 go module，故意不规范）。
+      - name: gofmt（要求无输出）
+        shell: pwsh
+        run: |
+          $files = gofmt -l cmd internal frontend
+          if ($files) {
+            $files
+            Write-Error "以上文件未格式化（本机可先跑 gofmt -w <file>）"
+            exit 1
+          }
+          Write-Host "gofmt: OK"
+
+      - name: go build
+        run: go build ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      # 架构 §2.2 铁律的机器化：
+      #   (a) internal/ 不得 import cmd/
+      #   (b) cmd/kron/<sub>/ 不得 import 另一个 cmd/kron/<other>/
+      - name: import 边界（内部访问层不互调）
+        shell: pwsh
+        run: |
+          $fail = $false
+
+          # (a) internal/ 及其传递依赖里不得出现 cmd/
+          $bad = go list -deps ./internal/... | Select-String -Pattern '^github\.com/xxx/kron/cmd/'
+          if ($bad) {
+            Write-Host "internal/ 依赖了 cmd/："
+            $bad
+            $fail = $true
+          }
+
+          # (b) 每个 cmd/kron/<sub> 的依赖里不得出现其他 <sub>
+          $subs = Get-ChildItem cmd/kron -Directory | Select-Object -ExpandProperty Name
+          foreach ($sub in $subs) {
+            $deps = go list -deps "./cmd/kron/$sub"
+            foreach ($dep in $deps) {
+              if ($dep -match '^github\.com/xxx/kron/cmd/kron/([^/]+)') {
+                if ($Matches[1] -ne $sub) {
+                  Write-Host "cmd/kron/$sub 依赖了 $dep"
+                  $fail = $true
+                }
+              }
+            }
+          }
+
+          if ($fail) {
+            Write-Error "违反架构 §2.2 import 边界"
+            exit 1
+          }
+          Write-Host "import 边界: OK"
+
+      # 重点包 = 领域核心。故意不含 cmd/ 与 e2e（那是"全量"档，太慢）。
+      # 要加/减包，只改这一行的列表。
+      - name: 重点包测试
+        run: go test ./internal/store ./internal/parser ./internal/lint ./internal/relations

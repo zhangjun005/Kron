@@ -1,1 +1,26 @@
-noeol=lf
+# 行尾统一：强制 LF 检出。
+#
+# 原因：Windows 上 git 默认 core.autocrlf=true 会把工作区改成 CRLF，导致
+# `gofmt -l .` 对全仓 Go 源码误报（gofmt 要求 LF）。显式的 eol 属性优先于
+# core.autocrlf，所以这一行能同时修好本机与 CI（windows-latest）。
+* text=auto eol=lf
+
+# Windows 脚本保留 CRLF（旧版 PowerShell / CMD 的解析兼容）
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 显式声明二进制，避免 text=auto 误判后损坏文件
+*.png binary
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.woff binary
+*.woff2 binary
+*.vsix binary
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+*.zip binary
