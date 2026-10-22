@@ -9,7 +9,7 @@
 
 `cmd/kron/serve-lsp/` 已合入主分支，能通过 stdio 提供基础的 `initialize`、`hover`、`definition`、`shutdown` 和 `exit`。服务端通过 `internal/parser` 扫描 `// @kron:intent <slug>`，再通过 `internal/store` 读取 intent Markdown。
 
-VSCode 扩展已能启动两个独立子进程：`serve-lsp` 负责编辑器语义能力，`serve-mcp` 负责只读意图树。当前扩展只连接第一个 workspace folder。
+VSCode 扩展对每个激活时已打开的 workspace folder 启动独立的 `serve-lsp` 与 `serve-mcp` 子进程；多根意图树按 workspace 分组。运行期间动态增删 workspace folder 尚未实现。
 
 ## 当前进展与剩余验收
 
@@ -21,7 +21,7 @@ VSCode 扩展已能启动两个独立子进程：`serve-lsp` 负责编辑器语�
 
 - VSCode Extension Host 中的 hover 与 F12 人工验收；
 - Ctrl+S 前后 hover/definition 行为；
-- 多根 workspace 行为；当前只使用第一个 workspace folder。
+- 多根 workspace 的编辑器内行为与树刷新仍需在 Extension Host 手动验收；启动时已为每个 folder 建立独立客户端。
 
 ## 交接入口
 
