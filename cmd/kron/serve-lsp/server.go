@@ -66,26 +66,11 @@ type anchorFinder func(ctx context.Context, filePath string) ([]model.Anchor, er
 // actually implements. The SDK targets LSP 3.18 (a superset of the 3.17
 // the RFC pinned); hover and definition behave identically across both.
 //
-// TextDocumentSync is set to Full so the editor treats the server as
-// "I want the full document on every open / change" — without this,
-// most editors (VSCode, Neovim) refuse to keep the document open
-// against the server and the file content seen by hover/definition
-// can lag the editor's view. v1.3 forwards the content read by
-// parser.AnchorsForFile directly (no cache), so Full is fine and
-// simpler than Incremental.
-//
-// AllSave is left at its zero value (false) because v1.3 does not
-// act on save notifications; DocumentSave is opt-in per the LSP
-// spec and the default is "don't send didSave".
+// TextDocumentSync is intentionally unadvertised: hover and definition
+// read saved files from disk and do not consume unsaved editor buffers.
 func (s *server) Initialize(ctx context.Context, params *protocol.InitializeParams) (*protocol.InitializeResult, error) {
-	syncKind := protocol.TextDocumentSyncKindFull
-	openClose := true
 	return &protocol.InitializeResult{
 		Capabilities: protocol.ServerCapabilities{
-			TextDocumentSync: &protocol.TextDocumentSyncOptions{
-				OpenClose: &openClose,
-				Change:    &syncKind,
-			},
 			HoverProvider:      protocol.Boolean(true),
 			DefinitionProvider: protocol.Boolean(true),
 		},
@@ -94,30 +79,6 @@ func (s *server) Initialize(ctx context.Context, params *protocol.InitializePara
 			Version: protocol.NewOptional(serverVersion),
 		},
 	}, nil
-}
-
-// DidOpen, DidChange, DidClose are the three document-synchronization
-// notifications declared by TextDocumentSync. v1.3 reads the file
-// from disk on every hover/definition (no in-memory cache), so the
-// notifications are no-ops — but the methods MUST be present on the
-// server (vs left to UnimplementedServer) so the editor sees the
-// capabilities the Initialize result declared are actually being
-// served. If the server declares TextDocumentSync and silently
-// ignores the notifications, the editor disconnects after the
-// first timeout.
-//
-// ctx is captured for v1.4+ cancellation hooks. v1.3 takes no
-// action, so the parameters are otherwise unused.
-func (s *server) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocumentParams) error {
-	return nil
-}
-
-func (s *server) DidChange(ctx context.Context, params *protocol.DidChangeTextDocumentParams) error {
-	return nil
-}
-
-func (s *server) DidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) error {
-	return nil
 }
 
 // Shutdown acknowledges the client's shutdown request. No teardown is

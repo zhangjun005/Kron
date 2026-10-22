@@ -389,37 +389,16 @@ func TestDefinition_NonNotFoundError_LogsAndReturnsNil(t *testing.T) {
 	require.NotEmpty(t, logged)
 }
 
-// --- P0-2: TextDocumentSync 验证 -------------------------------------
+// --- Capabilities ----------------------------------------------------
 
-func TestInitialize_DeclaresTextDocumentSync(t *testing.T) {
+func TestInitialize_DoesNotAdvertiseTextDocumentSync(t *testing.T) {
 	s := newTestServer(t)
 	res, err := s.Initialize(context.Background(), &protocol.InitializeParams{})
 	require.NoError(t, err)
 	require.NotNil(t, res)
 
-	opts, ok := res.Capabilities.TextDocumentSync.(*protocol.TextDocumentSyncOptions)
-	require.True(t, ok, "TextDocumentSync must be *TextDocumentSyncOptions, not a bare kind")
-	require.NotNil(t, opts)
-	require.NotNil(t, opts.OpenClose)
-	assert.True(t, *opts.OpenClose, "OpenClose must be true so editors send didOpen/didClose")
-	require.NotNil(t, opts.Change)
-	assert.Equal(t, protocol.TextDocumentSyncKindFull, *opts.Change,
-		"v1.3 must use Full sync (no in-memory cache yet)")
-}
-
-func TestDidOpen_NoOp(t *testing.T) {
-	s := newTestServer(t)
-	assert.NoError(t, s.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{}))
-}
-
-func TestDidChange_NoOp(t *testing.T) {
-	s := newTestServer(t)
-	assert.NoError(t, s.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{}))
-}
-
-func TestDidClose_NoOp(t *testing.T) {
-	s := newTestServer(t)
-	assert.NoError(t, s.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{}))
+	assert.Nil(t, res.Capabilities.TextDocumentSync,
+		"the server reads saved files from disk and must not promise buffer synchronization")
 }
 
 // --- P2-1: Exit 注入 + 测试 ------------------------------------------

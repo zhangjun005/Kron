@@ -212,7 +212,7 @@ AI Agent **不走 CLI**——它通过 stdio JSON-RPC 调用 MCP 工具。v1 工
 
 ### 5.3 IDE —— 给人 / AI 在编辑器内的可调用能力
 
-> **范畴**：v1 不交付 IDE 插件 / LSP server 本体，但 Kron 的数据契约（frontmatter + 锚点格式）已经按"未来 LSP 友好"设计。
+> Kron 已交付基础 LSP server（Hover / Definition）和 VSCode 扩展骨架。LSP 读取磁盘上的已保存文件；未保存内容同步及编辑器内验收仍有缺口。
 
 预期 IDE 入口提供**三路触发**（来自 [`implementation/ide-interaction.md`](implementation/ide-interaction.md)）：
 

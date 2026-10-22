@@ -17,7 +17,7 @@ This document is the LSP **access layer** specification. The Go entry point is `
 |---|---|
 | 代码 | **已实现并合入 master**（`d234e0a` → `7c3c030` → 合并 `22348eb`）。`cmd/kron/serve-lsp/` 6 个文件，override 8 个方法 |
 | 已验证 | `go test ./cmd/kron/serve-lsp/` 29 项全绿；`go vet ./...` 干净；`frontend/vscode` 的 `tsc` 通过 |
-| 缺口 ① 文档同步 | `Initialize` 声明 `OpenClose=true` / `Change=Full`，但 `didOpen` / `didChange` / `didClose` 不保存文本（见 §2.4）。**当前实际语义 = 每次请求从磁盘重读**；未保存的编辑内容不参与 hover/definition |
+| 文档内容 | LSP 不声明文档同步；Hover/Definition 每次从磁盘读取已保存文件，未保存编辑不参与查询。按交接决策保持只读语义 |
 | 缺口 ② 无真 stdio e2e | 只有进程内 `TestRun_EmptyStdin` / `TestRun_UnknownArgs`；没有像 [`serve-mcp/e2e/`](../../cmd/kron/serve-mcp/e2e/e2e_stdio_test.go) 那样 spawn 真实二进制、跑 Content-Length 握手的测试 |
 | 缺口 ③ 无信号处理 | `Run()` 用 `context.Background()`（`cmd/kron/serve-lsp/main.go:53`），stdin 不关闭时 Ctrl+C 不退出；`serve-mcp` 已有 `signal.NotifyContext` |
 | 未验收 | 未在真实编辑器 Extension Host 中人工验收 hover / F12；无 Marketplace 发布 |
@@ -26,7 +26,7 @@ This document is the LSP **access layer** specification. The Go entry point is `
 
 ## 1 能力清单 (capabilities v1.3)
 
-The server overrides 8 LSP methods. All other methods are explicitly "not implemented" by embedding `protocol.UnimplementedServer`.
+The server overrides 5 LSP methods. All other methods are explicitly "not implemented" by embedding `protocol.UnimplementedServer`.
 
 | Method | Direction | Capability advertised in `Initialize` |
 |---|---|---|
@@ -34,9 +34,7 @@ The server overrides 8 LSP methods. All other methods are explicitly "not implem
 | `initialized` | notification | (not overridden; `UnimplementedServer` no-ops it, required by spec) |
 | `shutdown` | request | n/a |
 | `exit` | notification | n/a |
-| `textDocument/didOpen` | notification | `TextDocumentSync.OpenClose = true` |
-| `textDocument/didChange` | notification | `TextDocumentSync.Change = Full` |
-| `textDocument/didClose` | notification | `TextDocumentSync.OpenClose = true` |
+| `textDocument/didOpen` / `didChange` / `didClose` | notification | not advertised; saved disk content only |
 | `textDocument/hover` | request | `HoverProvider = true` |
 | `textDocument/definition` | request | `DefinitionProvider = true` |
 
@@ -64,10 +62,6 @@ The server overrides 8 LSP methods. All other methods are explicitly "not implem
 ```go
 &protocol.InitializeResult{
     Capabilities: protocol.ServerCapabilities{
-        TextDocumentSync: &protocol.TextDocumentSyncOptions{
-            OpenClose: ptr(true),
-            Change:    ptr(TextDocumentSyncKindFull),
-        },
         HoverProvider:      Boolean(true),
         DefinitionProvider: Boolean(true),
     },
@@ -100,15 +94,11 @@ The server overrides 8 LSP methods. All other methods are explicitly "not implem
 - `protocol.LocationSlice{[location]}` — anchor exists, intent loads, jumps to the `.md`.
 - `(nil, nil)` — same failure modes as hover.
 
-### 2.4 `textDocument/didOpen` / `didChange` / `didClose`
+### 2.4 文档同步
 
-当前实现会接收这些通知但不保存文本；Hover/Definition 每次从磁盘重读文件。由于 `Initialize` 同时声明了
-`OpenClose=true` 和 `Change=Full`，这只能算协议入口已接通，不能算完整的文档同步实现：未保存的编辑内容不会参与
-后续解析。
-
-完整实现应按 URI 保存打开文档的全文和版本：`didOpen` 建立内存快照，`didChange` 按 `contentChanges` 应用全文或
-增量变更，`didClose` 删除快照；所有依赖文本的请求都应优先读取快照。若暂时不维护快照，则应撤销
-`OpenClose` / `Change` 能力声明，明确服务端只读磁盘。服务端不能一边声明同步能力，一边把通知当作无意义的空操作。
+服务端不声明 `TextDocumentSync`，也不处理 `didOpen`、`didChange` 或 `didClose`。Hover/Definition 每次从磁盘
+读取已保存文件；未保存的编辑不会参与解析。保存文件后，后续请求读取磁盘上的新内容。支持未保存内容需要另行
+实现按 URI 管理的文档快照及 parser 内存文本扫描能力，不属于当前只读契约。
 
 ### 2.5 `shutdown` / `exit`
 
@@ -126,7 +116,7 @@ The server overrides 8 LSP methods. All other methods are explicitly "not implem
 - `internal/store` (only `store.NewReader` and `store.Reader.Load`)
 - `internal/model` (only `model.Anchor`, `model.Intent`, `model.ErrIntentNotFound`, `model.AnchorKind`)
 
-It does NOT import any other access layer (`cmd/kron/cli`, `cmd/kron/serve-mcp`) per architecture.md §〇 铁律 #2. It does NOT import LSP-client concerns (those live in `frontend/extensions/vscode/` or `frontend/wails/` per the client-layer split, RFC 2026-10-08-lsp-client).
+It does NOT import any other access layer (`cmd/kron/cli`, `cmd/kron/serve-mcp`) per architecture.md §〇 铁律 #2. It does NOT import LSP-client concerns (those live in `frontend/vscode/` or `frontend/wails/` per the client-layer split, RFC 2026-10-08-lsp-client).
 
 ### 3.2 数据流 (hover)
 
@@ -195,10 +185,7 @@ This three-field shape mirrors the design rationale in [`cmd/kron/serve-mcp/serv
 | (入口) | `TestRun_EmptyStdin` | stdio 入口 (mirrors `servemcp.TestRun_EmptyStdin`) |
 | (入口) | `TestRun_UnknownArgs` | `resolveRoot` rejects unknown flags |
 | `initialize` | `TestInitialize_ReportsCapabilities` | base capabilities |
-| `initialize` | `TestInitialize_DeclaresTextDocumentSync` | TextDocumentSync opts (P0-2) |
-| `textDocument/didOpen` | `TestDidOpen_NoOp` | handler presence |
-| `textDocument/didChange` | `TestDidChange_NoOp` | handler presence |
-| `textDocument/didClose` | `TestDidClose_NoOp` | handler presence |
+| `initialize` | `TestInitialize_DoesNotAdvertiseTextDocumentSync` | disk-only contract |
 | `textDocument/hover` | `TestHover_OnAnchor` | fakeAnchors path |
 | `textDocument/hover` | `TestHover_NotOnAnchor` | off-anchor → nil |
 | `textDocument/hover` | `TestHover_DanglingAnchor` | dangle → nil, no error |
