@@ -8,19 +8,30 @@
 ## 1 已有 CI 检查（已实现）
 
 > 运行手册（怎么跑、怎么看、怎么手动触发）见 [`github-actions.md`](./github-actions.md)。
-
-> ⚠ **2026-10-22 核对**：仓库里只有 `.github/workflows/store-platform.yml` 一个 workflow，
-> **不存在** `.github/workflows/ci.yml`。下面前三行实际是「本机手动 + PR 模板 checklist」级别，
-> 没有 CI 自动执行，`位置` 列已改正为实情。
+>
+> **2026-10-22 重建**：仓库现在只有一个 workflow —— [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
+> （`name: CI`，单 job `verify (windows-latest)`）。旧的 `store-platform.yml`（三平台）已删除：
+> 维护者只用 Windows，Linux / macOS 暂不考虑。
+>
+> 范围是**刻意收窄**的：只覆盖"代码"，不覆盖"文档"；测试只跑重点包，不跑全量。
 
 | 规则 | 检查命令 | 门禁条件 | 位置 |
 |---|---|---|---|
-| Go vet | `go vet ./...` | 0 errors | 本机手动 + PR 模板 checklist（**无** workflow） |
-| Go format | `gofmt -l .` | 0 files | 本机手动 + PR 模板 checklist（**无** workflow） |
-| Go tests | `go test ./...` | 0 failures | 本机手动 + PR 模板 checklist（**无** workflow） |
-| Import boundary | `grep -r "internal/cli" cmd/` | 0 matches | 手动或 CI script |
-| Import boundary | `grep -r "cmd/kron/" internal/` | 0 matches | 手动或 CI script |
-| Store platform tests | `go test ./internal/store` | 三平台均通过 | `.github/workflows/store-platform.yml` — **非门禁**（2026-10-22 起）：PR 不跑，仅 `push: master` 或 `workflow_dispatch` 手动跑 |
+| Go format | `gofmt -l cmd internal frontend`（不含 `kron-mcp-test/` fixture） | 无输出 | `ci.yml` step `gofmt（要求无输出）` |
+| Go build | `go build ./...` | exit 0 | `ci.yml` step `go build` |
+| Go vet | `go vet ./...` | 0 errors | `ci.yml` step `go vet` |
+| Import 边界 (a) | `go list -deps ./internal/...` 中无 `kron/cmd/` | 0 matches | `ci.yml` step `import 边界` |
+| Import 边界 (b) | `cmd/kron/<sub>` 不依赖另一个 `cmd/kron/<other>` | 0 matches | 同上 |
+| 重点包测试 | `go test ./internal/store ./internal/parser ./internal/lint ./internal/relations` | 全绿 | `ci.yml` step `重点包测试` |
+
+**刻意不覆盖（决策记录，不是遗漏）**
+
+| 不覆盖的东西 | 原因 |
+|---|---|
+| `cmd/kron/**` 的测试、两个 `e2e` 套件 | 属于"全量"档：`serve-mcp` 单包 32s，e2e 各 7s，太重 |
+| `internal/model` / `identity` / `view` / `assumption` | 便宜（<2s）但暂不算"重点"，需要时改一行即可加 |
+| Linux / macOS 平台 | 维护者只用 Windows；代价是 `internal/store` 的 `flock` 分支不再被 CI 验证 |
+| **文档类规则**（内链完整性、architecture 无代码块、process 无实现代码…） | 2026-10-22 决定：文档不设门禁 —— 文档改动频率低、检查存量破口多（实测 74 处断链），设门禁容易在临门一脚卡住，收益不抵成本 |
 
 ### 1.1 门禁调整权（2026-10-22）
 
@@ -47,12 +58,15 @@
 > （`required_approving_review_count=1`, `require_code_owner_review=true`,
 > `dismiss_stale_reviews_on_push=true`）；bypass = `RepositoryRole/Repository admin`
 > （`bypass_mode=always`）。协作者：`@zhangjun005`(admin) / `@lanyue811`(write) / `@HomoFluctus`(write)。
-> **ruleset 未设置 required status checks** —— 所以与本节「Store platform tests 非门禁」不冲突，
-> 不会出现 `Expected — waiting for status to be reported`。
+> **ruleset 未设置 required status checks** —— `ci.yml` 已存在但尚未成为强制门禁。
+> 要变成真门禁：ruleset `protect-master` → Require status checks → 加入 `verify (windows-latest)`。
 
 ---
 
-## 2 已有 CI 检查（可实现，但未落地）
+## 2 文档类检查（2026-10-22 决定：**不设门禁**，仅留档）
+
+> 决定理由：文档改动频率低、存量破口多（实测 74 处断链）、门禁时机少，
+> 设成门禁容易在临门一脚卡住，收益不抵成本。以下规则**只作人工 review 参考**。
 
 | 规则 | 检查方式 | 难度 | 备注 |
 |---|---|---|---|
@@ -63,7 +77,9 @@
 
 ---
 
-## 3 待落地 CI 检查（当前靠 code review）
+## 3 文档一致性检查（留档，**不计划**自动化）
+
+> 与 §2 同理：文档类不设门禁。以下思路仅在未来某次文档重构时作参考。
 
 ### 3.1 Frontmatter 三文件同步（高价值，建议 v1 完成前落地）
 
@@ -127,13 +143,17 @@ fi
 
 ---
 
-## 5 落地优先级建议
+## 5 落地状态（2026-10-22）
 
-| 优先级 | 检查项 | 理由 |
-|---|---|---|
-| **P0** | Import boundary（`grep` 两行） | 已在 architecture.md §2.2 写出，立即可加 |
-| **P1** | `architecture.md` 无代码块 | 防止真理膨胀回滚；本次拆分的目的之一 |
-| **P2** | Frontmatter 三文件同步 | 高价值 + 常见错误 |
-| **P3** | 单向引用方向 | 中价值，需要先定义清楚什么算"引用" |
+| 项 | 状态 |
+|---|---|
+| Import boundary | ✅ **已落地**：`ci.yml` 的 `import 边界` step 用 `go list -deps` 检查（不用 grep，避免注释误报） |
+| Go build / vet / gofmt | ✅ **已落地**：`ci.yml` |
+| 重点包测试（store/parser/lint/relations） | ✅ **已落地**：`ci.yml` |
+| `architecture.md` 无代码块 / 无流程图 | ⏸ 不设门禁（§2） |
+| Frontmatter 三文件同步 | ⏸ 不设门禁（§2/§3），需要时人工 review |
+| 单向引用方向 | ⏸ 不设门禁（§2/§3） |
+| 文档内链完整性 | ❌ **存量 74 处断链**，连"可检查"都还不到；先清理再谈，且按 §2 决定不设门禁 |
+| 全量 `go test ./...`（含 `cmd/` 与 e2e） | ⏸ 刻意不跑（`serve-mcp` 单包 32s）——只在本机按需跑 |
 
 P0 和 P1 建议在 **v1 交付前落地**。
