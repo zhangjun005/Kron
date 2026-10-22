@@ -405,3 +405,13 @@ func TestAnchorsForFile_SortedOutput(t *testing.T) {
 	assert.Equal(t, "first", anchors[1].Slug)
 	assert.Equal(t, 3, anchors[1].LineNumber)
 }
+
+func TestAnchorsFromText(t *testing.T) {
+	root := t.TempDir()
+	anchors, err := AnchorsFromText(root, filepath.Join(root, "src", "a.go"), "// @kron:intent memory\n")
+	require.NoError(t, err)
+	require.Len(t, anchors, 1)
+	assert.Equal(t, "memory", anchors[0].Slug)
+	assert.Equal(t, "src/a.go", anchors[0].FilePath)
+	assert.Equal(t, 1, anchors[0].LineNumber)
+}

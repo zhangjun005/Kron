@@ -195,6 +195,26 @@ func AnchorsForFile(root, filePath string) ([]model.Anchor, error) {
 	return anchors, nil
 }
 
+// AnchorsFromText scans an in-memory source document for intent anchors.
+// filePath identifies the document and is normalized relative to root,
+// matching AnchorsForFile's anchor path contract.
+func AnchorsFromText(root, filePath, text string) ([]model.Anchor, error) {
+	if filePath == "" {
+		return nil, fmt.Errorf("parser: AnchorsFromText: filePath is empty")
+	}
+	anchors, err := scanFile(strings.NewReader(text), filePath)
+	if err != nil {
+		return nil, fmt.Errorf("parser: scan text for %s: %w", filePath, err)
+	}
+	if root != "" {
+		for i := range anchors {
+			anchors[i].FilePath = toRepoRelative(anchors[i].FilePath, root)
+		}
+	}
+	sortAnchors(anchors)
+	return anchors, nil
+}
+
 // scanFile scans a single open file for "@kron:intent <slug>" lines.
 // Lines are limited to a generous max line length so a pathological
 // minified file cannot blow memory.
