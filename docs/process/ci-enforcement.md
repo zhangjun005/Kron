@@ -7,6 +7,8 @@
 
 ## 1 已有 CI 检查（已实现）
 
+> 运行手册（怎么跑、怎么看、怎么手动触发）见 [`github-actions.md`](./github-actions.md)。
+
 > ⚠ **2026-10-22 核对**：仓库里只有 `.github/workflows/store-platform.yml` 一个 workflow，
 > **不存在** `.github/workflows/ci.yml`。下面前三行实际是「本机手动 + PR 模板 checklist」级别，
 > 没有 CI 自动执行，`位置` 列已改正为实情。
