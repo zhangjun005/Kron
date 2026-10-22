@@ -11,18 +11,16 @@
 
 VSCode 扩展已能启动两个独立子进程：`serve-lsp` 负责编辑器语义能力，`serve-mcp` 负责只读意图树。当前扩展只连接第一个 workspace folder。
 
-## 当前阻塞点
+## 当前进展与剩余验收
 
-按本次交接决策，服务端不声明文档同步能力。Hover 和 definition 每次从磁盘读取已保存内容；未保存的编辑不会参与解析。
+服务端声明全文文档同步，并按 URI 维护打开文档的快照。Hover 和 definition 对打开文件使用快照中的当前内容；未打开文件从磁盘读取。保存前的编辑也会参与查询。
 
-已保存文件上的 hover 和跳转可用；保存后重新请求会读到磁盘新内容。若未来需要保存前响应未保存编辑，应单独实现按 URI 的文档快照、parser 内存文本扫描接口及并发测试。
+快照按文档版本拒绝过期变更，并在 `didClose` 时删除。真实 stdio e2e 覆盖 Content-Length 握手、Hover、Definition 与正常退出；`Run()` 已处理 Ctrl+C 取消。Ctrl+S 前后仍需在 Extension Host 验证编辑中的锚点立即影响 Hover/F12，关闭文件后使用磁盘内容。
 
 ## 仍需验证
 
-- 真实 Content-Length stdio 客户端启动、握手、请求和退出流程；
 - VSCode Extension Host 中的 hover 与 F12 人工验收；
-- `Ctrl+S` 前后 hover/definition 行为；
-- Ctrl+C 或父进程退出时 `serve-lsp` 的进程收尾；
+- Ctrl+S 前后 hover/definition 行为；
 - 多根 workspace 行为；当前只使用第一个 workspace folder。
 
 ## 交接入口

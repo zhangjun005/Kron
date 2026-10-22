@@ -17,16 +17,16 @@ This document is the LSP **access layer** specification. The Go entry point is `
 |---|---|
 | 代码 | **已实现并合入 master**（`d234e0a` → `7c3c030` → 合并 `22348eb`）。`cmd/kron/serve-lsp/` 6 个文件，override 8 个方法 |
 | 已验证 | `go test ./cmd/kron/serve-lsp/` 29 项全绿；`go vet ./...` 干净；`frontend/vscode` 的 `tsc` 通过 |
-| 文档内容 | LSP 不声明文档同步；Hover/Definition 每次从磁盘读取已保存文件，未保存编辑不参与查询。按交接决策保持只读语义 |
-| 缺口 ② 无真 stdio e2e | 只有进程内 `TestRun_EmptyStdin` / `TestRun_UnknownArgs`；没有像 [`serve-mcp/e2e/`](../../cmd/kron/serve-mcp/e2e/e2e_stdio_test.go) 那样 spawn 真实二进制、跑 Content-Length 握手的测试 |
-| 缺口 ③ 无信号处理 | `Run()` 用 `context.Background()`（`cmd/kron/serve-lsp/main.go:53`），stdin 不关闭时 Ctrl+C 不退出；`serve-mcp` 已有 `signal.NotifyContext` |
+| 文档同步 | `didOpen` / `didChange` / `didClose` 维护按 URI 索引的全文快照；Hover/Definition 优先解析快照，关闭后回退到磁盘 |
+| stdio e2e | 真实二进制 Content-Length initialize、hover、definition、shutdown/exit 已覆盖 |
+| 信号退出 | `Run()` 使用 `signal.NotifyContext`；取消时关闭输入流并等待连接退出 |
 | 未验收 | 未在真实编辑器 Extension Host 中人工验收 hover / F12；无 Marketplace 发布 |
 
 ---
 
 ## 1 能力清单 (capabilities v1.3)
 
-The server overrides 5 LSP methods. All other methods are explicitly "not implemented" by embedding `protocol.UnimplementedServer`.
+The server overrides 8 LSP methods. All other methods are explicitly "not implemented" by embedding `protocol.UnimplementedServer`.
 
 | Method | Direction | Capability advertised in `Initialize` |
 |---|---|---|
@@ -34,7 +34,9 @@ The server overrides 5 LSP methods. All other methods are explicitly "not implem
 | `initialized` | notification | (not overridden; `UnimplementedServer` no-ops it, required by spec) |
 | `shutdown` | request | n/a |
 | `exit` | notification | n/a |
-| `textDocument/didOpen` / `didChange` / `didClose` | notification | not advertised; saved disk content only |
+| `textDocument/didOpen` | notification | `TextDocumentSync.OpenClose = true` |
+| `textDocument/didChange` | notification | `TextDocumentSync.Change = Full` |
+| `textDocument/didClose` | notification | `TextDocumentSync.OpenClose = true` |
 | `textDocument/hover` | request | `HoverProvider = true` |
 | `textDocument/definition` | request | `DefinitionProvider = true` |
 
@@ -62,6 +64,10 @@ The server overrides 5 LSP methods. All other methods are explicitly "not implem
 ```go
 &protocol.InitializeResult{
     Capabilities: protocol.ServerCapabilities{
+        TextDocumentSync: &protocol.TextDocumentSyncOptions{
+            OpenClose: ptr(true),
+            Change:    ptr(TextDocumentSyncKindFull),
+        },
         HoverProvider:      Boolean(true),
         DefinitionProvider: Boolean(true),
     },
@@ -96,9 +102,8 @@ The server overrides 5 LSP methods. All other methods are explicitly "not implem
 
 ### 2.4 文档同步
 
-服务端不声明 `TextDocumentSync`，也不处理 `didOpen`、`didChange` 或 `didClose`。Hover/Definition 每次从磁盘
-读取已保存文件；未保存的编辑不会参与解析。保存文件后，后续请求读取磁盘上的新内容。支持未保存内容需要另行
-实现按 URI 管理的文档快照及 parser 内存文本扫描能力，不属于当前只读契约。
+服务端按 URI 保存全文及文档版本：`didOpen` 建立快照，`didChange` 接收全文并忽略旧版本通知，`didClose` 删除
+快照。Hover/Definition 优先从打开文档的快照扫描锚点；未打开文档回退到磁盘。intent 本身仍由 store 从磁盘读取。
 
 ### 2.5 `shutdown` / `exit`
 
@@ -185,7 +190,8 @@ This three-field shape mirrors the design rationale in [`cmd/kron/serve-mcp/serv
 | (入口) | `TestRun_EmptyStdin` | stdio 入口 (mirrors `servemcp.TestRun_EmptyStdin`) |
 | (入口) | `TestRun_UnknownArgs` | `resolveRoot` rejects unknown flags |
 | `initialize` | `TestInitialize_ReportsCapabilities` | base capabilities |
-| `initialize` | `TestInitialize_DoesNotAdvertiseTextDocumentSync` | disk-only contract |
+| `initialize` | `TestInitialize_DeclaresFullTextDocumentSync` | Full synchronization |
+| document sync | `TestDocumentSnapshotLifecycleAndUnsavedQueries` | open/change/stale version/close + unsaved hover |
 | `textDocument/hover` | `TestHover_OnAnchor` | fakeAnchors path |
 | `textDocument/hover` | `TestHover_NotOnAnchor` | off-anchor → nil |
 | `textDocument/hover` | `TestHover_DanglingAnchor` | dangle → nil, no error |
@@ -205,7 +211,7 @@ This three-field shape mirrors the design rationale in [`cmd/kron/serve-mcp/serv
 | (internal) | `TestAnchorsForFile_NormalisedFilePath` | 绝对路径输入 → 仓库相对 `FilePath` |
 | (internal) | `TestSummarizeBody_*` (5 tests in `hover_test.go`) | helper unit tests |
 
-**Total: 29 tests** as of v1.3（由 `serve-lsp` stub 时期的 0 项增至 29 项）。All pass under `go test ./cmd/kron/serve-lsp/...`.
+**27 unit tests** are covered by the LSP package; a separate `e2e` package launches the actual binary and exercises Content-Length requests. Run `go test ./cmd/kron/serve-lsp/...`.
 
 ### 4.1 Test fixtures
 
