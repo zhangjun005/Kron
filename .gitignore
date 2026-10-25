@@ -18,6 +18,8 @@ go.work.sum
 .idea/
 *.swp
 .DS_Store
+!frontend/vscode/.vscode/
+!frontend/vscode/.vscode/**
 
 # Project-specific
 .kron/
@@ -35,6 +37,7 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/vscode/out/
+frontend/vscode/dist/
 frontend/vscode/node_modules/
 frontend/vscode/webview/node_modules/
 frontend/vscode/webview/dist/

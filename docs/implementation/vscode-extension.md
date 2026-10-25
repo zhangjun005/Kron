@@ -103,3 +103,12 @@ assumption 是可被多个 intent 引用的独立文件。界面应先用 `kron_
 - `TreeNode` 字段：`slug`、`name`、`is_dir`，以及可选的 `title`、`status`、`children`；`TreeResult` 包含 `root: TreeNode`。
 - 扩展宿主和 Webview 是独立的 Vite/npm 项目，各自管理依赖；VSCode 与 Wails 客户端不互相导入代码。
 - 可执行文件默认名为 `kron`；扩展配置 `configuration.kron.serverPath` 可覆盖该路径。
+
+## 当前实现补充
+
+以下是当前扩展中已落地的编辑器集成功能；上文的“代码锚点右键菜单”描述目标交互，尚不代表其中每个菜单项都已实现。
+
+- 输入完整的 `// @kron:intent <slug>` 注释后，扩展会检查当前 workspace；slug 尚不存在时询问是否快速创建。确认后经 `kron_add` 创建并刷新树，标题和必要元数据由 Kron 默认生成。
+- LSP 客户端按 `kron.lspLanguages` 启动；当前提供 hover 和 definition。代码锚点右键打开/编辑等完整菜单仍未实现。
+- Webview 意图图支持父子层级、关系连线、节点详情和节点右键创建子意图。子节点创建会将被右键的节点作为父节点；depends_on 用实线，references 用虚线，并通过 MCP 写入关系。
+- F5 在真实扩展开发宿主中已手工启动并稳定运行；已手工验证部分树、锚点提示和节点操作。完整 CRUD、assumption 生命周期及宿主关闭后子进程清理仍需逐项验收。

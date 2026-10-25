@@ -6,6 +6,7 @@
 | **作者** | AI assistant, 经 zhangjun005 委托 |
 | **创建日期** | 2026-10-18 |
 | **目标版本** | v1.3+ |
+| **v1.2 补充** | 2026-10-20：扩展 manifest、进程故障/清理、Webview CSP/消息校验、LSP 客户端配置与验收标准；不改变上游技术拍板 |
 | **取代** | [`docs/rfc/2026-10-10-frontend-ui-stack.md`](./2026-10-10-frontend-ui-stack.md) §3 "事实层" 详情, §6 "打包方案" + §8 "未解决问题" 中的 D1/D2/D3/D4 |
 
 ---
@@ -240,6 +241,44 @@ panel.webview.html = html.replace(/(src|href)="(\/.+?)"/g, (_, attr, p) =>
 
 ---
 
+### 2.7 扩展宿主工程约束 (不改变上游 UI / 架构拍板)
+
+本节补齐实现边界，不重新讨论 `2026-10-09-gui-ide-plan.md` 与
+`2026-10-10-frontend-ui-stack.md` 已确定的 UI 分工、MCP/LSP 分工或 SDK 选择。
+
+**扩展清单与 UI 注册**：VS Code 入口必须由扩展根目录 `package.json` 的
+`contributes` 注册，而不是只在 `activate()` 中创建 API 对象。现有基线将意图树放在
+Explorer 的 `views`，并注册刷新命令及其 `view/title` 菜单；按上游规划实现命令面板、
+编辑器标题栏或右键入口时，也必须同步声明对应的 `commands` / `menus`。`activationEvents`
+应与实际入口匹配：只有确实需要启动时提供的状态/服务，才采用 `onStartupFinished`；其余可由
+`onView` / `onCommand` 延迟激活。Activity Bar 自定义容器仍属于 D1 待决定项；决定前沿用
+Explorer 视图，不把 `viewsContainers` 当作本 RFC 的必做项。
+
+**MCP/LSP 生命周期与故障呈现**：MCP 和 LSP 是两个独立的 stdio 子进程，各自启动、报告状态和
+停止；一个通道故障不得伪装成另一个通道故障，也不得阻止扩展 UI 显示可恢复的错误。找不到
+`kron` 或连接/初始化失败时，向用户说明受影响的功能，并指向 `kron.serverPath` / PATH 检查；
+进程异常退出后清除对应连接状态，提供显式 Retry/Restart。初版不要求自动重连或指数退避，
+不得无限重试。请求应结束于成功、可显示的错误或用户取消；不得让 UI 永久停留在 loading。
+`deactivate()` 和 workspace 关闭时必须释放监听器、关闭 MCP transport 并停止 LanguageClient；
+即使子进程已退出，清理也应安全完成。
+
+**Webview 安全与消息契约**：HTML 使用严格 CSP，仅允许加载扩展打包的 Webview 资源；脚本使用
+nonce，`localResourceRoots` 限定到 Webview 构建目录，不开放任意远程脚本或 `unsafe-eval`。样式只允许
+本地构建 CSS；若动态布局确需 inline style，应限制在 `style-src` 并说明原因，不放宽脚本策略。
+Host/Webview 消息使用带 `type` 的判别联合，并在接收边界做运行时校验；MCP 返回内容和 Webview
+消息均视为外部输入。首期只实现本 RFC §4 #9 已定义的 `kron_tree:request`、
+`kron_tree:refresh`、`kron_tree:result`、`kron_tree:error`。任何写入消息必须等宿主确实实现并
+接入对应 MCP 工具后再加入协议；预览态的本地编辑不得显示为已经写入 Kron。
+
+**LSP 客户端配置**：`LanguageClientOptions.documentSelector` 由 `kron.lspLanguages` 和当前
+workspace 的文件 URI scheme 生成，只覆盖已支持的语言。若设置尚未在 manifest 中声明，先使用文档化的默认语言列表，
+不得假设用户设置已经存在；不得把未实现的补全/诊断能力宣称为可用。
+同步能力应与 `serve-lsp` 实际声明一致。LanguageClient 初始化失败时只将 LSP 标为不可用并提供
+重试/诊断信息，MCP 树和 Webview 仍可独立工作。当前 LSP 服务端已实现 hover / definition；
+completion / diagnostics 暂不在扩展中启用或宣称可用。
+
+---
+
 ## 3 spike 数据 (2026-10-18 实施)
 
 ### 3.1 `npm view` 各包版本 (采集时间 2026-10-18 16:30 UTC+8)
@@ -328,6 +367,21 @@ $ npm view shadcn version
 | 11 | `docs/implementation/vscode-extension.md` 同步 (master 已**有**, 增量补**实施**细节) | `docs/implementation/vscode-extension.md` | 0.5 天 | 文档 |
 
 **总改动 ~7.5 + 0.35 = ~7.85 天**. 1 个 PR 链 (12 commit, 逐步 reviewable).
+
+### 4.1 实施验收补充
+
+以下条目补全 #1、#5、#8、#9、#10 的实施验收，不新增架构、MCP 工具或 RFC D1-D4 的决定：
+
+- **扩展入口**：`package.json` 声明实际使用的 `views`、`commands` 和 `menus`；`activationEvents`
+  与入口匹配。当前使用 Explorer TreeView，不因本补充自动新增 Activity Bar 自定义容器。
+- **进程管理**：MCP 与 LSP 状态独立；缺少 `kron`、连接失败和初始化失败能给出可操作提示；异常退出能显式重试；
+  `deactivate()` 关闭两条连接并释放监听器，不做无限自动重启。
+- **Webview 安全**：CSP 限制到本地打包资源，脚本使用 nonce，资源根目录最小化；Host/Webview 输入有运行时校验。
+  当前只接通 tree 请求/刷新/成功/错误消息，写入协议需随宿主 MCP 写入实现一起定义。
+- **LSP 客户端**：`documentSelector` 与 `kron.lspLanguages` 和 workspace 文件类型一致；同步能力不超过服务端实际能力；
+  LSP 不可用时 MCP 树仍能工作；当前扩展只启用服务端已有的 hover / definition。
+- **F5 smoke**：验证扩展激活、贡献视图/命令可见、Webview 加载、tree 成功/错误状态，以及关闭 Extension Host 后 MCP/LSP 子进程均停止。
+  宿主已接入；手工验收尚未完成。
 
 ---
 
