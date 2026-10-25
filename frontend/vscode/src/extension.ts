@@ -48,12 +48,22 @@ async function activate(context: vscode.ExtensionContext): Promise<void> {
       documentSelector: lspLanguages.map((language) => ({
         scheme: 'file',
         language,
-        pattern: `${workspace.uri.path.replace(/\/$/, '')}/**`,
+        // LSP DocumentFilter patterns are serialized as glob strings, so use
+        // the absolute filesystem path and normalize Windows separators.
+        pattern: `${workspace.uri.fsPath.replace(/\\/g, '/').replace(/\/$/, '')}/**`,
       })),
+      outputChannelName: `Kron LSP: ${workspace.name}`,
+      revealOutputChannelOn: client.RevealOutputChannelOn.Error,
     }
     const languageClient = new client.LanguageClient(`kron-${workspace.uri.toString()}`, 'Kron', serverOptions, clientOptions)
-    await languageClient.start()
-    languageClients.push(languageClient)
+    try {
+      await languageClient.start()
+      languageClients.push(languageClient)
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      await vscode.window.showErrorMessage(`Kron LSP failed to start for ${workspace.name}: ${message}`)
+      throw error
+    }
   }
 
 	intentTree = new intentTreeModule.IntentTreeProvider(configuredPath, workspaces)

@@ -23,6 +23,8 @@ VSCode 扩展对每个激活时已打开的 workspace folder 启动独立的 `se
 - Ctrl+S 前后 hover/definition 行为；
 - 多根 workspace 的编辑器内行为与树刷新仍需在 Extension Host 手动验收；启动时已为每个 folder 建立独立客户端。
 
+本次未完成的桌面验收尝试及原因记录在[人工验收日志](../implementation/lsp-editor-acceptance-log-2026-10-22.md)。
+
 ## 交接入口
 
 - [LSP 实现状态与协议契约](../implementation/lsp.md)
