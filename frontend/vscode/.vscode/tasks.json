@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Kron: build webview",
+      "type": "shell",
+      "command": "pnpm",
+      "windows": { "command": "pnpm.cmd" },
+      "args": ["--dir", "webview", "build"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Kron: compile extension",
+      "type": "shell",
+      "command": "npm",
+      "windows": { "command": "npm.cmd" },
+      "args": ["run", "compile"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": "$tsc"
+    },
+    {
+      "label": "Kron: build extension and webview",
+      "dependsOrder": "sequence",
+      "dependsOn": ["Kron: build webview", "Kron: compile extension"],
+      "problemMatcher": []
+    }
+  ]
+}

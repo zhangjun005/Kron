@@ -1,3 +1,20 @@
+# Source TypeScript — compiled to out/ before packaging
 src/**
-tsconfig.json
+
+# Webview source — Vite 5 builds to dist/webview/ before packaging
+webview/**
+
+# Keep out/ and dist/webview/ in the VSIX; both are required at runtime.
+
+# Local dev residue
+.vscode-test/
+.vscode/**
 **/*.map
+.DS_Store
+*.log
+webview/node_modules/
+
+# Repo-level ignore
+.git/
+.github/
+docs/

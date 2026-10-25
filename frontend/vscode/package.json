@@ -1,8 +1,9 @@
 {
   "name": "kron-vscode",
+  "type": "commonjs",
   "displayName": "Kron",
   "publisher": "homofluctus",
-  "description": "Kron language support",
+  "description": "Kron intent ledger — IDE integration",
   "version": "0.0.1",
   "repository": {
     "type": "git",
@@ -15,19 +16,34 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onView:kron.intents",
+    "onCommand:kron.openIntentWorkspace"
   ],
   "contributes": {
     "commands": [
       {
         "command": "kron.refreshIntents",
         "title": "Kron: Refresh Intents"
+      },
+      {
+        "command": "kron.openIntentWorkspace",
+        "title": "Kron: Open Intent Workspace"
+      },
+      {
+        "command": "kron.restartConnections",
+        "title": "Kron: Restart Connections"
       }
     ],
     "menus": {
       "view/title": [
         {
           "command": "kron.refreshIntents",
+          "when": "view == kron.intents",
+          "group": "navigation"
+        },
+        {
+          "command": "kron.openIntentWorkspace",
           "when": "view == kron.intents",
           "group": "navigation"
         }
@@ -51,25 +67,12 @@
         },
         "kron.lspLanguages": {
           "type": "array",
-          "items": {
-            "type": "string"
-          },
+          "items": { "type": "string" },
           "default": [
-            "go",
-            "markdown",
-            "typescript",
-            "javascript",
-            "python",
-            "rust",
-            "java",
-            "c",
-            "cpp",
-            "csharp",
-            "kotlin",
-            "swift",
-            "shellscript"
+            "go", "markdown", "typescript", "javascript", "python", "rust", "java",
+            "c", "cpp", "csharp", "kotlin", "swift", "shellscript"
           ],
-          "description": "VSCode language IDs that receive Kron hover and definition support."
+          "description": "VS Code language IDs that receive Kron hover and definition support."
         }
       }
     }
@@ -78,18 +81,19 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "vscode:prepublish": "npm run compile",
-    "package": "vsce package --dependencies"
+    "vscode:prepublish": "npm run build:webview && npm run compile",
+    "package": "vsce package --dependencies",
+    "build:webview": "pnpm --dir webview build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.1",
-    "vscode-languageclient": "^9.0.1",
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "vscode-languageclient": "^10.0.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^4.0.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.6.3"
   }
 }
