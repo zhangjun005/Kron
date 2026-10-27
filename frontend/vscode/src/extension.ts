@@ -15,7 +15,9 @@ let lspConnections: KronLspClient[] = []
 let treeProvider: IntentTreeProvider | undefined
 let restartPromise: Promise<void> | undefined
 const anchorCreateTimers = new Map<string, NodeJS.Timeout>()
+const anchorDecorationTimers = new Map<string, NodeJS.Timeout>()
 const promptedAnchors = new Set<string>()
+let anchorDecoration: vscode.TextEditorDecorationType | undefined
 
 const INTENT_ANCHOR = /^\s*(?:\/\/|#|--)\s*@kron:intent\s+([a-z0-9][a-z0-9_-]*(?:\/[a-z0-9][a-z0-9_-]*)*)\s*$/
 
@@ -76,6 +78,35 @@ function scheduleQuickIntentPrompt(document: vscode.TextDocument, line: number):
     void maybeOfferQuickIntent(document, line)
   }, 900)
   anchorCreateTimers.set(key, timer)
+}
+
+function updateIntentAnchorDecorations(document: vscode.TextDocument): void {
+  if (anchorDecoration === undefined || document.uri.scheme !== 'file') return
+  const ranges: vscode.Range[] = []
+  for (let line = 0; line < document.lineCount; line += 1) {
+    const text = document.lineAt(line).text
+    const match = INTENT_ANCHOR.exec(text)
+    const slug = match?.[1]
+    if (match === null || slug === undefined) continue
+    const start = match[0].lastIndexOf(slug)
+    ranges.push(new vscode.Range(line, start, line, start + slug.length))
+  }
+  for (const editor of vscode.window.visibleTextEditors) {
+    if (editor.document.uri.toString() === document.uri.toString()) {
+      editor.setDecorations(anchorDecoration, ranges)
+    }
+  }
+}
+
+function scheduleIntentAnchorDecorations(document: vscode.TextDocument): void {
+  const key = document.uri.toString()
+  const previous = anchorDecorationTimers.get(key)
+  if (previous !== undefined) clearTimeout(previous)
+  const timer = setTimeout(() => {
+    anchorDecorationTimers.delete(key)
+    updateIntentAnchorDecorations(document)
+  }, 120)
+  anchorDecorationTimers.set(key, timer)
 }
 
 async function maybeOfferQuickIntent(document: vscode.TextDocument, line: number): Promise<void> {
@@ -161,7 +192,12 @@ async function restartConnections(): Promise<void> {
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   output = vscode.window.createOutputChannel('Kron')
   statusBar = new KronStatusBar()
-  context.subscriptions.push(output, statusBar)
+  anchorDecoration = vscode.window.createTextEditorDecorationType({
+    color: new vscode.ThemeColor('textLink.foreground'),
+    textDecoration: 'underline',
+  })
+  context.subscriptions.push(output, statusBar, anchorDecoration)
+  for (const editor of vscode.window.visibleTextEditors) scheduleIntentAnchorDecorations(editor.document)
 
   const workspaces = vscode.workspace.workspaceFolders ?? []
   const serverPath = vscode.workspace.getConfiguration('kron').get<string>('serverPath', 'kron').trim() || 'kron'
@@ -208,12 +244,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('kron.restartConnections', restartConnections),
     vscode.workspace.onDidChangeTextDocument((event) => {
       if (event.document.uri.scheme !== 'file') return
+      scheduleIntentAnchorDecorations(event.document)
       const changedLines = new Set<number>()
       for (const change of event.contentChanges) {
         changedLines.add(change.range.start.line)
         changedLines.add(Math.min(change.range.end.line, event.document.lineCount - 1))
       }
       for (const line of changedLines) scheduleQuickIntentPrompt(event.document, line)
+    }),
+    vscode.workspace.onDidOpenTextDocument((document) => scheduleIntentAnchorDecorations(document)),
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      if (editor !== undefined) scheduleIntentAnchorDecorations(editor.document)
     }),
     vscode.workspace.onDidCloseTextDocument((document) => {
       const prefix = `${document.uri.toString()}\u0000`
@@ -222,6 +263,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           clearTimeout(timer)
           anchorCreateTimers.delete(key)
         }
+      }
+      const decorationTimer = anchorDecorationTimers.get(document.uri.toString())
+      if (decorationTimer !== undefined) {
+        clearTimeout(decorationTimer)
+        anchorDecorationTimers.delete(document.uri.toString())
       }
     }),
   )
@@ -254,6 +300,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 /** Stops each protocol process independently during Extension Host shutdown. */
 export async function deactivate(): Promise<void> {
+  for (const timer of anchorCreateTimers.values()) clearTimeout(timer)
+  for (const timer of anchorDecorationTimers.values()) clearTimeout(timer)
+  anchorCreateTimers.clear()
+  anchorDecorationTimers.clear()
+  anchorDecoration = undefined
   const shutdowns = [
     ...mcpConnections.map(({ client }) => client.stop()),
     ...lspConnections.map((client) => client.stop()),

@@ -1033,14 +1033,34 @@ function App(): JSX.Element {
 
   return (
     <main className="h-full w-full overflow-hidden bg-background text-foreground">
-      <div className="flex h-full min-h-0 flex-col">
-        <header className="flex min-w-0 shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-2">
-          <div className="flex min-w-0 items-center gap-3">
+      <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden">
+        <IntentCanvas
+          root={activeTree}
+          filter={filter}
+          selectedSlug={selectedSlug}
+          relations={treeRelations}
+          detail={canEdit ? selectedIntent ?? null : liveIntent}
+          detailLoading={detailLoading}
+          onCreateRelation={createGraphRelation}
+          onCreateChild={startCreateChild}
+          onEditIntent={startEdit}
+          onDeleteIntent={() => {
+            if (activeDetail !== null) {
+              setPendingDeleteSlug(activeDetail.slug)
+              setFormMode(null)
+              setFormError(null)
+            }
+          }}
+          onSelect={(node) => { setSelectedSlug(node.slug); setFormMode(null); setShowAssumptionForm(false); setPendingDeleteSlug(null) }}
+        />
+
+        <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex flex-wrap items-center justify-between gap-2">
+          <div className="pointer-events-auto flex items-center gap-2 rounded-lg bg-background/85 px-2 py-1 shadow-sm backdrop-blur-sm">
             <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">K</div>
             <div className="font-semibold leading-tight">Intent tree</div>
             <Badge variant={canEdit ? 'secondary' : 'default'}>{canEdit ? 'Mock preview' : 'Live tree'}</Badge>
           </div>
-          <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+          <div className="pointer-events-auto flex flex-wrap items-center justify-end gap-2">
             <Button variant="outline" size="sm" onClick={() => setShowArchivePanel(true)}>
               Archived <Badge variant="secondary" className="ml-2">{archivedIntents.length}</Badge>
             </Button>
@@ -1051,40 +1071,12 @@ function App(): JSX.Element {
               <span className="mr-2" aria-hidden="true">＋</span>New intent
             </Button>
           </div>
-        </header>
-
-        <div className="min-h-0 flex-1 p-2">
-          <div className="h-full min-h-0">
-            <Card className="flex h-full min-h-0 flex-col shadow-none">
-              <CardHeader className="flex shrink-0 flex-row flex-wrap items-center justify-between gap-3 p-3">
-                <CardDescription>{canEdit ? intents.length : rows.filter(({ node }) => !node.is_dir).length} intents · hierarchy view</CardDescription>
-                <div className="flex min-w-0 flex-1 items-center justify-end gap-2 sm:max-w-lg">
-                  <Input aria-label="Filter intents" placeholder="Filter intents…" value={filter} onChange={(event) => setFilter(event.target.value)} />
-                </div>
-              </CardHeader>
-              <CardContent className="relative flex min-h-0 flex-1 flex-col p-2 pt-0">
-                {error ? <p role="alert" className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
-                <IntentCanvas
-                  root={activeTree}
-                  filter={filter}
-                  selectedSlug={selectedSlug}
-                  relations={treeRelations}
-                  detail={canEdit ? selectedIntent ?? null : liveIntent}
-                  detailLoading={detailLoading}
-                  onCreateRelation={createGraphRelation}
-                  onCreateChild={startCreateChild}
-                  onEditIntent={startEdit}
-                  onDeleteIntent={() => {
-                    if (activeDetail !== null) {
-                      setPendingDeleteSlug(activeDetail.slug)
-                      setFormMode(null)
-                      setFormError(null)
-                    }
-                  }}
-                  onSelect={(node) => { setSelectedSlug(node.slug); setFormMode(null); setShowAssumptionForm(false); setPendingDeleteSlug(null) }}
-                />
-              </CardContent>
-            </Card>
+        </div>
+        <div className="pointer-events-none absolute left-3 top-[3.75rem] z-20 flex items-center gap-2 rounded-lg bg-background/85 p-1.5 shadow-sm backdrop-blur-sm">
+          <span className="px-1 text-xs text-muted-foreground">{canEdit ? intents.length : rows.filter(({ node }) => !node.is_dir).length} intents · hierarchy</span>
+          <Input className="pointer-events-auto w-64 max-w-[45vw]" aria-label="Filter intents" placeholder="Filter intents…" value={filter} onChange={(event) => setFilter(event.target.value)} />
+        </div>
+        {error ? <p role="alert" className="pointer-events-none absolute bottom-10 left-3 z-20 max-w-[min(560px,calc(100%-1.5rem))] rounded-md border border-destructive/40 bg-destructive/90 px-3 py-2 text-sm text-destructive-foreground shadow">{error}</p> : null}
 
             <aside className="fixed inset-0 z-50 overflow-y-auto bg-background p-4 md:p-8" hidden={!showArchivePanel} aria-label="Archived intents">
               <Card className="mx-auto w-full max-w-3xl shadow-none">
@@ -1117,8 +1109,34 @@ function App(): JSX.Element {
               </Card>
             </aside>
 
-            <section className="fixed inset-0 z-[60] overflow-y-auto bg-background p-4 md:p-8" hidden={formMode === null && pendingDeleteSlug === null}>
-              <div className="flex min-h-full w-full flex-col gap-4">
+            {formMode !== null || pendingDeleteSlug !== null ? <section className="fixed inset-0 z-[60] grid place-items-center p-4">
+              <button
+                type="button"
+                className="absolute inset-0 bg-background/40"
+                aria-label="Close intent panel"
+                onClick={() => {
+                  setFormMode(null)
+                  setPendingDeleteSlug(null)
+                  setDraftParentSlug(null)
+                  setShowAssumptionForm(false)
+                  setFormError(null)
+                }}
+              />
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label={formMode === 'create' ? 'Create intent' : pendingDeleteSlug !== null ? 'Delete intent' : 'Edit intent'}
+                className="relative z-[1] flex max-h-[92vh] w-[min(760px,92vw)] flex-col gap-4 overflow-y-auto rounded-xl border bg-background p-4 shadow-2xl md:p-6"
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    setFormMode(null)
+                    setPendingDeleteSlug(null)
+                    setDraftParentSlug(null)
+                    setShowAssumptionForm(false)
+                    setFormError(null)
+                  }
+                }}
+              >
               <div className="flex justify-end">
                 <Button variant="outline" size="sm" onClick={() => {
                   setFormMode(null)
@@ -1221,181 +1239,9 @@ function App(): JSX.Element {
                     </form>
                   </CardContent>
                 </Card>
-              ) : pendingDeleteSlug === null && activeDetail !== null ? (
-                <>
-                  <Card>
-                    <CardHeader className="p-5 pb-4">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0 space-y-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant="outline">{activeDetail.status}</Badge>
-                            <Badge variant="secondary">{activeDetail.kind}</Badge>
-                          </div>
-                          <CardTitle className="break-words text-2xl">{activeDetail.title}</CardTitle>
-                          <CardDescription className="break-all font-mono text-xs">{activeDetail.slug}</CardDescription>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button variant="outline" size="sm" onClick={startEdit} disabled={detailLoading || saving || activeDetail.kind !== 'leaf' || (!canEdit && liveIntent === null)}>
-                            Edit intent
-                          </Button>
-                          <Button variant="destructive" size="sm" onClick={() => { setPendingDeleteSlug(activeDetail.slug); setFormMode(null); setFormError(null) }} disabled={saving || activeDetail.kind !== 'leaf' || (!canEdit && liveIntent === null)}>
-                            {canEdit ? 'Archive' : 'Delete'}
-                          </Button>
-                        </div>
-                      </div>
-                      <p className="pt-3 text-sm leading-6 text-muted-foreground">{activeDetail.summary}</p>
-                    </CardHeader>
-                    <CardContent className="grid gap-4 p-5 pt-0 sm:grid-cols-2">
-                      <div className="rounded-md bg-muted/50 p-3">
-                        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Symbol</div>
-                        <div className="mt-1 font-mono text-sm">{activeDetail.symbol || 'Not specified'}</div>
-                      </div>
-                      <div className="rounded-md bg-muted/50 p-3">
-                        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Reviewers</div>
-                        <div className="mt-1 text-sm">{activeDetail.reviewers.length > 0 ? activeDetail.reviewers.join(', ') : 'No reviewers listed'}</div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(260px,0.8fr)]">
-                    <Card>
-                      <CardHeader className="p-5 pb-3">
-                        <CardTitle className="text-base">Decision</CardTitle>
-                        <CardDescription>Intent body preview</CardDescription>
-                      </CardHeader>
-                      <CardContent className="p-5 pt-0">
-                        {activeDetail.body ? <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-6 text-muted-foreground">{activeDetail.body}</pre> : <p className="text-sm text-muted-foreground">No body text is available for this live tree item.</p>}
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardHeader className="p-5 pb-3">
-                        <CardTitle className="text-base">Relationships</CardTitle>
-                        <CardDescription>References and prerequisites</CardDescription>
-                      </CardHeader>
-                      <CardContent className="space-y-4 p-5 pt-0">
-                        <div>
-                          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">References</div>
-                          {activeDetail.references.length ? <div className="flex flex-wrap gap-1.5">{activeDetail.references.map((slug) => rows.some(({ node }) => node.slug === slug)
-                            ? <button key={slug} type="button" onClick={() => selectRelatedIntent(slug)} aria-label={`Open referenced intent ${slug}`}><Badge variant="secondary" className="cursor-pointer hover:bg-secondary/70">{slug}</Badge></button>
-                            : <Badge key={slug} variant="secondary" title="Not present in the current intent tree">{slug}</Badge>)}</div> : <p className="text-sm text-muted-foreground">None</p>}
-                        </div>
-                        <div>
-                          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Depends on</div>
-                          {activeDetail.dependsOn.length ? <div className="flex flex-wrap gap-1.5">{activeDetail.dependsOn.map((slug) => rows.some(({ node }) => node.slug === slug)
-                            ? <button key={slug} type="button" onClick={() => selectRelatedIntent(slug)} aria-label={`Open prerequisite intent ${slug}`}><Badge variant="outline" className="cursor-pointer hover:bg-accent">{slug}</Badge></button>
-                            : <Badge key={slug} variant="outline" title="Not present in the current intent tree">{slug}</Badge>)}</div> : <p className="text-sm text-muted-foreground">None</p>}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </div>
-
-                  <Card>
-                    <CardHeader className="flex-row items-start justify-between space-y-0 p-5">
-                      <div>
-                        <CardTitle className="text-base">Assumptions</CardTitle>
-                        <CardDescription className="mt-1">Per-intent severity and rationale; shared text comes from the registry.</CardDescription>
-                      </div>
-                      <Button variant="outline" size="sm" onClick={toggleAssumptionForm} disabled={detailLoading || saving || activeDetail.kind !== 'leaf' || (!canEdit && liveIntent === null)}>
-                        {showAssumptionForm ? 'Cancel' : 'Add assumption'}
-                      </Button>
-                    </CardHeader>
-                    <CardContent className="space-y-3 p-5 pt-0">
-                      {activeDetail.assumptions.length === 0 ? <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">No assumptions are linked to this intent.</p> : null}
-                      {activeDetail.assumptions.map((item) => {
-                        const shared = sharedAssumptions.find((assumption) => assumption.id === item.id)
-                        return (
-                          <div key={item.id} className="rounded-lg border p-4">
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="font-mono text-sm font-medium">{item.id}</span>
-                                  <Badge variant={item.severity === 'hard' ? 'destructive' : 'secondary'}>{item.severity}</Badge>
-                                  {shared ? <span className="text-xs text-muted-foreground">default: {shared.defaultSeverity}</span> : null}
-                                </div>
-                                <p className="mt-2 text-sm text-muted-foreground">{shared?.text ?? 'Registry text is not available.'}</p>
-                              </div>
-                              <Button variant="ghost" size="sm" onClick={() => detachAssumption(item.id)} disabled={saving}>Unlink</Button>
-                            </div>
-                            <p className="mt-3 border-l-2 pl-3 text-sm leading-6">{item.rationale}</p>
-                            {item.expiresAt ? <p className="mt-2 text-xs text-muted-foreground">Review by {item.expiresAt}</p> : null}
-                            {shared?.usedBy !== undefined ? <p className="mt-1 text-xs text-muted-foreground">Used by {shared.usedBy.length} intent{shared.usedBy.length === 1 ? '' : 's'}</p> : null}
-                          </div>
-                        )
-                      })}
-
-                      {showAssumptionForm ? (
-                        <form className="grid gap-4 rounded-lg border bg-muted/20 p-4 md:grid-cols-2" onSubmit={assumptionMode === 'existing' ? attachExistingAssumption : attachAssumption}>
-                          <div className="md:col-span-2">
-                            <div className="font-medium">Link an assumption</div>
-                            <p className="mt-1 text-xs text-muted-foreground">Shared text is stored once; severity and rationale belong to this intent.</p>
-                          </div>
-                          <div className="flex gap-2 md:col-span-2">
-                            <Button type="button" size="sm" variant={assumptionMode === 'existing' ? 'secondary' : 'outline'} disabled={availableAssumptions.length === 0} onClick={() => { setAssumptionMode('existing'); setFormError(null) }}>Use existing</Button>
-                            <Button type="button" size="sm" variant={assumptionMode === 'new' ? 'secondary' : 'outline'} onClick={() => { setAssumptionMode('new'); setFormError(null) }}>Create new</Button>
-                          </div>
-                          {assumptionMode === 'existing' ? (
-                            <>
-                              <Field label="Existing assumption">
-                                <select className={fieldClass()} value={selectedAssumptionId} onChange={(event) => {
-                                  const nextId = event.target.value
-                                  const nextAssumption = assumptions.find((assumption) => assumption.id === nextId)
-                                  setSelectedAssumptionId(nextId)
-                                  if (nextAssumption !== undefined) setAssumptionDraft({ ...assumptionDraft, defaultSeverity: nextAssumption.defaultSeverity, severity: nextAssumption.defaultSeverity })
-                                }}>
-                                  {availableAssumptions.map((assumption) => <option key={assumption.id} value={assumption.id}>{assumption.id}</option>)}
-                                </select>
-                              </Field>
-                              <div className="rounded-md bg-background p-3 text-sm text-muted-foreground">
-                                {assumptions.find((assumption) => assumption.id === selectedAssumptionId)?.text ?? 'No unlinked shared assumptions are available.'}
-                              </div>
-                            </>
-                          ) : (
-                            <>
-                              <Field label="Assumption ID" hint="One kebab-case segment; no slash.">
-                                <Input value={assumptionDraft.id} placeholder="single-region" onChange={(event) => setAssumptionDraft({ ...assumptionDraft, id: event.target.value })} />
-                              </Field>
-                              <Field label="Default severity">
-                                <select className={fieldClass()} value={assumptionDraft.defaultSeverity} onChange={(event) => setAssumptionDraft({ ...assumptionDraft, defaultSeverity: event.target.value as Severity })}>
-                                  <option value="hard">hard</option><option value="soft">soft</option>
-                                </select>
-                              </Field>
-                              <div className="md:col-span-2">
-                                <Field label="Shared assumption text">
-                                  <textarea className={`${fieldClass()} min-h-20 resize-y`} value={assumptionDraft.text} placeholder="Describe the precondition in plain language." onChange={(event) => setAssumptionDraft({ ...assumptionDraft, text: event.target.value })} />
-                                </Field>
-                              </div>
-                            </>
-                          )}
-                          <Field label="Severity for this intent">
-                            <select className={fieldClass()} value={assumptionDraft.severity} onChange={(event) => setAssumptionDraft({ ...assumptionDraft, severity: event.target.value as Severity })}>
-                              <option value="hard">hard</option><option value="soft">soft</option>
-                            </select>
-                          </Field>
-                          <Field label="Review date" hint="Optional; expiry does not automatically fail lint.">
-                            <Input type="date" value={assumptionDraft.expiresAt} onChange={(event) => setAssumptionDraft({ ...assumptionDraft, expiresAt: event.target.value })} />
-                          </Field>
-                          <div className="md:col-span-2">
-                            <Field label="Rationale" hint="Required, at least 10 characters.">
-                              <textarea className={`${fieldClass()} min-h-20 resize-y`} value={assumptionDraft.rationale} placeholder="Why does this assumption have this severity for this intent?" onChange={(event) => setAssumptionDraft({ ...assumptionDraft, rationale: event.target.value })} />
-                            </Field>
-                          </div>
-                          {formError ? <p role="alert" className="md:col-span-2 text-sm text-destructive">{formError}</p> : null}
-                          <div className="flex justify-end gap-2 md:col-span-2">
-                            <Button type="button" variant="outline" onClick={() => { setShowAssumptionForm(false); setFormError(null) }}>Cancel</Button>
-                            <Button type="submit">{assumptionMode === 'existing' ? 'Attach assumption' : 'Create and attach'}</Button>
-                          </div>
-                        </form>
-                      ) : null}
-                    </CardContent>
-                  </Card>
-                </>
-              ) : (
-                <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">Select an intent from the tree to view its details.</CardContent></Card>
-              )}
+              ) : null}
               </div>
-            </section>
-          </div>
-        </div>
+            </section> : null}
       </div>
     </main>
   )

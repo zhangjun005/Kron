@@ -87,7 +87,7 @@ When a valid `// @kron:intent <slug>` anchor is completed and left unchanged bri
 
 ## Code navigation
 
-Use **Ctrl+left-click** on a Kron intent anchor to follow its LSP definition in the editor. This uses VS Code's built-in go-to-definition gesture; F12 remains available as VS Code's standard keyboard shortcut.
+Kron intent slugs in valid `@kron:intent` anchors are underlined. Use **Ctrl+left-click** on an anchor to follow its LSP definition in the editor. F12 remains available as VS Code's standard keyboard shortcut.
 
 ## Not in scope
 
