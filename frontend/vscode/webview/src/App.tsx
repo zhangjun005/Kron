@@ -362,6 +362,7 @@ function App(): JSX.Element {
   const [formError, setFormError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [pendingDeleteSlug, setPendingDeleteSlug] = useState<string | null>(null)
+  const [showArchivePanel, setShowArchivePanel] = useState(false)
   const [showAssumptionForm, setShowAssumptionForm] = useState(false)
   const [assumptionMode, setAssumptionMode] = useState<'existing' | 'new'>('existing')
   const [selectedAssumptionId, setSelectedAssumptionId] = useState('')
@@ -981,6 +982,7 @@ function App(): JSX.Element {
         setSelectedSlug(slug)
         setNotice(`Restored "${slug}" from Kron trash.`)
         setDetailReload((value) => value + 1)
+        setShowArchivePanel(false)
         requestTree(true)
       } catch (requestError: unknown) {
         setDetailError(requestError instanceof Error ? requestError.message : 'Kron could not restore this intent.')
@@ -997,6 +999,7 @@ function App(): JSX.Element {
       : assumption))
     setSelectedSlug(slug)
     setNotice(`Preview restored "${slug}". No workspace files were changed.`)
+    setShowArchivePanel(false)
   }
 
   const toggleAssumptionForm = (): void => {
@@ -1029,20 +1032,19 @@ function App(): JSX.Element {
   const availableAssumptions = assumptions.filter((assumption) => !activeDetail?.assumptions.some((item) => item.id === assumption.id))
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <div className="flex min-h-screen flex-col">
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3">
-          <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">K</div>
-            <div>
-              <div className="font-semibold leading-tight">Kron</div>
-              <div className="text-xs text-muted-foreground">Intent workspace</div>
-            </div>
+    <main className="h-full w-full overflow-hidden bg-background text-foreground">
+      <div className="flex h-full min-h-0 flex-col">
+        <header className="flex min-w-0 shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-2">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">K</div>
+            <div className="font-semibold leading-tight">Intent tree</div>
             <Badge variant={canEdit ? 'secondary' : 'default'}>{canEdit ? 'Mock preview' : 'Live tree'}</Badge>
           </div>
-          <div className="flex items-center gap-2">
-            {!canEdit ? <span className="hidden text-xs text-muted-foreground sm:inline">Changes write to the selected Kron workspace</span> : null}
-            <Button variant="outline" size="sm" onClick={() => requestTree(true)} disabled={loading}>
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setShowArchivePanel(true)}>
+              Archived <Badge variant="secondary" className="ml-2">{archivedIntents.length}</Badge>
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => requestTree(true)} disabled={loading} aria-label="Refresh intents">
               <span className="mr-2" aria-hidden="true">↻</span>{loading ? 'Loading…' : 'Refresh'}
             </Button>
             <Button size="sm" onClick={startCreate} disabled={!canEdit && activeWorkspaceId === undefined}>
@@ -1051,22 +1053,16 @@ function App(): JSX.Element {
           </div>
         </header>
 
-        <div className="flex-1 p-4 md:p-6">
-          <div className="mx-auto grid max-w-7xl gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
-            <Card className="min-w-0 shadow-none lg:col-span-2">
-              <CardHeader className="flex-row flex-wrap items-center justify-between gap-3 p-4">
-                <div>
-                  <CardTitle className="text-sm">Intent tree</CardTitle>
-                  <CardDescription className="mt-1">{canEdit ? intents.length : rows.filter(({ node }) => !node.is_dir).length} intents · hierarchy view</CardDescription>
-                </div>
+        <div className="min-h-0 flex-1 p-2">
+          <div className="h-full min-h-0">
+            <Card className="flex h-full min-h-0 flex-col shadow-none">
+              <CardHeader className="flex shrink-0 flex-row flex-wrap items-center justify-between gap-3 p-3">
+                <CardDescription>{canEdit ? intents.length : rows.filter(({ node }) => !node.is_dir).length} intents · hierarchy view</CardDescription>
                 <div className="flex min-w-0 flex-1 items-center justify-end gap-2 sm:max-w-lg">
                   <Input aria-label="Filter intents" placeholder="Filter intents…" value={filter} onChange={(event) => setFilter(event.target.value)} />
-                  <Button variant="outline" size="sm" onClick={() => requestTree(true)} disabled={loading}>
-                    <span className="mr-2" aria-hidden="true">↻</span>{loading ? 'Loading…' : 'Refresh'}
-                  </Button>
                 </div>
               </CardHeader>
-              <CardContent className="p-4 pt-0">
+              <CardContent className="relative flex min-h-0 flex-1 flex-col p-2 pt-0">
                 {error ? <p role="alert" className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
                 <IntentCanvas
                   root={activeTree}
@@ -1090,12 +1086,15 @@ function App(): JSX.Element {
               </CardContent>
             </Card>
 
-            <aside className="min-w-0">
-              <Card className="mt-4 shadow-none">
+            <aside className="fixed inset-0 z-50 overflow-y-auto bg-background p-4 md:p-8" hidden={!showArchivePanel} aria-label="Archived intents">
+              <Card className="mx-auto w-full max-w-3xl shadow-none">
                 <CardHeader className="p-4">
                   <div className="flex items-center justify-between">
-                    <CardTitle className="text-sm">Archived intents</CardTitle>
-                    <Badge variant="secondary">{archivedIntents.length}</Badge>
+                    <div className="flex items-center gap-3">
+                      <CardTitle className="text-lg">Archived intents</CardTitle>
+                      <Badge variant="secondary">{archivedIntents.length}</Badge>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => setShowArchivePanel(false)}>Exit</Button>
                   </div>
                   <CardDescription>{canEdit ? 'Preview items can be restored in this session.' : 'Deleted intents can be restored during this Webview session.'}</CardDescription>
                 </CardHeader>
@@ -1118,7 +1117,17 @@ function App(): JSX.Element {
               </Card>
             </aside>
 
-            <section className="min-w-0 space-y-4" hidden={formMode === null && pendingDeleteSlug === null}>
+            <section className="fixed inset-0 z-[60] overflow-y-auto bg-background p-4 md:p-8" hidden={formMode === null && pendingDeleteSlug === null}>
+              <div className="flex min-h-full w-full flex-col gap-4">
+              <div className="flex justify-end">
+                <Button variant="outline" size="sm" onClick={() => {
+                  setFormMode(null)
+                  setPendingDeleteSlug(null)
+                  setDraftParentSlug(null)
+                  setShowAssumptionForm(false)
+                  setFormError(null)
+                }}>Exit</Button>
+              </div>
               {canEdit ? (
                 <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-muted-foreground">
                   Mock preview: edits stay in this page session and are not written to Kron files or sent to MCP.
@@ -1383,6 +1392,7 @@ function App(): JSX.Element {
               ) : (
                 <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">Select an intent from the tree to view its details.</CardContent></Card>
               )}
+              </div>
             </section>
           </div>
         </div>
