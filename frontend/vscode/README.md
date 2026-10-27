@@ -85,6 +85,10 @@ For current implementation state, lifecycle/CSP/LSP integration constraints, and
 
 When a valid `// @kron:intent <slug>` anchor is completed and left unchanged briefly, the extension checks the current workspace. If that intent does not exist, it offers to create it. Confirming creates it through `kron_add`, refreshes the Intent tree, and lets Kron fill creator/time metadata and derive the title from the final slug segment. Optional metadata is not requested.
 
+## Code navigation
+
+Kron intent slugs in valid `@kron:intent` anchors are underlined. Use **Ctrl+left-click** on an anchor to follow its LSP definition in the editor. F12 remains available as VS Code's standard keyboard shortcut.
+
 ## Not in scope
 
 - ❌ No direct import of `internal/` (architecture iron rule #1 + #9)

@@ -37,6 +37,7 @@ const ROW_HEIGHT = 92
 const NODE_WIDTH = 236
 const NODE_HEIGHT = 64
 const PADDING = 40
+const CANVAS_TOP_INSET = 104
 
 function buildLayout(root: TreeNode): CanvasLayout {
   const nodes: PositionedNode[] = []
@@ -116,7 +117,8 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
     title: root.title ?? root.name,
     children: root.children ?? [],
   }), [root])
-  const [pan, setPan] = useState({ x: 20, y: 16 })
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
   const [panning, setPanning] = useState(false)
   const [inspectedSlug, setInspectedSlug] = useState<string | null>(null)
   const [expandedDetails, setExpandedDetails] = useState(false)
@@ -132,6 +134,23 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
   const intents = countLeafIntents(root)
   const hasChildren = (root.children?.length ?? 0) > 0
   const inspectedNode = inspectedSlug === null ? null : layout.nodes.find(({ node }) => node.slug === inspectedSlug)?.node ?? null
+  const fitScale = viewportSize.width > 0 && viewportSize.height > 0
+    ? Math.max(0.1, Math.min(1, (viewportSize.width - 32) / layout.width, (viewportSize.height - CANVAS_TOP_INSET - 24) / layout.height))
+    : 1
+  const fitOffset = {
+    x: Math.max(16, (viewportSize.width - layout.width * fitScale) / 2),
+    y: CANVAS_TOP_INSET + Math.max(12, (viewportSize.height - CANVAS_TOP_INSET - layout.height * fitScale) / 2),
+  }
+
+  useEffect(() => {
+    const viewport = viewportRef.current
+    if (viewport === null) return
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry !== undefined) setViewportSize({ width: entry.contentRect.width, height: entry.contentRect.height })
+    })
+    observer.observe(viewport)
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -215,7 +234,10 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
     const bounds = viewportRef.current.getBoundingClientRect()
     setLinking((current) => current === null ? null : {
       ...current,
-      cursor: { x: event.clientX - bounds.left - pan.x, y: event.clientY - bounds.top - pan.y },
+      cursor: {
+        x: (event.clientX - bounds.left - fitOffset.x - pan.x) / fitScale,
+        y: (event.clientY - bounds.top - fitOffset.y - pan.y) / fitScale,
+      },
     })
   }
 
@@ -253,13 +275,13 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
   }
 
   return (
-    <div ref={containerRef} className="relative flex h-[min(62vh,620px)] min-h-[420px] w-full overflow-hidden rounded-lg border" aria-label="Intent relationship canvas">
+    <div ref={containerRef} className="relative flex min-h-0 w-full flex-1 overflow-hidden" aria-label="Intent relationship canvas">
       <div
         ref={viewportRef}
         className="relative min-w-0 flex-1 overflow-hidden"
         onMouseDown={startPan}
         onMouseMove={updateLinkCursor}
-        onDoubleClick={(event) => { if ((event.target as HTMLElement).closest('[data-intent-node], [data-canvas-overlay]') === null) setPan({ x: 20, y: 16 }) }}
+        onDoubleClick={(event) => { if ((event.target as HTMLElement).closest('[data-intent-node], [data-canvas-overlay]') === null) setPan({ x: 0, y: 0 }) }}
         onContextMenu={(event) => { if ((event.target as HTMLElement).closest('[data-intent-node]') === null) { event.preventDefault(); setContextMenu(null); if (linking !== null) setLinking(null) } }}
       >
       <div
@@ -271,7 +293,7 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
           backgroundPosition: `${pan.x}px ${pan.y}px`,
         }}
       >
-        <div className="absolute left-0 top-0" style={{ transform: `translate(${pan.x}px, ${pan.y}px)`, width: layout.width, height: layout.height }}>
+        <div className="absolute left-0 top-0 origin-top-left" style={{ transform: `translate(${fitOffset.x + pan.x}px, ${fitOffset.y + pan.y}px) scale(${fitScale})`, width: layout.width, height: layout.height }}>
           <svg className="pointer-events-none absolute left-0 top-0" width={layout.width} height={layout.height} aria-hidden="true">
             <defs>
               <marker id="kron-vscode-depends-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -392,10 +414,10 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
         </div>
       </div>
       {!hasChildren ? <div className="pointer-events-none absolute inset-0 grid place-items-center text-sm text-muted-foreground">No intents in this workspace yet.</div> : null}
-      {linking !== null ? <div data-canvas-overlay="true" className="absolute left-2 top-2 z-20 rounded-md border bg-background/95 px-3 py-2 text-xs shadow-sm">{linkSaving ? 'Saving relation…' : `Choose a target for ${linking.kind === 'depends' ? 'depends_on (solid)' : 'references (dashed)'}. Press Esc to cancel.`}{linkError ? <div role="alert" className="mt-1 text-destructive">{linkError}</div> : null}</div> : null}
-      {linking === null && linkMessage !== null ? <div data-canvas-overlay="true" role="status" className="absolute left-2 top-2 z-20 rounded-md border bg-background/95 px-3 py-2 text-xs shadow-sm">{linkMessage}<button type="button" className="ml-3 text-muted-foreground hover:text-foreground" onClick={() => setLinkMessage(null)}>×</button></div> : null}
+      {linking !== null ? <div data-canvas-overlay="true" className="absolute bottom-10 left-2 z-20 max-w-[min(480px,calc(100%-1rem))] rounded-md border bg-background/95 px-3 py-2 text-xs shadow-sm">{linkSaving ? 'Saving relation…' : `Choose a target for ${linking.kind === 'depends' ? 'depends_on (solid)' : 'references (dashed)'}. Press Esc to cancel.`}{linkError ? <div role="alert" className="mt-1 text-destructive">{linkError}</div> : null}</div> : null}
+      {linking === null && linkMessage !== null ? <div data-canvas-overlay="true" role="status" className="absolute bottom-10 left-2 z-20 max-w-[min(480px,calc(100%-1rem))] rounded-md border bg-background/95 px-3 py-2 text-xs shadow-sm">{linkMessage}<button type="button" className="ml-3 text-muted-foreground hover:text-foreground" onClick={() => setLinkMessage(null)}>×</button></div> : null}
       {contextMenu !== null ? (
-        <div data-canvas-overlay="true" className="absolute z-30 grid min-w-56 gap-1 rounded-md border bg-popover p-1 text-popover-foreground shadow-md" style={{ left: Math.min(contextMenu.x, Math.max(8, (containerRef.current?.clientWidth ?? 600) - 240)), top: Math.min(contextMenu.y, Math.max(8, (containerRef.current?.clientHeight ?? 400) - 100)) }} onMouseDown={(event) => event.stopPropagation()}>
+        <div data-canvas-overlay="true" className="absolute z-30 grid min-w-56 gap-1 rounded-md border bg-popover p-1 text-popover-foreground shadow-lg" style={{ left: Math.min(contextMenu.x, Math.max(8, (containerRef.current?.clientWidth ?? 600) - 240)), top: Math.min(contextMenu.y, Math.max(8, (containerRef.current?.clientHeight ?? 400) - 100)), backgroundColor: 'hsl(var(--popover))', opacity: 1 }} onMouseDown={(event) => event.stopPropagation()}>
           <div className="px-3 pt-2 text-[10px] text-muted-foreground">Parent: {contextMenu.node.slug}</div>
           <button type="button" className="rounded px-3 py-2 text-left text-xs hover:bg-accent" onClick={() => { onCreateChild(contextMenu.node); setContextMenu(null) }}>Create child intent</button>
           {!contextMenu.node.is_dir || relations[contextMenu.node.slug]?.exists === true ? (
@@ -407,7 +429,7 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
           ) : null}
         </div>
       ) : null}
-      <div className="pointer-events-none absolute right-2 top-2 flex flex-wrap items-center gap-3 rounded bg-background/90 px-2 py-1 text-[10px] text-muted-foreground">
+      <div className="pointer-events-none absolute right-2 top-[3.75rem] flex flex-wrap items-center justify-end gap-3 rounded bg-background/90 px-2 py-1 text-[10px] text-muted-foreground">
           <span className="flex items-center gap-1"><svg width="24" height="8" aria-hidden="true"><line x1="1" y1="4" x2="21" y2="4" stroke="hsl(var(--primary))" strokeWidth="2" /></svg>depends_on (hard)</span>
           <span className="flex items-center gap-1"><svg width="24" height="8" aria-hidden="true"><line x1="1" y1="4" x2="21" y2="4" stroke="hsl(var(--muted-foreground))" strokeWidth="1.5" strokeDasharray="6 4" /></svg>references (soft)</span>
       </div>
@@ -421,14 +443,14 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
       </div>
       </div>
       {inspectedNode !== null ? (
-        <aside data-canvas-overlay="true" className="z-10 flex w-[min(330px,42%)] shrink-0 flex-col border-l bg-card" aria-label={`Intent details: ${inspectedNode.title ?? inspectedNode.name}`}>
+        <aside data-canvas-overlay="true" className="absolute inset-y-0 right-0 z-40 flex w-[min(380px,42%)] max-w-full flex-col border-l bg-card shadow-2xl" aria-label={`Intent details: ${inspectedNode.title ?? inspectedNode.name}`}>
           <div className="flex items-start justify-between gap-2 border-b p-3">
             <div className="min-w-0">
               <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Intent details</div>
               <div className="mt-1 truncate text-sm font-semibold">{detail?.slug === inspectedSlug ? detail.title : inspectedNode.title ?? inspectedNode.name}</div>
               <div className="truncate font-mono text-[10px] text-muted-foreground">{inspectedNode.slug}</div>
             </div>
-            <button type="button" className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent" aria-label="Close intent details" onClick={() => { setInspectedSlug(null); setExpandedDetails(false) }}>×</button>
+            <button type="button" className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent" aria-label="Close intent details" title="Close intent details" onClick={() => { setInspectedSlug(null); setExpandedDetails(false) }}>×</button>
           </div>
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-xs">
             {detailLoading ? <p role="status" className="text-muted-foreground">Loading intent details…</p> : null}
