@@ -80,8 +80,17 @@ if (-not $SkipFrontend) {
 }
 Push-Location (Join-Path $RepoRoot 'frontend\wails')
 try {
-    go build -tags "desktop production" -ldflags "-w -s -H windowsgui" `
-        -o (Join-Path $App 'Kron-GUI.exe') .
+    # Use the Wails builder so build/appicon.png is converted into the
+    # Windows PE icon resource. A raw `go build` leaves the executable with
+    # the generic Go icon even though the in-app logo is correct.
+    go run github.com/wailsapp/wails/v2/cmd/wails@v2.16.0 build -s -skipbindings -nopackage `
+        -tags "desktop production" -ldflags "-w -s -H windowsgui" `
+        -webview2 error -o Kron-GUI.exe
+    if ($LASTEXITCODE -ne 0) {
+        throw "Wails GUI build failed with exit code $LASTEXITCODE"
+    }
+    Copy-Item -LiteralPath (Join-Path $RepoRoot 'frontend\wails\build\bin\Kron-GUI.exe') `
+        -Destination (Join-Path $App 'Kron-GUI.exe') -Force
 } finally {
     Pop-Location
 }
@@ -113,6 +122,17 @@ if ((Resolve-Path $registry.current_project).Path -ne (Resolve-Path $Project).Pa
     throw "registry current_project points at '$($registry.current_project)', expected '$Project'"
 }
 
+# Seed the GUI-only preferences file alongside the portable bundle. The GUI
+# will extend this file when the user customises themes or project cards.
+$guiSettings = @"
+{
+  "schema_version": 1,
+  "theme": "system",
+  "projects": {}
+}
+"@
+Set-Content -Path (Join-Path $App 'guiSettings.json') -Value $guiSettings.Trim() -Encoding UTF8
+
 # ---- 5. release-like README.txt -------------------------------------------
 $readme = @"
 Kron test bundle (release-shaped)
@@ -127,6 +147,7 @@ Write-Output "seeded release-like env: $App"
 Write-Output "  Kron-GUI.exe  = Wails GUI"
 Write-Output "  kron.exe      = CLI + serve-mcp + serve-lsp"
 Write-Output "  projects.json = $registryPath"
+Write-Output "  guiSettings.json = $(Join-Path $App 'guiSettings.json')"
 Write-Output "  project       = $Project"
 
 if ($Verify) {

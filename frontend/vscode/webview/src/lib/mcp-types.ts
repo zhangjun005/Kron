@@ -36,7 +36,7 @@ export type WebviewInbound =
     | { type: 'kron_mcp:error'; requestId: number; tool: McpToolName; message: string }
 
 export type McpToolName =
-    | 'kron_get' | 'kron_add' | 'kron_update' | 'kron_delete' | 'kron_restore'
+    | 'kron_get' | 'kron_lint' | 'kron_add' | 'kron_update' | 'kron_delete' | 'kron_restore'
     | 'kron_assume_list' | 'kron_assume_create'
 
 /** Messages the webview can send to the extension host. */
@@ -86,7 +86,7 @@ export function isWebviewInbound(value: unknown): value is WebviewInbound {
 }
 
 function isMcpToolName(value: unknown): value is McpToolName {
-    return value === 'kron_get' || value === 'kron_add' || value === 'kron_update'
+    return value === 'kron_get' || value === 'kron_lint' || value === 'kron_add' || value === 'kron_update'
         || value === 'kron_delete' || value === 'kron_restore'
         || value === 'kron_assume_list' || value === 'kron_assume_create'
 }

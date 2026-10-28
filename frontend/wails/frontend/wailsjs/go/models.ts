@@ -1,5 +1,50 @@
 export namespace main {
 
+	export class GUIProjectSettings {
+	    displayName: string;
+	    coverImage: string;
+
+	    static createFrom(source: any = {}) {
+	        return new GUIProjectSettings(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.displayName = source["displayName"];
+	        this.coverImage = source["coverImage"];
+	    }
+	}
+
+	export class GUISettings {
+	    schemaVersion: number;
+	    theme: string;
+	    projects: {[key: string]: GUIProjectSettings};
+
+	    static createFrom(source: any = {}) {
+	        return new GUISettings(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schemaVersion = source["schemaVersion"];
+	        this.theme = source["theme"];
+	        this.projects = this.convertValues(source["projects"], GUIProjectSettings, true);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (asMap && "object" === typeof a) {
+		        for (const key of Object.keys(a)) {
+		            a[key] = new classs(a[key]);
+		        }
+		        return a;
+		    }
+		    return new classs(a);
+		}
+	}
+
 	export class KronInfo {
 	    name: string;
 	    version: string;

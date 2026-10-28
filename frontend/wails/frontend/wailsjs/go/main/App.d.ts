@@ -4,7 +4,19 @@ import {main} from '../models';
 
 export function CallMCPTool(arg1:string,arg2:string):Promise<string>;
 
+export function AddProject():Promise<main.ListProjectsLiveResult>;
+
 export function GetKronInfo():Promise<main.KronInfo>;
+
+export function GetGUISettings():Promise<main.GUISettings>;
+
+export function ChooseProjectCover(arg1:string):Promise<main.GUISettings>;
+
+export function GetProjectCoverData(arg1:string):Promise<string>;
+
+export function SetGUIProject(arg1:string,arg2:string):Promise<main.GUISettings>;
+
+export function SetGUITheme(arg1:string):Promise<main.GUISettings>;
 
 
 export function ListMCPToolsLive():Promise<main.ListMCPToolsLiveResult>;
@@ -12,5 +24,7 @@ export function ListMCPToolsLive():Promise<main.ListMCPToolsLiveResult>;
 export function ListProjectsLive():Promise<main.ListProjectsLiveResult>;
 
 export function OpenInIDE(arg1:string):Promise<main.OpenIDEResult>;
+
+export function OpenProjectFolder(arg1:string):Promise<void>;
 
 export function SwitchProject(arg1:string):Promise<main.ListProjectsLiveResult>;

@@ -21,7 +21,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export const MCP_TOOL_NAMES = [
-  'kron_tree', 'kron_get', 'kron_add', 'kron_update', 'kron_delete', 'kron_restore',
+  'kron_tree', 'kron_get', 'kron_lint', 'kron_add', 'kron_update', 'kron_delete', 'kron_restore',
   'kron_assume_list', 'kron_assume_create',
 ] as const
 export type McpToolName = typeof MCP_TOOL_NAMES[number]
@@ -48,6 +48,7 @@ const assumptionRefSchema = z.object({
 })
 const toolInputSchemas: Record<McpToolName, zod.ZodTypeAny> = {
   kron_tree: z.object({}).strict(),
+  kron_lint: z.object({}).strict(),
   kron_get: z.object({ slug: z.string().min(1), include_relations: z.boolean().optional() }).strict(),
   kron_add: z.object({
     slug: z.string().min(1),
@@ -77,6 +78,9 @@ const toolInputSchemas: Record<McpToolName, zod.ZodTypeAny> = {
 }
 const toolOutputSchemas: Record<McpToolName, zod.ZodTypeAny> = {
   kron_tree: treeResultSchema,
+  kron_lint: z.object({
+    summary: z.object({ errors: z.number(), warnings: z.number() }).passthrough().optional(),
+  }).passthrough(),
   kron_get: z.object({ intent: z.object({
     slug: z.string(),
     frontmatter: z.object({

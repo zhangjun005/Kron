@@ -3,7 +3,6 @@
 // then fires `onDone` so the main shell can mount.
 
 import {useEffect, useState} from 'react';
-import {Sparkles} from 'lucide-react';
 import {Progress} from '@/components/ui/progress';
 
 interface BootAnimationProps {
@@ -59,17 +58,15 @@ export function BootAnimation(props: BootAnimationProps): JSX.Element {
             ].join(' ')}
         >
             <div className="flex flex-col items-center gap-6 w-72">
-                <div
+                <img
+                    src="/kronLogo.png"
+                    alt="Kron"
                     className={[
-                        'w-16 h-16 rounded-2xl',
-                        'bg-primary text-primary-foreground',
-                        'flex items-center justify-center',
+                        'w-20 h-20 object-contain',
                         'transition-transform duration-700',
                         phase === 'in' ? 'scale-90' : 'scale-100',
                     ].join(' ')}
-                >
-                    <Sparkles className="h-8 w-8"/>
-                </div>
+                />
 
                 <div className="text-center space-y-1">
                     <div className="text-lg font-semibold tracking-tight">

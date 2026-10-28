@@ -65,9 +65,67 @@
   }
 }
 
-/*
- * NOTE: VSCode webview dark/light theme sync (--vscode-* CSS variables)
- * is intentionally OUT of scope for this PR.
- * Tracked under RFC 2026-10-18-vscode-skeleton-sdk.md §3.4 D2 (v.s. PR).
- * For now we use shadcn's default light/dark via the .dark class.
- */
+body {
+  color: var(--vscode-foreground, hsl(var(--foreground)));
+  background: var(--vscode-editor-background, hsl(var(--background)));
+  font-size: var(--kron-font-size, 14px);
+}
+
+body[data-kron-font-size="10"] { --kron-font-size: 10px; }
+body[data-kron-font-size="11"] { --kron-font-size: 11px; }
+body[data-kron-font-size="12"] { --kron-font-size: 12px; }
+body[data-kron-font-size="13"] { --kron-font-size: 13px; }
+body[data-kron-font-size="14"] { --kron-font-size: 14px; }
+body[data-kron-font-size="15"] { --kron-font-size: 15px; }
+body[data-kron-font-size="16"] { --kron-font-size: 16px; }
+body[data-kron-font-size="17"] { --kron-font-size: 17px; }
+body[data-kron-font-size="18"] { --kron-font-size: 18px; }
+body[data-kron-font-size="19"] { --kron-font-size: 19px; }
+body[data-kron-font-size="20"] { --kron-font-size: 20px; }
+body[data-kron-font-size="21"] { --kron-font-size: 21px; }
+body[data-kron-font-size="22"] { --kron-font-size: 22px; }
+body[data-kron-font-size="23"] { --kron-font-size: 23px; }
+body[data-kron-font-size="24"] { --kron-font-size: 24px; }
+
+.markdown-body {
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3 {
+  margin: 1rem 0 0.5rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.markdown-body h1 { font-size: 1.35em; }
+.markdown-body h2 { font-size: 1.2em; }
+.markdown-body h3 { font-size: 1.08em; }
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body blockquote,
+.markdown-body pre { margin: 0.65rem 0; }
+.markdown-body ul,
+.markdown-body ol { padding-left: 1.35rem; }
+.markdown-body blockquote {
+  border-left: 3px solid var(--vscode-textBlockQuote-border, hsl(var(--border)));
+  padding-left: 0.8rem;
+  color: var(--vscode-descriptionForeground, hsl(var(--muted-foreground)));
+}
+.markdown-body code {
+  border-radius: 0.25rem;
+  background: var(--vscode-textCodeBlock-background, hsl(var(--muted)));
+  padding: 0.1rem 0.25rem;
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+}
+.markdown-body pre {
+  overflow: auto;
+  border: 1px solid var(--vscode-textCodeBlock-background, hsl(var(--border)));
+  background: var(--vscode-textCodeBlock-background, hsl(var(--muted)));
+  padding: 0.75rem;
+}
+.markdown-body pre code { background: transparent; padding: 0; }
+.markdown-body a { color: var(--vscode-textLink-foreground, hsl(var(--primary))); }

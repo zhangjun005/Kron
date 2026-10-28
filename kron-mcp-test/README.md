@@ -12,6 +12,8 @@ kron-mcp-test/
 │   ├── Kron-GUI.exe         ← Wails GUI（raw build，双击）
 │   ├── kron.exe             ← CLI + serve-mcp + serve-lsp（同一个二进制）
 │   ├── projects.json        ← registry，由 `kron register` 写在 exe 旁
+│   ├── guiSettings.json     ← GUI 主题和项目卡片偏好
+│   ├── covers/               ← GUI 项目封面（用户选择后生成）
 │   ├── README.txt           ← 模拟发布 zip 内的说明
 │   └── serve-mcp.log        ← 运行时由 GUI spawn 的 serve-mcp 写入
 ├── project/                 ← 被测项目（入库 fixture，含 .kron/ + 锚点）
@@ -42,7 +44,7 @@ powershell -NoProfile -File frontend/wails/scripts/seed-release-env.ps1 -SkipFro
 
 ## 已验证的发布态行为
 
-1. **GUI**：`app\Kron-GUI.exe` 双击（cwd = `app`）→ 从 exe 旁的 `projects.json` 读 active project → spawn `app\kron.exe serve-mcp -CWD project` → Live 树正常。
+1. **GUI**：`app\Kron-GUI.exe` 双击（cwd = `app`）→ 项目卡片首页 → 选择项目 → spawn `app\kron.exe serve-mcp -CWD project` → Live 树正常。
 2. **MCP 引用 json**：`kron.exe serve-mcp`（无 `-CWD`，cwd 设为无关目录）→ 仍从 `app\projects.json` 解析出 8 条 intent；移走 `projects.json` 后同一调用失败（负向对照）。
 3. **CLI**：在 `project/` 内运行 `app\kron.exe lint`，结果与仓库 fixture 一致（1 error + 1 warning）。
 

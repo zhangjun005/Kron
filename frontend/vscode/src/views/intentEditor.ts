@@ -47,7 +47,7 @@ function timeout<T>(promise: Promise<T>): Promise<T> {
   })
 }
 
-function renderHtml(context: vscode.ExtensionContext, webview: vscode.Webview): string {
+function renderHtml(context: vscode.ExtensionContext, webview: vscode.Webview, fontSize: number): string {
   const webviewRoot = vscode.Uri.file(path.join(context.extensionPath, 'dist', 'webview'))
   const indexPath = path.join(webviewRoot.fsPath, 'index.html')
   let html: string
@@ -65,7 +65,9 @@ function renderHtml(context: vscode.ExtensionContext, webview: vscode.Webview): 
     `style-src ${webview.cspSource}`,
     `script-src 'nonce-${nonce}' ${webview.cspSource}`,
   ].join('; ')
+  const safeFontSize = Number.isFinite(fontSize) ? Math.min(24, Math.max(10, Math.round(fontSize))) : 14
   html = html.replace(/<head>/i, `<head>\n<meta http-equiv="Content-Security-Policy" content="${policy}">`)
+  html = html.replace(/<body\b/i, `<body data-kron-font-size="${safeFontSize}"`)
   html = html.replace(/<script\b([^>]*)>/gi, (_tag, attributes: string) => `<script nonce="${nonce}"${attributes}>`)
   return html.replace(/\b(src|href)="([^"]+)"/g, (match, attribute: string, resource: string) => {
     if (/^(?:https?:|data:|#|vscode-webview:)/i.test(resource)) return match
@@ -114,7 +116,8 @@ export function openIntentWorkspace(
   context.subscriptions.push(panel)
 
   try {
-    panel.webview.html = renderHtml(context, panel.webview)
+    const fontSize = vscode.workspace.getConfiguration('kron').get<number>('webviewFontSize', 14)
+    panel.webview.html = renderHtml(context, panel.webview, fontSize)
   } catch (error: unknown) {
     output.appendLine(`Webview initialization failed: ${error instanceof Error ? error.message : String(error)}`)
     void vscode.window.showErrorMessage(error instanceof Error ? error.message : 'Unable to open the Kron Webview.')

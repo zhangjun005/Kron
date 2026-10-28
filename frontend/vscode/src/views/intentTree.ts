@@ -24,7 +24,17 @@ export class IntentTreeProvider implements vscode.TreeDataProvider<IntentItem>, 
   readonly onDidChangeTreeData = this.changed.event
   private root: TreeNode | undefined
 
-  constructor(private readonly connections: readonly WorkspaceMcpConnection[]) {}
+  private connections: readonly WorkspaceMcpConnection[]
+
+  constructor(connections: readonly WorkspaceMcpConnection[]) {
+    this.connections = connections
+  }
+
+  setConnections(connections: readonly WorkspaceMcpConnection[]): void {
+    this.connections = connections
+    this.root = undefined
+    this.changed.fire()
+  }
 
   async refresh(): Promise<TreeResult> {
     if (this.connections.length === 0) throw new Error('Open a workspace folder to load Kron intents.')

@@ -24,15 +24,18 @@
     "commands": [
       {
         "command": "kron.refreshIntents",
-        "title": "Kron: Refresh Intents"
+        "title": "Kron: Refresh Intents",
+        "icon": "$(refresh)"
       },
       {
         "command": "kron.openIntentWorkspace",
-        "title": "Kron: Open Intent Workspace"
+        "title": "Kron: Open Intent Workspace",
+        "icon": "$(folder-opened)"
       },
       {
         "command": "kron.restartConnections",
-        "title": "Kron: Restart Connections"
+        "title": "Kron: Restart Connections",
+        "icon": "$(debug-restart)"
       }
     ],
     "menus": {
@@ -73,6 +76,13 @@
             "c", "cpp", "csharp", "kotlin", "swift", "shellscript"
           ],
           "description": "VS Code language IDs that receive Kron hover and definition support."
+        },
+        "kron.webviewFontSize": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 24,
+          "default": 14,
+          "description": "Base font size in the Kron Intent Workspace Webview."
         }
       }
     }

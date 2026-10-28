@@ -9,14 +9,19 @@ import {
     ListTree,
     FileCode2,
     GitBranch,
-    ShieldCheck,
     CircleAlert,
+    ShieldCheck,
     History,
     Sparkles,
     Search,
     ChevronRight,
     ChevronDown,
     Folder,
+    ImagePlus,
+    Settings,
+    FolderOpen,
+    ArrowRight,
+    ArrowLeft,
 } from 'lucide-react';
 import {Button} from '@/components/ui/button';
 import {Badge} from '@/components/ui/badge';
@@ -31,7 +36,8 @@ import {
 import {ScrollArea} from '@/components/ui/scroll-area';
 import {Separator} from '@/components/ui/separator';
 import {Progress} from '@/components/ui/progress';
-import {GetKronInfo, ListMCPToolsLive, CallMCPTool, ListProjectsLive, SwitchProject} from '../wailsjs/go/main/App';
+import {AddProject, ChooseProjectCover, GetGUISettings, GetKronInfo, GetProjectCoverData, ListMCPToolsLive, CallMCPTool, ListProjectsLive, OpenProjectFolder, SetGUIProject, SetGUITheme, SwitchProject} from '../wailsjs/go/main/App';
+import {main} from '../wailsjs/go/models';
 import {type KronInfo, type IntentNode, type TreeStats} from '@/lib/intent-types';
 import {BootAnimation} from '@/components/boot-animation';
 import {IntentCanvas} from '@/components/intent-canvas';
@@ -51,6 +57,8 @@ interface RailAssumption {
     verifiedAt?: string;
     verifiedBy?: string;
 }
+
+type GUITheme = 'system' | 'light' | 'dark';
 
 // The GUI always talks to a real `kron serve-mcp` subprocess (via the Go
 // bridge). There is no built-in demo data: the shared integration fixture
@@ -89,6 +97,12 @@ function App() {
     const [switchingProject, setSwitchingProject] = useState<string | null>(null);
     const [projectSwitchError, setProjectSwitchError] = useState<string | null>(null);
     const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+    const [theme, setTheme] = useState<GUITheme>('system');
+    const [settingsError, setSettingsError] = useState<string | null>(null);
+    const [settingsSaving, setSettingsSaving] = useState<boolean>(false);
+    const [guiSettings, setGuiSettings] = useState<main.GUISettings | null>(null);
+    const [workspaceEntered, setWorkspaceEntered] = useState<boolean>(false);
+    const [addingProject, setAddingProject] = useState<boolean>(false);
     // Selection is owned here so the left-rail rows can drive the canvas.
     const [selectedIntentId, setSelectedIntentId] = useState<string | null>(null);
     const [focusRequest, setFocusRequest] = useState<number>(0);
@@ -100,6 +114,65 @@ function App() {
     );
     const [liveProjectsError, setLiveProjectsError] = useState<string | null>(null);
     const [liveProjectsLoading, setLiveProjectsLoading] = useState<boolean>(false);
+
+    useEffect(() => {
+        let cancelled = false;
+        void GetGUISettings().then((settings: main.GUISettings) => {
+            if (cancelled) return;
+            const nextTheme: GUITheme = settings.theme === 'light' || settings.theme === 'dark'
+                ? settings.theme
+                : 'system';
+            setTheme(nextTheme);
+            setGuiSettings(settings);
+        }).catch((err: unknown) => {
+            if (!cancelled) setSettingsError(err instanceof Error ? err.message : String(err));
+        });
+        return (): void => { cancelled = true; };
+    }, []);
+
+    useEffect(() => {
+        const root = document.documentElement;
+        const media = window.matchMedia('(prefers-color-scheme: dark)');
+        const apply = (): void => {
+            const isDark = theme === 'dark' || (theme === 'system' && media.matches);
+            root.classList.toggle('dark', isDark);
+            root.style.colorScheme = isDark ? 'dark' : 'light';
+        };
+        apply();
+        if (theme !== 'system') return;
+        media.addEventListener('change', apply);
+        return (): void => media.removeEventListener('change', apply);
+    }, [theme]);
+
+    const changeTheme = useCallback((nextTheme: GUITheme): void => {
+        setSettingsSaving(true);
+        setSettingsError(null);
+        void SetGUITheme(nextTheme).then(() => {
+            setTheme(nextTheme);
+        }).catch((err: unknown) => {
+            setSettingsError(err instanceof Error ? err.message : String(err));
+        }).finally(() => setSettingsSaving(false));
+    }, []);
+
+    const saveProjectSettings = useCallback((projectPath: string, displayName: string): void => {
+        setSettingsSaving(true);
+        setSettingsError(null);
+        void SetGUIProject(projectPath, displayName).then((settings) => {
+            setGuiSettings(settings);
+        }).catch((err: unknown) => {
+            setSettingsError(err instanceof Error ? err.message : String(err));
+        }).finally(() => setSettingsSaving(false));
+    }, []);
+
+    const chooseProjectCover = useCallback((projectPath: string): void => {
+        setSettingsSaving(true);
+        setSettingsError(null);
+        void ChooseProjectCover(projectPath).then((settings) => {
+            setGuiSettings(settings);
+        }).catch((err: unknown) => {
+            setSettingsError(err instanceof Error ? err.message : String(err));
+        }).finally(() => setSettingsSaving(false));
+    }, []);
 
     const displayTree: IntentNode[] = liveTree ?? [];
     const showLiveTreeSkeleton: boolean = liveTree === null && liveTreeError === null;
@@ -247,6 +320,22 @@ function App() {
         }
     }, [refreshLive, refreshLiveTree]);
 
+    const openProject = useCallback((path: string): void => {
+        void switchLiveProject(path).then(() => setWorkspaceEntered(true));
+    }, [switchLiveProject]);
+
+    const addProject = useCallback((): void => {
+        setAddingProject(true);
+        setSettingsError(null);
+        void AddProject().then(async (projects) => {
+            setLiveProjects(projects);
+            const settings = await GetGUISettings();
+            setGuiSettings(settings);
+        }).catch((err: unknown) => {
+            setSettingsError(err instanceof Error ? err.message : String(err));
+        }).finally(() => setAddingProject(false));
+    }, []);
+
     useEffect(() => {
         let cancelled = false;
         (async (): Promise<void> => {
@@ -285,6 +374,48 @@ function App() {
         ...(item.verified_at !== undefined ? {verifiedAt: item.verified_at} : {}),
         ...(item.verified_by !== undefined ? {verifiedBy: item.verified_by} : {}),
     }));
+
+    if (settingsOpen) {
+        return (
+            <>
+                {!booted && (
+                    <BootAnimation onDone={(): void => setBooted(true)}/>
+                )}
+                {booted && (
+                    <SettingsPage
+                        theme={theme}
+                        settings={guiSettings}
+                        projects={liveProjects}
+                        settingsError={settingsError}
+                        settingsSaving={settingsSaving}
+                        onThemeChange={changeTheme}
+                        onSaveProject={saveProjectSettings}
+                        onChooseCover={chooseProjectCover}
+                        onClose={(): void => setSettingsOpen(false)}
+                    />
+                )}
+            </>
+        );
+    }
+
+    if (!workspaceEntered) {
+        return (
+            <>
+                {!booted && (
+                    <BootAnimation onDone={(): void => setBooted(true)}/>
+                )}
+                {booted && (
+                    <ProjectHome
+                        projects={liveProjects}
+                        settings={guiSettings}
+                        onOpenProject={openProject}
+                        addingProject={addingProject}
+                        addProject={addProject}
+                    />
+                )}
+            </>
+        );
+    }
 
     return (
         <>
@@ -325,6 +456,17 @@ function App() {
                     lintLoading={lintLoading}
                     settingsOpen={settingsOpen}
                     onSettingsOpenChange={setSettingsOpen}
+                    currentProjectPath={liveProjects?.current ?? ''}
+                    onOpenProjectFolder={(): void => {
+                        if (liveProjects?.current === undefined || liveProjects.current === '') return;
+                        void OpenProjectFolder(liveProjects.current).catch((err: unknown) => {
+                            setLiveError(err instanceof Error ? err.message : String(err));
+                        });
+                    }}
+                    theme={theme}
+                    settingsError={settingsError}
+                    settingsSaving={settingsSaving}
+                    onThemeChange={changeTheme}
                     assumptions={railAssumptions}
                     assumptionsError={assumptionsError}
                     onSelectIntent={(id): void => {
@@ -410,6 +552,147 @@ function App() {
     );
 }
 
+function ProjectHome(props: {
+    projects: ListProjectsLiveResult | null;
+    settings: main.GUISettings | null;
+    onOpenProject: (path: string) => void;
+    addingProject: boolean;
+    addProject: () => void;
+}): JSX.Element {
+    const [covers, setCovers] = useState<Record<string, string>>({});
+
+    useEffect(() => {
+        let cancelled = false;
+        const paths = props.projects?.projects.map((project) => project.path) ?? [];
+        void Promise.all(paths.map(async (path) => {
+            try {
+                const data = await GetProjectCoverData(path);
+                return data === '' ? null : {path, data};
+            } catch {
+                return null;
+            }
+        })).then((results) => {
+            if (cancelled) return;
+            const next: Record<string, string> = {};
+            for (const result of results) {
+                if (result !== null) next[result.path] = result.data;
+            }
+            setCovers(next);
+        });
+        return (): void => { cancelled = true; };
+    }, [props.projects, props.settings]);
+
+    return (
+        <main className="flex min-h-screen w-screen items-center justify-center overflow-hidden bg-background text-foreground">
+            <div className="w-full max-w-7xl px-8">
+                <div className="flex gap-6 overflow-x-auto pb-5 pt-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    {(props.projects?.projects ?? []).map((project) => {
+                            const metadata = props.settings?.projects?.[project.path];
+                            const displayName = metadata?.displayName?.trim() || project.path.split(/[\\/]/).filter(Boolean).pop() || project.path;
+                            const cover = covers[project.path];
+                            const isCurrent = project.path === props.projects?.current;
+                            return (
+                                <button
+                                    key={project.path}
+                                    type="button"
+                                    onClick={(): void => props.onOpenProject(project.path)}
+                                    className="group w-56 shrink-0 text-left"
+                                >
+                                    <div className={["relative aspect-square overflow-hidden bg-card shadow-sm transition-all duration-200 group-hover:-translate-y-1 group-hover:ring-2 group-hover:ring-primary group-hover:ring-offset-2 group-hover:ring-offset-background", isCurrent ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' : ''].join(' ')}>
+                                        <img src={cover || '/kronLogo.png'} alt="" className="h-full w-full object-cover"/>
+                                        <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/80 to-transparent px-4 pb-4 pt-12 text-white">
+                                            <span className="text-xs font-medium">{isCurrent ? 'Current project' : 'Open project'}</span>
+                                            <ArrowRight className="h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100"/>
+                                        </div>
+                                    </div>
+                                    <div className="mt-3 truncate text-sm font-semibold">{displayName}</div>
+                                    <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground" title={project.path}>{project.path}</div>
+                                </button>
+                            );
+                        })}
+                    <button type="button" onClick={props.addProject} disabled={props.addingProject} className="group w-56 shrink-0 text-left disabled:cursor-wait">
+                        <div className="flex aspect-square items-center justify-center border border-dashed border-border bg-card transition-all duration-200 group-hover:-translate-y-1 group-hover:border-primary group-hover:bg-accent">
+                            <span className="text-7xl font-extralight text-muted-foreground transition-colors group-hover:text-foreground">{props.addingProject ? '…' : '+'}</span>
+                        </div>
+                        <div className="mt-3 text-sm font-semibold">Add project</div>
+                        <div className="mt-1 text-[11px] text-muted-foreground">Choose a folder</div>
+                    </button>
+                </div>
+            </div>
+        </main>
+    );
+}
+
+function SettingsPage(props: {
+    theme: GUITheme;
+    settings: main.GUISettings | null;
+    projects: ListProjectsLiveResult | null;
+    settingsError: string | null;
+    settingsSaving: boolean;
+    onThemeChange: (theme: GUITheme) => void;
+    onSaveProject: (path: string, name: string) => void;
+    onChooseCover: (path: string) => void;
+    onClose: () => void;
+}): JSX.Element {
+    const projectPaths = new Set([
+        ...Object.keys(props.settings?.projects ?? {}),
+        ...(props.projects?.projects.map((project) => project.path) ?? []),
+    ]);
+    return (
+        <main className="min-h-screen w-screen overflow-auto bg-background text-foreground">
+            <div className="mx-auto max-w-4xl px-8 py-8">
+                <div className="flex items-center gap-3">
+                    <Button variant="ghost" size="sm" onClick={props.onClose}><ArrowLeft className="mr-2 h-4 w-4"/> Back</Button>
+                    <h1 className="text-2xl font-semibold">Settings</h1>
+                </div>
+                <Separator className="my-6"/>
+                <Card>
+                    <CardHeader><CardTitle className="text-base">Appearance</CardTitle><CardDescription>Choose how Kron should render its desktop interface.</CardDescription></CardHeader>
+                    <CardContent>
+                        <label className="flex max-w-sm items-center justify-between gap-4 text-sm">
+                            <span>Theme</span>
+                            <select value={props.theme} disabled={props.settingsSaving} onChange={(event): void => {
+                                const value = event.target.value;
+                                if (value === 'system' || value === 'light' || value === 'dark') props.onThemeChange(value);
+                            }} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
+                                <option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option>
+                            </select>
+                        </label>
+                    </CardContent>
+                </Card>
+                <Card className="mt-6">
+                    <CardHeader><CardTitle className="text-base">Project cards</CardTitle><CardDescription>Customize the name and cover shown on the project home screen.</CardDescription></CardHeader>
+                    <CardContent className="space-y-4">
+                        {projectPaths.size === 0 ? <p className="text-sm text-muted-foreground">Project cards will appear here after projects are registered.</p> : Array.from(projectPaths).map((path) => (
+                            <ProjectSettingRow key={path} path={path} metadata={props.settings?.projects?.[path] ?? {displayName: '', coverImage: ''}} disabled={props.settingsSaving} onSave={props.onSaveProject} onChooseCover={props.onChooseCover}/>
+                        ))}
+                    </CardContent>
+                </Card>
+                {props.settingsError !== null && <p role="alert" className="mt-4 text-sm text-destructive">{props.settingsError}</p>}
+            </div>
+        </main>
+    );
+}
+
+function ProjectSettingRow(props: {
+    path: string;
+    metadata: main.GUIProjectSettings;
+    disabled: boolean;
+    onSave: (path: string, name: string) => void;
+    onChooseCover: (path: string) => void;
+}): JSX.Element {
+    const fallback = props.path.split(/[\\/]/).filter(Boolean).pop() || props.path;
+    const [name, setName] = useState<string>(props.metadata.displayName || fallback);
+    return (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border p-3">
+            <div className="min-w-0 flex-1"><div className="truncate text-sm font-medium">{fallback}</div><div className="truncate font-mono text-[11px] text-muted-foreground" title={props.path}>{props.path}</div></div>
+            <Input value={name} disabled={props.disabled} onChange={(event): void => setName(event.target.value)} className="w-48" aria-label={`Display name for ${fallback}`}/>
+            <Button variant="outline" size="sm" disabled={props.disabled} onClick={(): void => props.onChooseCover(props.path)}><ImagePlus className="mr-2 h-4 w-4"/> Cover</Button>
+            <Button size="sm" disabled={props.disabled} onClick={(): void => props.onSave(props.path, name)}>Save</Button>
+        </div>
+    );
+}
+
 function emptyStats(): TreeStats {
     return {intents: 0, groups: 0, stale: 0, verified: 0, draft: 0, review: 0, archived: 0};
 }
@@ -457,6 +740,12 @@ function LeftRail(props: {
     lintLoading: boolean;
     settingsOpen: boolean;
     onSettingsOpenChange: (open: boolean) => void;
+    currentProjectPath: string;
+    onOpenProjectFolder: () => void;
+    theme: GUITheme;
+    settingsError: string | null;
+    settingsSaving: boolean;
+    onThemeChange: (theme: GUITheme) => void;
     /** B-3 assumption registry entries (from kron_assume_list). */
     assumptions: RailAssumption[];
     assumptionsError: string | null;
@@ -487,6 +776,12 @@ function LeftRail(props: {
         lintLoading,
         settingsOpen,
         onSettingsOpenChange,
+        currentProjectPath,
+        onOpenProjectFolder,
+        theme,
+        settingsError,
+        settingsSaving,
+        onThemeChange,
         assumptions,
         assumptionsError,
         onSelectIntent,
@@ -571,7 +866,7 @@ function LeftRail(props: {
                     label="Settings"
                     onClick={(): void => onSettingsOpenChange(!settingsOpen)}
                 >
-                    <ShieldCheck className="h-5 w-5"/>
+                    <Settings className="h-5 w-5"/>
                 </ActivityIcon>
             </div>
 
@@ -590,13 +885,27 @@ function LeftRail(props: {
                         {activeView === 'git' && 'Source Control'}
                         {activeView === 'tools' && 'MCP Tools'}
                     </span>
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-5 w-5 p-0 text-muted-foreground"
-                    >
-                        <History className="h-3.5 w-3.5"/>
-                    </Button>
+                    <div className="flex items-center gap-1">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-5 w-5 p-0 text-muted-foreground"
+                        >
+                            <History className="h-3.5 w-3.5"/>
+                        </Button>
+                        {activeView === 'explorer' && currentProjectPath !== '' ? (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-5 w-5 p-0 text-muted-foreground"
+                                title="Open project folder"
+                                aria-label="Open project folder"
+                                onClick={onOpenProjectFolder}
+                            >
+                                <FolderOpen className="h-3.5 w-3.5"/>
+                            </Button>
+                        ) : null}
+                    </div>
                 </div>
                 <Separator/>
 
@@ -613,8 +922,7 @@ function LeftRail(props: {
                                         Settings
                                     </CardTitle>
                                     <CardDescription className="text-[10px]">
-                                        Read-only client. Everything below comes
-                                        from <code className="font-mono">kron serve-mcp</code>.
+                                        GUI preferences are stored in <code className="font-mono">guiSettings.json</code>.
                                     </CardDescription>
                                 </CardHeader>
                                 <CardContent className="p-3 pt-0 space-y-1.5">
@@ -638,6 +946,23 @@ function LeftRail(props: {
                                         <span className="text-muted-foreground">Registry</span>
                                         <span className="truncate font-mono" title={liveProjects?.projectsPath ?? ''}>{liveProjects?.projectsPath ?? 'not loaded'}</span>
                                     </div>
+                                    <label className="flex items-center justify-between gap-2 pt-1">
+                                        <span className="text-muted-foreground">Theme</span>
+                                        <select
+                                            value={theme}
+                                            disabled={settingsSaving}
+                                            onChange={(event): void => {
+                                                const value = event.target.value;
+                                                if (value === 'system' || value === 'light' || value === 'dark') onThemeChange(value);
+                                            }}
+                                            className="h-7 rounded-md border border-input bg-background px-2 text-[11px] text-foreground"
+                                        >
+                                            <option value="system">System</option>
+                                            <option value="light">Light</option>
+                                            <option value="dark">Dark</option>
+                                        </select>
+                                    </label>
+                                    {settingsError !== null && <p role="alert" className="text-[10px] text-destructive break-words">{settingsError}</p>}
                                     <Button
                                         variant="outline"
                                         size="sm"

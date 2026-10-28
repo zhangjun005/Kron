@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { CircleCheck, CircleDashed, CircleX, FileText, Folder } from 'lucide-react'
 import type { TreeNode } from '@/lib/mcp-types'
+import { MarkdownPreview } from '@/components/MarkdownPreview'
 
 type PositionedNode = {
   node: TreeNode
@@ -107,11 +108,14 @@ type IntentCanvasProps = {
   onCreateChild: (parent: TreeNode) => void
   onEditIntent: () => void
   onDeleteIntent: () => void
+  editorContent: ReactNode | null
+  onCloseDetails: () => void
+  onClearSelection: () => void
   onSelect: (node: TreeNode) => void
 }
 
 /** Left-to-right, pannable hierarchy canvas, adapted for the VS Code Webview tree contract. */
-export function IntentCanvas({ root, filter, selectedSlug, relations, detail, detailLoading, onCreateRelation, onCreateChild, onEditIntent, onDeleteIntent, onSelect }: IntentCanvasProps): JSX.Element {
+export function IntentCanvas({ root, filter, selectedSlug, relations, detail, detailLoading, onCreateRelation, onCreateChild, onEditIntent, onDeleteIntent, editorContent, onCloseDetails, onClearSelection, onSelect }: IntentCanvasProps): JSX.Element {
   const layout = useMemo(() => buildLayout({
     ...root,
     title: root.title ?? root.name,
@@ -127,13 +131,17 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
   const [linkSaving, setLinkSaving] = useState(false)
   const [linkError, setLinkError] = useState<string | null>(null)
   const [linkMessage, setLinkMessage] = useState<string | null>(null)
+  const [detailOffset, setDetailOffset] = useState({ x: 0, y: 0 })
+  const [draggingDetail, setDraggingDetail] = useState(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<{ x: number; y: number; originX: number; originY: number; moved: boolean } | null>(null)
+  const detailDragRef = useRef<{ x: number; y: number; originX: number; originY: number } | null>(null)
   const query = filter.trim().toLowerCase()
   const intents = countLeafIntents(root)
   const hasChildren = (root.children?.length ?? 0) > 0
   const inspectedNode = inspectedSlug === null ? null : layout.nodes.find(({ node }) => node.slug === inspectedSlug)?.node ?? null
+  const inspectedPosition = inspectedSlug === null ? null : layout.nodes.find(({ node }) => node.slug === inspectedSlug) ?? null
   const fitScale = viewportSize.width > 0 && viewportSize.height > 0
     ? Math.max(0.1, Math.min(1, (viewportSize.width - 32) / layout.width, (viewportSize.height - CANVAS_TOP_INSET - 24) / layout.height))
     : 1
@@ -141,6 +149,12 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
     x: Math.max(16, (viewportSize.width - layout.width * fitScale) / 2),
     y: CANVAS_TOP_INSET + Math.max(12, (viewportSize.height - CANVAS_TOP_INSET - layout.height * fitScale) / 2),
   }
+
+  useEffect(() => {
+    setDetailOffset({ x: 0, y: 0 })
+    setDraggingDetail(false)
+    detailDragRef.current = null
+  }, [inspectedSlug])
 
   useEffect(() => {
     const viewport = viewportRef.current
@@ -158,11 +172,28 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
         setContextMenu(null)
         setLinking(null)
         setLinkError(null)
+        setInspectedSlug(null)
+        setExpandedDetails(false)
+        onClearSelection()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
+
+  // Context menus close on the first click outside the menu. The node click
+  // handler can then open the next node's details in the same event sequence.
+  useEffect(() => {
+    if (contextMenu === null) return
+    const onPointerDown = (event: PointerEvent): void => {
+      const target = event.target as HTMLElement | null
+      if (target?.closest('[data-canvas-overlay="true"]') !== null) return
+      setContextMenu(null)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [contextMenu])
+
   const relationEdges = useMemo((): RelationEdge[] => {
     const bySlug = new Map(layout.nodes
       .filter(({ isWorkspace, node }) => !isWorkspace && (!node.is_dir || relations[node.slug]?.exists === true))
@@ -212,8 +243,14 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
       setPan({ x: drag.originX + dx, y: drag.originY + dy })
     }
     const onUp = (): void => {
+      const drag = dragRef.current
       dragRef.current = null
       setPanning(false)
+      if (drag !== null && !drag.moved) {
+        setInspectedSlug(null)
+        setExpandedDetails(false)
+        onClearSelection()
+      }
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
@@ -387,16 +424,15 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
                     chooseLinkTarget(node)
                     return
                   }
-                  onSelect(node)
-                  if (inspectedSlug !== null) { setInspectedSlug(node.slug); setExpandedDetails(false) }
-                }}
-                onDoubleClick={(event) => {
-                  event.stopPropagation()
-                  if (linking !== null) return
+                  if (selectedSlug === node.slug && inspectedSlug === node.slug) {
+                    setInspectedSlug(null)
+                    setExpandedDetails(false)
+                    onClearSelection()
+                    return
+                  }
                   onSelect(node)
                   setInspectedSlug(node.slug)
                   setExpandedDetails(false)
-                  setContextMenu(null)
                 }}
                 onContextMenu={(event) => {
                   event.preventDefault()
@@ -439,22 +475,53 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
         </div>
       ) : null}
       <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-background/85 px-2 py-1 text-[10px] text-muted-foreground">
-        Drag empty space to pan · double-click a node for details · right-click a node to link
+        Drag empty space to pan · click a node for details · right-click a node to link
       </div>
       </div>
-      {inspectedNode !== null ? (
-        <aside data-canvas-overlay="true" className="absolute inset-y-0 right-0 z-40 flex w-[min(380px,42%)] max-w-full flex-col border-l bg-card shadow-2xl" aria-label={`Intent details: ${inspectedNode.title ?? inspectedNode.name}`}>
+      {inspectedNode !== null && inspectedPosition !== null ? (
+        <aside
+          data-canvas-overlay="true"
+          className={`absolute z-40 flex max-h-[78vh] ${editorContent !== null ? 'w-[min(760px,calc(100vw-1.5rem))]' : 'w-[min(380px,calc(100vw-1.5rem))]'} flex-col overflow-hidden rounded-xl border bg-card shadow-2xl ${draggingDetail ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
+          style={{ left: fitOffset.x + pan.x + inspectedPosition.x * fitScale + detailOffset.x, top: fitOffset.y + pan.y + (inspectedPosition.y + NODE_HEIGHT + 12) * fitScale + detailOffset.y }}
+          onMouseDown={(event) => {
+            const target = event.target as HTMLElement
+            if (target.closest('button, a, input, textarea, select, code') !== null) return
+            event.stopPropagation()
+            detailDragRef.current = { x: event.clientX, y: event.clientY, originX: detailOffset.x, originY: detailOffset.y }
+            setDraggingDetail(true)
+          }}
+          onMouseMove={(event) => {
+            const drag = detailDragRef.current
+            if (drag === null) return
+            event.stopPropagation()
+            setDetailOffset({ x: drag.originX + event.clientX - drag.x, y: drag.originY + event.clientY - drag.y })
+          }}
+          onMouseUp={(event) => {
+            if (detailDragRef.current === null) return
+            event.stopPropagation()
+            detailDragRef.current = null
+            setDraggingDetail(false)
+          }}
+          onMouseLeave={() => {
+            if (detailDragRef.current !== null) {
+              detailDragRef.current = null
+              setDraggingDetail(false)
+            }
+          }}
+          aria-label={`Intent details: ${inspectedNode.title ?? inspectedNode.name}`}
+        >
           <div className="flex items-start justify-between gap-2 border-b p-3">
             <div className="min-w-0">
               <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Intent details</div>
               <div className="mt-1 truncate text-sm font-semibold">{detail?.slug === inspectedSlug ? detail.title : inspectedNode.title ?? inspectedNode.name}</div>
               <div className="truncate font-mono text-[10px] text-muted-foreground">{inspectedNode.slug}</div>
             </div>
-            <button type="button" className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent" aria-label="Close intent details" title="Close intent details" onClick={() => { setInspectedSlug(null); setExpandedDetails(false) }}>×</button>
+            <button type="button" className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent" aria-label="Close intent details" title="Close intent details" onClick={() => { onCloseDetails(); setInspectedSlug(null); setExpandedDetails(false); onClearSelection() }}>×</button>
           </div>
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-xs">
+            {editorContent !== null ? editorContent : null}
             {detailLoading ? <p role="status" className="text-muted-foreground">Loading intent details…</p> : null}
-            {detail?.slug === inspectedSlug ? (
+            {editorContent === null && detail?.slug === inspectedSlug ? (
               <>
                 <div className="flex gap-1.5"><span className="rounded bg-secondary px-2 py-0.5">{detail.status}</span><span className="rounded bg-secondary px-2 py-0.5">{detail.kind}</span></div>
                 <p className="whitespace-pre-wrap leading-5 text-muted-foreground">{detail.summary || 'No summary is available.'}</p>
@@ -462,14 +529,14 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
                   <>
                     <div className="rounded-md bg-muted/50 p-2"><div className="text-[10px] uppercase text-muted-foreground">Symbol</div><div className="mt-1 break-all font-mono">{detail.symbol || 'Not specified'}</div></div>
                     <div><div className="text-[10px] uppercase text-muted-foreground">Reviewers</div><div className="mt-1 break-words">{detail.reviewers.length ? detail.reviewers.join(', ') : 'None'}</div></div>
-                    <div><div className="text-[10px] uppercase text-muted-foreground">Decision</div><pre className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2 font-sans leading-5">{detail.body || 'No decision text.'}</pre></div>
+                    <div><div className="text-[10px] uppercase text-muted-foreground">Decision</div><div className="mt-1 max-h-56 overflow-auto rounded-md bg-muted/50 p-2"><MarkdownPreview body={detail.body || 'No decision text.'}/></div></div>
                     <div><div className="text-[10px] uppercase text-muted-foreground">depends_on · solid</div><div className="mt-1 break-words">{detail.dependsOn.join(', ') || 'None'}</div></div>
                     <div><div className="text-[10px] uppercase text-muted-foreground">references · dashed</div><div className="mt-1 break-words">{detail.references.join(', ') || 'None'}</div></div>
                   </>
                 ) : null}
                 <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={() => setExpandedDetails((value) => !value)}>{expandedDetails ? 'Show summary' : 'Show full details'}</button>
                 <div className="flex gap-2 border-t pt-3">
-                  <button type="button" className="rounded border px-2.5 py-1.5 hover:bg-accent" onClick={onEditIntent} disabled={detail.kind !== 'leaf'}>Edit</button>
+                  <button type="button" className="rounded border px-2.5 py-1.5 hover:bg-accent" onClick={onEditIntent}>Edit</button>
                   <button type="button" className="rounded border border-destructive/50 px-2.5 py-1.5 text-destructive hover:bg-destructive/10" onClick={onDeleteIntent} disabled={detail.kind !== 'leaf'}>Delete</button>
                 </div>
               </>

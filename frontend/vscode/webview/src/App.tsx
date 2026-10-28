@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { IntentCanvas } from '@/IntentCanvas'
+import { MarkdownPreview } from '@/components/MarkdownPreview'
 import { isWebviewInbound, type McpToolName, type TreeNode, type TreeResult, type WebviewOutbound } from '@/lib/mcp-types'
 
 type Severity = 'hard' | 'soft'
@@ -1031,6 +1032,78 @@ function App(): JSX.Element {
   const sharedAssumptions = assumptions.filter((assumption) => activeDetail?.assumptions.some((item) => item.id === assumption.id))
   const availableAssumptions = assumptions.filter((assumption) => !activeDetail?.assumptions.some((item) => item.id === assumption.id))
 
+  const editorContent = formMode === null ? null : (
+    <form className="grid items-start gap-4 md:grid-cols-2" onSubmit={saveIntent}>
+      <div className="md:col-span-2 flex items-start justify-between gap-3">
+        <div>
+          <div className="text-base font-semibold">{formMode === 'create' ? 'New intent' : 'Edit intent'}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{canEdit ? 'Preview form for the supported intent fields.' : 'Edits are written through the Kron MCP tools.'}</div>
+        </div>
+        <span className="rounded-full bg-muted px-2 py-1 text-[10px] text-muted-foreground">Editing</span>
+      </div>
+      <Field label="Intent slug" hint={draftParentSlug === null ? 'Lowercase kebab-case; use / for a group.' : `Child of “${draftParentSlug}” is locked; enter one child name after the slash.`}>
+        <Input value={draft.slug} disabled={formMode === 'edit'} placeholder="auth/session-renewal" onChange={(event) => {
+          const value = event.target.value
+          const prefix = draftParentSlug === null ? '' : `${draftParentSlug}/`
+          setDraft({ ...draft, slug: prefix !== '' && !value.startsWith(prefix) ? `${prefix}${value.replace(/^\/+/, '')}` : value })
+        }} />
+      </Field>
+      <Field label="Title">
+        <Input value={draft.title} placeholder="Session renewal" onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
+      </Field>
+      <div className="md:col-span-2">
+        <Field label="Summary" hint={formMode === 'create' ? 'Required. Shown in the intent tree and used as the opening paragraph.' : canEdit ? 'A short description shown in the tree and detail header.' : 'Derived from the first paragraph of the Markdown body.'}>
+          <textarea className={`${fieldClass()} min-h-20 resize-y`} value={draft.summary} readOnly={!canEdit && formMode !== 'create'} placeholder="What decision does this intent record?" onChange={(event) => setDraft({ ...draft, summary: event.target.value })} />
+        </Field>
+      </div>
+      <div className="md:col-span-2 grid min-h-[24rem] gap-4 lg:grid-cols-2">
+        <Field label="Markdown body" hint={canEdit ? 'Edit the decision body; the preview updates as you type.' : 'The Markdown body is saved through Kron MCP.'}>
+          <textarea className={`${fieldClass()} min-h-[20rem] resize-y font-mono text-sm leading-6`} value={draft.body} placeholder={'## Why\n\nExplain the decision and its trade-offs.'} onChange={(event) => setDraft({ ...draft, body: event.target.value })} />
+        </Field>
+        <div className="grid min-h-0 gap-1.5 text-sm">
+          <span className="font-medium">Preview</span>
+          <div className="min-h-[20rem] overflow-auto rounded-md border border-input bg-muted/20 p-4">
+            <MarkdownPreview body={draft.body || 'Nothing to preview yet.'} />
+          </div>
+        </div>
+      </div>
+      <details className="md:col-span-2 rounded-md border p-3">
+        <summary className="cursor-pointer text-sm font-medium">Advanced fields (optional)</summary>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          {formMode === 'create' ? (
+            <Field label="Intent kind" hint="Leaf is a single intent; node groups child intents.">
+              <select className={fieldClass()} value={draft.kind} onChange={(event) => setDraft({ ...draft, kind: event.target.value as Intent['kind'] })}>
+                <option value="leaf">leaf</option><option value="node">node</option>
+              </select>
+            </Field>
+          ) : null}
+          <Field label="Status">
+            <select className={fieldClass()} value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as Intent['status'] })}>
+              <option value="draft">draft</option><option value="active">active</option><option value="superseded">superseded</option>
+            </select>
+          </Field>
+          <Field label="Symbol" hint="Optional code symbol or symbol list.">
+            <Input value={draft.symbol} placeholder="auth.RefreshToken" onChange={(event) => setDraft({ ...draft, symbol: event.target.value })} />
+          </Field>
+          <Field label="Reviewers" hint="Separate handles with commas or new lines.">
+            <Input value={draft.reviewersText} placeholder="@reviewer" onChange={(event) => setDraft({ ...draft, reviewersText: event.target.value })} />
+          </Field>
+          <Field label="References" hint="Intent slugs, one per line.">
+            <textarea className={`${fieldClass()} min-h-20 resize-y`} value={draft.referencesText} placeholder="security/session-timeout" onChange={(event) => setDraft({ ...draft, referencesText: event.target.value })} />
+          </Field>
+          <Field label="Depends on" hint="Required intent slugs, one per line.">
+            <textarea className={`${fieldClass()} min-h-20 resize-y`} value={draft.dependsOnText} placeholder="auth/token-storage" onChange={(event) => setDraft({ ...draft, dependsOnText: event.target.value })} />
+          </Field>
+        </div>
+      </details>
+      {formError ? <p role="alert" className="md:col-span-2 text-sm text-destructive">{formError}</p> : null}
+      <div className="flex justify-end gap-2 md:col-span-2">
+        <Button type="button" variant="outline" onClick={() => { setFormMode(null); setDraftParentSlug(null) }}>Cancel</Button>
+        <Button type="submit" disabled={saving}>{saving ? 'Saving…' : canEdit ? 'Save preview' : 'Save intent'}</Button>
+      </div>
+    </form>
+  )
+
   return (
     <main className="h-full w-full overflow-hidden bg-background text-foreground">
       <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden">
@@ -1051,6 +1124,9 @@ function App(): JSX.Element {
               setFormError(null)
             }
           }}
+          editorContent={editorContent}
+          onCloseDetails={() => { setFormMode(null); setDraftParentSlug(null); setFormError(null) }}
+          onClearSelection={() => { setSelectedSlug(''); setFormMode(null); setDraftParentSlug(null); setFormError(null) }}
           onSelect={(node) => { setSelectedSlug(node.slug); setFormMode(null); setShowAssumptionForm(false); setPendingDeleteSlug(null) }}
         />
 
@@ -1109,7 +1185,7 @@ function App(): JSX.Element {
               </Card>
             </aside>
 
-            {formMode !== null || pendingDeleteSlug !== null ? <section className="fixed inset-0 z-[60] grid place-items-center p-4">
+            {pendingDeleteSlug !== null ? <section className="fixed inset-0 z-[60] grid place-items-center p-4">
               <button
                 type="button"
                 className="absolute inset-0 bg-background/40"
@@ -1125,8 +1201,8 @@ function App(): JSX.Element {
               <div
                 role="dialog"
                 aria-modal="true"
-                aria-label={formMode === 'create' ? 'Create intent' : pendingDeleteSlug !== null ? 'Delete intent' : 'Edit intent'}
-                className="relative z-[1] flex max-h-[92vh] w-[min(760px,92vw)] flex-col gap-4 overflow-y-auto rounded-xl border bg-background p-4 shadow-2xl md:p-6"
+                aria-label="Delete intent"
+                className="relative z-[1] flex max-h-[78vh] w-[min(560px,calc(100vw-1.5rem))] flex-col gap-4 overflow-y-auto rounded-xl border bg-background p-4 shadow-2xl md:p-6"
                 onKeyDown={(event) => {
                   if (event.key === 'Escape') {
                     setFormMode(null)
@@ -1138,13 +1214,7 @@ function App(): JSX.Element {
                 }}
               >
               <div className="flex justify-end">
-                <Button variant="outline" size="sm" onClick={() => {
-                  setFormMode(null)
-                  setPendingDeleteSlug(null)
-                  setDraftParentSlug(null)
-                  setShowAssumptionForm(false)
-                  setFormError(null)
-                }}>Exit</Button>
+                <Button variant="outline" size="sm" onClick={() => setPendingDeleteSlug(null)}>Close</Button>
               </div>
               {canEdit ? (
                 <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-muted-foreground">
@@ -1171,75 +1241,6 @@ function App(): JSX.Element {
                 </Card>
               ) : null}
 
-              {formMode !== null ? (
-                <Card>
-                  <CardHeader className="flex-row items-start justify-between space-y-0 p-5">
-                    <div>
-                      <CardTitle>{formMode === 'create' ? 'New intent' : 'Edit intent'}</CardTitle>
-                      <CardDescription className="mt-1">{canEdit ? 'Preview form for the supported intent fields.' : 'Edits are written through the Kron MCP tools.'}</CardDescription>
-                    </div>
-                      <Button variant="ghost" size="sm" onClick={() => { setFormMode(null); setDraftParentSlug(null); setFormError(null) }}>Cancel</Button>
-                  </CardHeader>
-                  <CardContent className="p-5 pt-0">
-                    <form className="grid gap-4 md:grid-cols-2" onSubmit={saveIntent}>
-                      <Field label="Intent slug" hint={draftParentSlug === null ? 'Lowercase kebab-case; use / for a group.' : `Child of “${draftParentSlug}” is locked; enter one child name after the slash.`}>
-                        <Input value={draft.slug} disabled={formMode === 'edit'} placeholder="auth/session-renewal" onChange={(event) => {
-                          const value = event.target.value
-                          const prefix = draftParentSlug === null ? '' : `${draftParentSlug}/`
-                          setDraft({ ...draft, slug: prefix !== '' && !value.startsWith(prefix) ? `${prefix}${value.replace(/^\/+/, '')}` : value })
-                        }} />
-                      </Field>
-                      <Field label="Title">
-                        <Input value={draft.title} placeholder="Session renewal" onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
-                      </Field>
-                      <div className="md:col-span-2">
-                        <Field label="Summary" hint={formMode === 'create' ? 'Required. Shown in the intent tree and used as the opening paragraph.' : canEdit ? 'A short description shown in the tree and detail header.' : 'Derived from the first paragraph of the Markdown body.'}>
-                          <textarea className={`${fieldClass()} min-h-20 resize-y`} value={draft.summary} readOnly={!canEdit && formMode !== 'create'} placeholder="What decision does this intent record?" onChange={(event) => setDraft({ ...draft, summary: event.target.value })} />
-                        </Field>
-                      </div>
-                      <div className="md:col-span-2">
-                        <Field label="Why / body (optional)" hint={canEdit ? 'Add rationale or trade-offs in Markdown.' : 'Optional Markdown content; the summary is saved as the opening paragraph.'}>
-                          <textarea className={`${fieldClass()} min-h-36 resize-y font-mono text-xs`} value={draft.body} placeholder={'## Why\n\nExplain the decision and its trade-offs.'} onChange={(event) => setDraft({ ...draft, body: event.target.value })} />
-                        </Field>
-                      </div>
-                      <details className="md:col-span-2 rounded-md border p-3">
-                        <summary className="cursor-pointer text-sm font-medium">Advanced fields (optional)</summary>
-                        <div className="mt-4 grid gap-4 md:grid-cols-2">
-                          {formMode === 'create' ? (
-                            <Field label="Intent kind" hint="Leaf is a single intent; node groups child intents.">
-                              <select className={fieldClass()} value={draft.kind} onChange={(event) => setDraft({ ...draft, kind: event.target.value as Intent['kind'] })}>
-                                <option value="leaf">leaf</option><option value="node">node</option>
-                              </select>
-                            </Field>
-                          ) : null}
-                          <Field label="Status">
-                            <select className={fieldClass()} value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as Intent['status'] })}>
-                              <option value="draft">draft</option><option value="active">active</option><option value="superseded">superseded</option>
-                            </select>
-                          </Field>
-                          <Field label="Symbol" hint="Optional code symbol or symbol list.">
-                            <Input value={draft.symbol} placeholder="auth.RefreshToken" onChange={(event) => setDraft({ ...draft, symbol: event.target.value })} />
-                          </Field>
-                          <Field label="Reviewers" hint="Separate handles with commas or new lines.">
-                            <Input value={draft.reviewersText} placeholder="@reviewer" onChange={(event) => setDraft({ ...draft, reviewersText: event.target.value })} />
-                          </Field>
-                          <Field label="References" hint="Intent slugs, one per line.">
-                            <textarea className={`${fieldClass()} min-h-20 resize-y`} value={draft.referencesText} placeholder="security/session-timeout" onChange={(event) => setDraft({ ...draft, referencesText: event.target.value })} />
-                          </Field>
-                          <Field label="Depends on" hint="Required intent slugs, one per line.">
-                            <textarea className={`${fieldClass()} min-h-20 resize-y`} value={draft.dependsOnText} placeholder="auth/token-storage" onChange={(event) => setDraft({ ...draft, dependsOnText: event.target.value })} />
-                          </Field>
-                        </div>
-                      </details>
-                      {formError ? <p role="alert" className="md:col-span-2 text-sm text-destructive">{formError}</p> : null}
-                      <div className="flex justify-end gap-2 md:col-span-2">
-                        <Button type="button" variant="outline" onClick={() => { setFormMode(null); setDraftParentSlug(null) }}>Cancel</Button>
-                        <Button type="submit" disabled={saving}>{saving ? 'Saving…' : canEdit ? 'Save preview' : 'Save intent'}</Button>
-                      </div>
-                    </form>
-                  </CardContent>
-                </Card>
-              ) : null}
               </div>
             </section> : null}
       </div>

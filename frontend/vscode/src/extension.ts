@@ -199,31 +199,51 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(output, statusBar, anchorDecoration)
   for (const editor of vscode.window.visibleTextEditors) scheduleIntentAnchorDecorations(editor.document)
 
-  const workspaces = vscode.workspace.workspaceFolders ?? []
   const serverPath = vscode.workspace.getConfiguration('kron').get<string>('serverPath', 'kron').trim() || 'kron'
   const configuredLanguages: unknown = vscode.workspace.getConfiguration('kron').get('lspLanguages', DEFAULT_LSP_LANGUAGES)
   const parsedLanguages = languageListSchema.safeParse(configuredLanguages)
   const languages = parsedLanguages.success ? parsedLanguages.data : [...DEFAULT_LSP_LANGUAGES]
   if (!parsedLanguages.success) log('Invalid kron.lspLanguages setting; using the documented default language list.')
 
-  mcpConnections = workspaces.map((workspace) => ({
-    workspace,
-    client: new KronMcpClient(
-      serverPath,
-      workspace.uri.fsPath,
-      log,
-      (_state: ConnectionState) => updateMcpStates(),
-    ),
-  }))
-  lspConnections = workspaces.map((workspace) => new KronLspClient(
-    serverPath,
-    workspace,
-    languages,
-    log,
-    (_state: ConnectionState) => updateLspStates(),
-  ))
-
   treeProvider = new IntentTreeProvider(mcpConnections)
+
+  const rebuildConnections = async (): Promise<void> => {
+    await Promise.allSettled([
+      ...mcpConnections.map(({ client }) => client.stop()),
+      ...lspConnections.map((client) => client.stop()),
+    ])
+    const workspaces = vscode.workspace.workspaceFolders ?? []
+    mcpConnections = workspaces.map((workspace) => ({
+      workspace,
+      client: new KronMcpClient(
+        serverPath,
+        workspace.uri.fsPath,
+        log,
+        (_state: ConnectionState) => updateMcpStates(),
+      ),
+    }))
+    lspConnections = workspaces.map((workspace) => new KronLspClient(
+      serverPath,
+      workspace,
+      languages,
+      log,
+      (_state: ConnectionState) => updateLspStates(),
+    ))
+    treeProvider?.setConnections(mcpConnections)
+    updateMcpStates()
+    updateLspStates()
+    if (workspaces.length === 0) {
+      statusBar?.setNoWorkspace()
+      return
+    }
+    await startConnections()
+    try {
+      await refreshIntents(false)
+    } catch (error: unknown) {
+      log(`Workspace tree refresh failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
   context.subscriptions.push(
     vscode.window.createTreeView('kron.intents', { treeDataProvider: treeProvider }),
     treeProvider,
@@ -235,13 +255,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
     vscode.commands.registerCommand('kron.openIntentWorkspace', () => {
-      if (workspaces.length === 0 || treeProvider === undefined || output === undefined) {
+      if ((vscode.workspace.workspaceFolders?.length ?? 0) === 0 || treeProvider === undefined || output === undefined) {
         void vscode.window.showWarningMessage('Open a workspace folder before opening the Kron intent workspace.')
         return
       }
       openIntentWorkspace(context, treeProvider, output)
     }),
     vscode.commands.registerCommand('kron.restartConnections', restartConnections),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      void rebuildConnections()
+    }),
     vscode.workspace.onDidChangeTextDocument((event) => {
       if (event.document.uri.scheme !== 'file') return
       scheduleIntentAnchorDecorations(event.document)
@@ -272,30 +295,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   )
 
-  if (workspaces.length === 0) {
-    statusBar.setNoWorkspace()
-    return
-  }
-
-  updateMcpStates()
-  updateLspStates()
-
-  void startMcpConnections().then(async () => {
-    try {
-      await refreshIntents(false)
-    } catch {
-      void vscode.window.showWarningMessage('Kron could not load the intent tree. Check kron.serverPath and the Kron output channel.')
-      return
-    }
-    if (mcpConnections.some(({ client }) => client.state !== 'ready')) {
-      void vscode.window.showWarningMessage('Some Kron workspace trees are unavailable. Check kron.serverPath and the Kron output channel.')
-    }
-  })
-  void startLspConnections().then(() => {
-    if (lspConnections.some((client) => client.state !== 'ready')) {
-      void vscode.window.showWarningMessage('Kron hover and definition are unavailable. Check kron.serverPath and the Kron output channel.')
-    }
-  })
+  void rebuildConnections()
 }
 
 /** Stops each protocol process independently during Extension Host shutdown. */
