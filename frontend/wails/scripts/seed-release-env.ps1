@@ -80,9 +80,10 @@ if (-not $SkipFrontend) {
 }
 Push-Location (Join-Path $RepoRoot 'frontend\wails')
 try {
-    # Use the Wails builder so build/appicon.png is converted into the
-    # Windows PE icon resource. A raw `go build` leaves the executable with
-    # the generic Go icon even though the in-app logo is correct.
+    # -nopackage skips Wails' own icon/version resource generation, so the
+    # checked-in frontend/wails/kron-res.syso (generated from
+    # build/windows/icon.ico) is what embeds the Kron icon into the exe.
+    # Keep that file in git; a raw go build picks it up too.
     go run github.com/wailsapp/wails/v2/cmd/wails@v2.16.0 build -s -skipbindings -nopackage `
         -tags "desktop production" -ldflags "-w -s -H windowsgui" `
         -webview2 error -o Kron-GUI.exe

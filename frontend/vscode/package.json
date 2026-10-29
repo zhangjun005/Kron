@@ -280,5 +280,6 @@
     "ai-agents",
     "mcp",
     "lsp"
-  ]
+  ],
+  "license": "MIT"
 }

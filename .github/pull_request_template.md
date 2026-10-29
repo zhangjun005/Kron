@@ -8,6 +8,21 @@ internal/ API 改动 PR 必填 §"调用方清单" / §"RFC 链接"
 
 <!-- 一句话: 这个 PR 解决什么问题 / 加什么能力 -->
 
+## Kron intent checklist (领域必填)
+
+<!--
+这一节是 Kron 特有的领域检查；流程/架构检查见下方通用章节。
+-->
+
+- [ ] 相关 `.kron/intents/**` 已在本 PR 更新（或明确说明不需要）
+- [ ] 新/改行为有对应 intent（没有"只改代码不写意图"的决策）
+- [ ] `status` 反映真实状态（讨论中 `draft` / 已合并 `active` / 被替代 `superseded`）
+- [ ] 新增/修改的 assumption 使用 `.kron/assumptions/<id>.md`，并填了 per-intent `severity` + `rationale`
+- [ ] 过期/未验证的 hard assumption 已复核（`verified_at` / `expires_at`）或有意降级
+- [ ] 代码锚点 `@kron:intent <slug>` 与本次改动同步（新增/删除/改名都检查）
+- [ ] `depends_on` 只放硬前置；see-also 放 `references`
+- [ ] `kron lint` 无 error（warning 已逐条 review）
+
 ## Scope
 
 <!--
