@@ -598,7 +598,7 @@ function ProjectHome(props: {
                                     onClick={(): void => props.onOpenProject(project.path)}
                                     className="group w-56 shrink-0 text-left"
                                 >
-                                    <div className={["relative aspect-square overflow-hidden bg-card shadow-sm transition-all duration-200 group-hover:-translate-y-1 group-hover:ring-2 group-hover:ring-primary group-hover:ring-offset-2 group-hover:ring-offset-background", isCurrent ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' : ''].join(' ')}>
+                                    <div className={["relative aspect-square overflow-hidden rounded-lg bg-card shadow-sm transition-all duration-200 group-hover:-translate-y-1 group-hover:ring-1 group-hover:ring-primary/40", isCurrent ? 'ring-1 ring-primary/50' : ''].join(' ')}>
                                         <img src={cover || '/kronLogo.png'} alt="" className="h-full w-full object-cover"/>
                                         <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/80 to-transparent px-4 pb-4 pt-12 text-white">
                                             <span className="text-xs font-medium">{isCurrent ? 'Current project' : 'Open project'}</span>
@@ -683,8 +683,19 @@ function ProjectSettingRow(props: {
 }): JSX.Element {
     const fallback = props.path.split(/[\\/]/).filter(Boolean).pop() || props.path;
     const [name, setName] = useState<string>(props.metadata.displayName || fallback);
+    const [cover, setCover] = useState<string>('');
+    useEffect(() => {
+        let cancelled = false;
+        void GetProjectCoverData(props.path).then((data) => {
+            if (!cancelled) setCover(data);
+        }).catch(() => {
+            if (!cancelled) setCover('');
+        });
+        return (): void => { cancelled = true; };
+    }, [props.path, props.metadata.coverImage]);
     return (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border p-3">
+            <img src={cover === '' ? '/kronLogo.png' : cover} alt="Project cover preview" className="h-14 w-14 shrink-0 rounded-md border border-border object-cover"/>
             <div className="min-w-0 flex-1"><div className="truncate text-sm font-medium">{fallback}</div><div className="truncate font-mono text-[11px] text-muted-foreground" title={props.path}>{props.path}</div></div>
             <Input value={name} disabled={props.disabled} onChange={(event): void => setName(event.target.value)} className="w-48" aria-label={`Display name for ${fallback}`}/>
             <Button variant="outline" size="sm" disabled={props.disabled} onClick={(): void => props.onChooseCover(props.path)}><ImagePlus className="mr-2 h-4 w-4"/> Cover</Button>
@@ -1675,7 +1686,7 @@ function TopBar(props: {
                 {/* The GUI is deliberately read-only: no intent CRUD here.
                     Editing happens in the user's IDE on the Markdown files;
                     the GUI only previews what serve-mcp returns. */}
-                (                    <Button
+                <Button
                         variant="secondary"
                         size="sm"
                         disabled={liveTreeLoading}
