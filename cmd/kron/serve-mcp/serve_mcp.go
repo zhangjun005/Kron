@@ -47,8 +47,36 @@ var ErrNotImplemented = errors.New("kron serve-mcp: not yet available (planned f
 // docs/rfc/2026-10-04-mcp-sdk-adoption.md §2.
 const (
 	serverName    = "kron"
+	serverTitle   = "Kron"
 	serverVersion = "v1.2.0"
 )
+
+// newKronServer constructs the SDK server with Kron's identity and the
+// workflow instructions surfaced to every MCP client.
+func newKronServer() *mcp.Server {
+	return mcp.NewServer(&mcp.Implementation{
+		Name:    serverName,
+		Title:   serverTitle,
+		Version: serverVersion,
+	}, &mcp.ServerOptions{
+		Instructions: serverInstructions,
+	})
+}
+
+// serverInstructions is surfaced in the initialize result so AI clients
+// know the recommended Kron workflow without reading external docs. Keep it
+// short — clients concatenate it into the model context.
+const serverInstructions = `Kron stores project intent as Markdown under .kron/ (intents) and
+.kron/assumptions/ (shared assumptions). Recommended workflow:
+1. Before implementing a feature, read the relevant intents
+   (kron-implement, kron_list, kron_get) and their assumptions.
+2. Treat expired or unverified hard assumptions as risks: verify them
+   (kron_assume_update with verified_at/expires_at) instead of guessing.
+3. Keep code anchors (@kron:intent <slug>) in sync with the intent they
+   belong to; anchors drive hover/jump and lint.
+4. Edit intents with kron_update and assumptions with kron_assume_update.
+5. Before finishing, run kron_lint (and kron_stale for drift) and fix
+   errors. Use kron_delete/kron_restore for soft deletes.`
 
 // Run is the entry point. args[0] is the optional "-CWD <root>" flag;
 // absent it defaults to the process's current working directory.
@@ -105,33 +133,19 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 	log.SetOutput(errOut)
 	slog.SetDefault(slog.New(shim))
 
-	// Create the SDK server with explicit ServerOptions so the
-	// contract with MCP clients is clear (G-4):
-	//   - Tools: auto-inferred from registerTools() below
-	//     (SDK sets Tools: {ListChanged: true} when any tool is
-	//     registered).
-	//   - Resources, Prompts: SDK leaves them nil because we
-	//     never call AddResource / AddPrompt. We do NOT set
-	//     HasResources / HasPrompts in ServerOptions, so the
-	//     wire contract is "I do not advertise these" — clients
-	//     won't issue resources/list or prompts/list against us.
-	//   - Logging: SDK defaults Logging to &LoggingCapabilities{}
-	//     regardless of whether we register a handler. The C-3
-	//     shimHandler wires the actual logging dispatch:
-	//     activeSession.Log() is called when a session exists;
-	//     if the client never calls logging/setLevel, the SDK
-	//     silently drops the message (per MCP spec).
+	// Create the SDK server with explicit ServerOptions. go-sdk v1.1.0
+	// infers capabilities from the registration calls:
+	//   - Tools: {listChanged: true} once registerTools runs below.
+	//   - Resources: advertised because registerResources adds the
+	//     kron://intents/{+slug} template.
+	//   - Prompts: advertised because registerPrompts adds three
+	//     templates.
+	//   - Logging: always advertised by the SDK; setLevel is handled by
+	//     the SDK and shimHandler forwards slog records to session.Log.
+	// Instructions carries the recommended AI workflow to every client.
 	//
 	// G-4 (docs/mcp/backlog.md §G-4 + docs/mcp/missing-capabilities.md §G-4).
-	//
-	// SDK note: go-sdk v1.1.0 does not expose a Capabilities field
-	// in ServerOptions; the only control points are HasResources /
-	// HasPrompts / HasTools. We keep them all at zero (the default)
-	// to preserve "Tools auto-on, Resources / Prompts off" semantics.
-	server := mcp.NewServer(&mcp.Implementation{
-		Name:    serverName,
-		Version: serverVersion,
-	}, nil)
+	server := newKronServer()
 
 	// Inject the Kron caller identity into every handler ctx before
 	// dispatch. This satisfies architecture.md §〇 铁律 #4: access
@@ -153,7 +167,7 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 	// difference. The schema itself is unchanged.
 	server.AddReceivingMiddleware(coerceMiddleware())
 
-	// Register the 12 kron_* tools. Done after middleware so
+	// Register the 18 kron_* tools. Done after middleware so
 	// handlers see the injected caller on their ctx.
 	registerTools(server)
 

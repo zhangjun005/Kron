@@ -2,6 +2,7 @@ package servemcp
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -79,6 +80,11 @@ func TestPrompts_Implement_MatchAndPrereqs(t *testing.T) {
 	// would use kron_update for this.
 	patchIntentDependsOn(t, dir, "auth-jwt-refresh", []string{"auth-jwt"})
 
+	patchIntentAssumptions(t, dir, "auth-jwt-refresh", []map[string]any{{
+		"id": "single-region", "severity": "hard", "rationale": "refresh tokens live in one region",
+		"expires_at": "2027-01-01",
+	}})
+
 	ts := newTestSession(t, dir)
 	defer ts.Cleanup()
 
@@ -97,6 +103,8 @@ func TestPrompts_Implement_MatchAndPrereqs(t *testing.T) {
 	assert.Contains(t, text, "## User Request", "rendered message must keep the documented section names")
 	assert.Contains(t, text, "## Matched Intents")
 	assert.Contains(t, text, "## Action")
+	assert.Contains(t, text, "assumptions:", "implement prompt must surface assumption links")
+	assert.Contains(t, text, "single-region", "implement prompt must name the linked assumption")
 }
 
 // TestPrompts_Implement_NoMatch seeds nothing and asks for a
@@ -127,6 +135,11 @@ func TestPrompts_DriftCheck_DefaultAndOverride(t *testing.T) {
 	dir := initRepo(t)
 	addIntent(t, dir, "old-intent", "", "old enough to be stale")
 
+	patchIntentAssumptions(t, dir, "old-intent", []map[string]any{{
+		"id": "clock-skew-30s", "severity": "hard", "rationale": "clocks must agree for JWT validation",
+		"expires_at": "2020-01-01",
+	}})
+
 	ts := newTestSession(t, dir)
 	defer ts.Cleanup()
 
@@ -138,6 +151,7 @@ func TestPrompts_DriftCheck_DefaultAndOverride(t *testing.T) {
 		require.Len(t, res.Messages, 1)
 		text := textContent(t, res.Messages[0])
 		assert.Contains(t, text, "days_threshold=90", "default threshold must be 90")
+		assert.Contains(t, text, "old-intent: clock-skew-30s (expired", "drift prompt must keep intent:assumption context")
 	})
 
 	t.Run("override 30 days", func(t *testing.T) {
@@ -172,6 +186,8 @@ func TestPrompts_Review_StatusFilter(t *testing.T) {
 	addIntentStatus(t, dir, "active-intent", "active", "active")
 	addIntentStatus(t, dir, "draft-intent", "draft body", "draft")
 
+	patchIntentReferences(t, dir, "active-intent", []string{"missing-intent"})
+
 	ts := newTestSession(t, dir)
 	defer ts.Cleanup()
 
@@ -184,6 +200,9 @@ func TestPrompts_Review_StatusFilter(t *testing.T) {
 		text := textContent(t, res.Messages[0])
 		assert.Contains(t, text, "status=active", "default status must be 'active'")
 		assert.Contains(t, text, "active-intent", "active intent must appear in the in-scope list")
+		assert.Contains(t, text, "dangling-reference", "review prompt must group lint findings by rule")
+		assert.Contains(t, text, "references non-existent intent", "review prompt must include the finding detail")
+		assert.Contains(t, text, "[warning]", "review prompt must include the finding severity")
 	})
 
 	t.Run("override status=draft shows draft only", func(t *testing.T) {
@@ -196,7 +215,11 @@ func TestPrompts_Review_StatusFilter(t *testing.T) {
 		text := textContent(t, res.Messages[0])
 		assert.Contains(t, text, "status=draft", "explicit status must be reflected")
 		assert.Contains(t, text, "draft-intent", "draft filter must include draft intents")
-		assert.NotContains(t, text, "active-intent", "draft filter must exclude active intents")
+		inScope := text
+		if idx := strings.Index(text, "### Findings by rule"); idx >= 0 {
+			inScope = text[:idx]
+		}
+		assert.NotContains(t, inScope, "active-intent", "draft filter must exclude active intents from the in-scope list")
 	})
 }
 
@@ -248,6 +271,34 @@ func patchIntentDependsOn(t *testing.T, dir, slug string, dependsOn []string) {
 	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "kron_update",
 		Arguments: map[string]any{"slug": slug, "depends_on": dependsOn},
+	})
+	require.NoError(t, err, "kron_update transport must succeed")
+	require.False(t, res.IsError, "kron_update must not be a tool error: %v", res.Content)
+}
+
+// patchIntentAssumptions attaches assumption links to an intent through
+// kron_update (the same path users/agents take in production).
+func patchIntentAssumptions(t *testing.T, dir, slug string, assumptions []map[string]any) {
+	t.Helper()
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_update",
+		Arguments: map[string]any{"slug": slug, "assumptions": assumptions},
+	})
+	require.NoError(t, err, "kron_update transport must succeed")
+	require.False(t, res.IsError, "kron_update must not be a tool error: %v", res.Content)
+}
+
+// patchIntentReferences adds a references list through kron_update so lint
+// findings (dangling-reference) become visible to kron-review.
+func patchIntentReferences(t *testing.T, dir, slug string, references []string) {
+	t.Helper()
+	ts := newTestSession(t, dir)
+	defer ts.Cleanup()
+	res, err := ts.Session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "kron_update",
+		Arguments: map[string]any{"slug": slug, "references": references},
 	})
 	require.NoError(t, err, "kron_update transport must succeed")
 	require.False(t, res.IsError, "kron_update must not be a tool error: %v", res.Content)

@@ -512,23 +512,114 @@ type StaleOutput struct {
 //
 // If you add a tool, append it to this slice AND its handler to
 // handlers_*.go with consistent naming.
+// toolAnnotations returns MCP safety hints for one tool. Kron tools only
+// touch the local .kron/ tree, so openWorldHint is always false. The
+// destructive flag matters for client confirmation UX: `kron_delete` /
+// `kron_assume_delete` remove files, while add/update/restore are additive.
+func toolAnnotations(readOnly, destructive, idempotent bool) *mcp.ToolAnnotations {
+	openWorld := false
+	return &mcp.ToolAnnotations{
+		ReadOnlyHint:    readOnly,
+		DestructiveHint: &destructive,
+		IdempotentHint:  idempotent,
+		OpenWorldHint:   &openWorld,
+	}
+}
+
+// registerTools installs the 18 kron_* tools with their wire metadata.
+//
+// Every tool carries a human-readable Title plus MCP ToolAnnotations so
+// clients can render safe confirmations (read-only vs destructive) and
+// agents can reason about repeatability.
 func registerTools(server *mcp.Server) {
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_add", Description: "Create a new intent file at .kron/intents/<slug>.md."}, HandleAdd)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_check", Description: "Inspect every intent's assumptions[] and surface expired / unverified hard assumptions."}, HandleAssumeCheck)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_create", Description: "Create a new assumption registry file at .kron/assumptions/<id>.md."}, HandleAssumptionCreate)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_delete", Description: "Soft-delete an assumption (move to .kron/.trash/assumptions/)."}, HandleAssumptionDelete)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_get", Description: "Load a single assumption by id (full frontmatter + body + source path)."}, HandleAssumptionGet)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_list", Description: "List every assumption in the registry, optionally filtered by status."}, HandleAssumptionList)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_update", Description: "Patch an existing assumption registry file (PATCH semantics)."}, HandleAssumptionUpdate)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_delete", Description: "Soft-delete an intent (move to .kron/.trash/)."}, HandleDelete)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_get", Description: "Load a single intent by slug (full frontmatter + body)."}, HandleGet)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_impact", Description: "Reverse-link view: who depends on, references, and anchors an intent."}, HandleImpact)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_init", Description: "Create the .kron/ skeleton (idempotent)."}, HandleInit)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_intent_density", Description: "Cross-an intent-coverage: how many intents have anchors, which source files lack anchors."}, HandleIntentDensity)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_lint", Description: "Run lint over .kron/intents/ (frontmatter, dangling refs, depends_on cycles)."}, HandleLint)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_list", Description: "List every intent (with optional prefix filter)."}, HandleList)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_restore", Description: "Restore a soft-deleted intent from .kron/.trash/."}, HandleRestore)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_stale", Description: "Find active intents older than days_threshold and expired hard assumptions."}, HandleStale)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_tree", Description: "Return the full intent directory tree (root + nested children) for GUI/IDE tree views."}, HandleTree)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_update", Description: "Patch an existing intent (PATCH semantics; only supplied fields are touched)."}, HandleUpdate)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_add", Title: "Create intent",
+		Description: "Create a new intent file at .kron/intents/<slug>.md.",
+		Annotations: toolAnnotations(false, false, false),
+	}, HandleAdd)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_assume_check", Title: "Check assumptions",
+		Description: "Inspect every intent's assumptions[] and surface expired / unverified hard assumptions.",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleAssumeCheck)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_assume_create", Title: "Create assumption",
+		Description: "Create a new assumption registry file at .kron/assumptions/<id>.md.",
+		Annotations: toolAnnotations(false, false, false),
+	}, HandleAssumptionCreate)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_assume_delete", Title: "Delete assumption",
+		Description: "Soft-delete an assumption (move to .kron/.trash/assumptions/).",
+		Annotations: toolAnnotations(false, true, true),
+	}, HandleAssumptionDelete)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_assume_get", Title: "Get assumption",
+		Description: "Load a single assumption by id (full frontmatter + body + source path).",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleAssumptionGet)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_assume_list", Title: "List assumptions",
+		Description: "List every assumption in the registry, optionally filtered by status.",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleAssumptionList)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_assume_update", Title: "Update assumption",
+		Description: "Patch an existing assumption registry file (PATCH semantics).",
+		Annotations: toolAnnotations(false, false, true),
+	}, HandleAssumptionUpdate)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_delete", Title: "Delete intent",
+		Description: "Soft-delete an intent (move to .kron/.trash/). Node intents require confirm_subtree.",
+		Annotations: toolAnnotations(false, true, true),
+	}, HandleDelete)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_get", Title: "Get intent",
+		Description: "Load a single intent by slug (full frontmatter + body).",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleGet)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_impact", Title: "Intent impact",
+		Description: "Reverse-link view: who depends on, references, and anchors an intent.",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleImpact)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_init", Title: "Initialize Kron project",
+		Description: "Create the .kron/ skeleton (idempotent) and register the project as current.",
+		Annotations: toolAnnotations(false, false, true),
+	}, HandleInit)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_intent_density", Title: "Intent coverage density",
+		Description: "Cross-an intent-coverage: how many intents have anchors, which source files lack anchors.",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleIntentDensity)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_lint", Title: "Lint intents",
+		Description: "Run lint over .kron/intents/ (frontmatter, dangling refs, depends_on cycles, assumption rules).",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleLint)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_list", Title: "List intents",
+		Description: "List every intent (with optional prefix filter), including assumptions and link fields.",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleList)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_restore", Title: "Restore intent",
+		Description: "Restore a soft-deleted intent from .kron/.trash/ (node subtrees restore as a whole).",
+		Annotations: toolAnnotations(false, false, true),
+	}, HandleRestore)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_stale", Title: "Find stale intents",
+		Description: "Find active intents older than days_threshold and expired hard assumptions.",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleStale)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_tree", Title: "Intent tree",
+		Description: "Return the full intent directory tree (root + nested children) for GUI/IDE tree views.",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleTree)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_update", Title: "Update intent",
+		Description: "Patch an existing intent (PATCH semantics; only supplied fields are touched).",
+		Annotations: toolAnnotations(false, false, true),
+	}, HandleUpdate)
 }
