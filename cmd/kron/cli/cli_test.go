@@ -69,6 +69,29 @@ func TestRunInit_Idempotent(t *testing.T) {
 	assert.Contains(t, out.String(), "already exists")
 }
 
+// TestRunInit_ExistingProjectPromotesCurrent mirrors MCP `kron_init`: an
+// already-initialised checkout must still be registered and promoted to
+// current_project (no early return just because .kron/ exists).
+func TestRunInit_ExistingProjectPromotesCurrent(t *testing.T) {
+	registryPath := filepath.Join(t.TempDir(), "projects.json")
+	t.Setenv("KRON_PROJECTS_JSON_PATH", registryPath)
+	dir := t.TempDir()
+	chdir(t, dir)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".kron", "intents"), 0o755))
+
+	var out, errOut bytes.Buffer
+	require.NoError(t, runInit(nil, &out, &errOut))
+	assert.Contains(t, out.String(), "already exists")
+
+	reg, err := store.ReadProjectsJSON()
+	require.NoError(t, err)
+	abs, err := filepath.Abs(dir)
+	require.NoError(t, err)
+	assert.Equal(t, abs, reg.CurrentProject, "existing .kron/ must still become current_project")
+	require.Len(t, reg.Projects, 1)
+	assert.Equal(t, abs, reg.Projects[0].Path)
+}
+
 func TestRunAdd_RequiresInit(t *testing.T) {
 	dir := t.TempDir()
 	chdir(t, dir)
