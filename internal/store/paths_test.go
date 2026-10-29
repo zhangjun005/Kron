@@ -215,8 +215,8 @@ func TestWriter_Exists_NodeAndLeaf(t *testing.T) {
 }
 
 func TestWriter_MoveToTrash_NodeForm(t *testing.T) {
-	// MoveToTrash must work regardless of which form the file
-	// takes on disk.
+	// A node intent is trashed as its whole directory (shape preserved), so a
+	// restore brings back the README form instead of demoting it to a leaf.
 	dir := t.TempDir()
 	writeFile(t, dir, ".kron/intents/auth/README.md", "node intent")
 
@@ -225,15 +225,70 @@ func TestWriter_MoveToTrash_NodeForm(t *testing.T) {
 
 	require.NoError(t, w.MoveToTrash(context.Background(), "auth"))
 
-	// Source gone (in either form).
+	// Live directory and leaf form are both gone.
 	_, err = os.Stat(filepath.Join(dir, ".kron", "intents", "auth", "README.md"))
 	assert.True(t, os.IsNotExist(err))
 	_, err = os.Stat(filepath.Join(dir, ".kron", "intents", "auth.md"))
 	assert.True(t, os.IsNotExist(err))
 
-	// Trashed file present at canonical .trash/<slug>.md.
-	_, err = os.Stat(filepath.Join(dir, ".kron", ".trash", "auth.md"))
+	// Trash mirrors the node shape.
+	_, err = os.Stat(filepath.Join(dir, ".kron", ".trash", "auth", "README.md"))
 	assert.NoError(t, err)
+
+	require.NoError(t, w.RestoreFromTrash(context.Background(), "auth"))
+	_, err = os.Stat(filepath.Join(dir, ".kron", "intents", "auth", "README.md"))
+	assert.NoError(t, err)
+	_, err = os.Stat(filepath.Join(dir, ".kron", "intents", "auth.md"))
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestWriter_MoveToTrash_NodeSubtree(t *testing.T) {
+	// Deleting a node removes its whole subtree from the live tree; restoring
+	// brings every descendant back with the same shape.
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/intents/auth/README.md", "node intent")
+	writeFile(t, dir, ".kron/intents/auth/jwt.md", "child")
+
+	w, err := NewWriter(dir)
+	require.NoError(t, err)
+	require.NoError(t, w.MoveToTrash(context.Background(), "auth"))
+
+	_, err = os.Stat(filepath.Join(dir, ".kron", "intents", "auth", "jwt.md"))
+	assert.True(t, os.IsNotExist(err), "child must leave the live tree with its parent")
+	_, err = os.Stat(filepath.Join(dir, ".kron", ".trash", "auth", "jwt.md"))
+	assert.NoError(t, err, "child must travel with the trashed subtree")
+
+	require.NoError(t, w.RestoreFromTrash(context.Background(), "auth"))
+	_, err = os.Stat(filepath.Join(dir, ".kron", "intents", "auth", "jwt.md"))
+	assert.NoError(t, err)
+}
+
+func TestWriter_RestoreFromTrash_LegacyNodeAsLeaf(t *testing.T) {
+	// Entries trashed by the old code (node collapsed to <slug>.md) restore as
+	// leaf intents; no automatic promotion to node shape.
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/.trash/auth.md", "legacy node intent")
+
+	w, err := NewWriter(dir)
+	require.NoError(t, err)
+	require.NoError(t, w.RestoreFromTrash(context.Background(), "auth"))
+
+	_, err = os.Stat(filepath.Join(dir, ".kron", "intents", "auth.md"))
+	assert.NoError(t, err)
+	_, err = os.Stat(filepath.Join(dir, ".kron", "intents", "auth", "README.md"))
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestWriter_RestoreFromTrash_RefusesCollisionWithDirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, ".kron/.trash/auth.md", "legacy node intent")
+	writeFile(t, dir, ".kron/intents/auth/jwt.md", "new child under a live directory")
+
+	w, err := NewWriter(dir)
+	require.NoError(t, err)
+	err = w.RestoreFromTrash(context.Background(), "auth")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, model.ErrIntentExists)
 }
 
 func TestWriter_Update_PreservesNodeForm(t *testing.T) {

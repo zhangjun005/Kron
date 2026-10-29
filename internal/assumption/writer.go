@@ -118,6 +118,11 @@ func (w *Writer) Create(ctx context.Context, p CreateParams) error {
 	if p.Body != nil {
 		body = *p.Body
 	}
+	if p.ExpiresAt != nil {
+		if err := parser.ValidateAssumptionDateFields(*p.ExpiresAt, ""); err != nil {
+			return fmt.Errorf("assumption: expires_at: %w", err)
+		}
+	}
 
 	path := filepath.Join(w.root, p.ID+".md")
 	if _, err := os.Stat(path); err == nil {

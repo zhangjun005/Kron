@@ -121,7 +121,7 @@ func HandleAssumeCheck(ctx context.Context, _ *mcp.CallToolRequest, in AssumeChe
 				Verified:        a.VerifiedAt != "",
 			}
 			if a.ExpiresAt != "" {
-				if exp, err := time.Parse(time.RFC3339, a.ExpiresAt); err == nil {
+				if exp, err := parser.ParseExpiryDate(a.ExpiresAt); err == nil {
 					days := int(exp.Sub(now).Hours() / 24)
 					w.DaysRemaining = &days
 					if days < 0 && a.Severity == model.SeverityHard {

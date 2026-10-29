@@ -42,6 +42,7 @@
 | 根目录 + 子目录 `*.md` (`README.md`, `docs/**/*.md`, ...) | ✅ | 新增 (仓库内**任何** .md) |
 | `.kron/intents/*.md` | ❌ | 自身即意图, 不需锚定自身 |
 | `.kron/.trash/*.md` | ❌ | 软删状态, 不扫描 |
+| `.kron/.trash/*/` (node 子树) | ❌ | 软删状态, 不扫描 |
 | 围栏代码块 (\`\`\`\` ... \`\`\`\`) 内的 `// @kron:intent` | ❌ | 维持 in-fence 状态机, 避免假阳 |
 
 **语法与代码完全一致**, 不引入 MD 专属语法. 例 (`README.md`):
@@ -168,6 +169,13 @@ assumptions:
 - 不驱动任何自动行为
 - 仅供 LSP hover 提示变色（MCP `kron_assume_check` 也可读）
 - 到期不报错，只提醒"该重新审这条假设了"
+
+`expires_at` / `verified_at` 的写法：
+- 文档形态是纯日期 `YYYY-MM-DD`（人类手写 frontmatter 的默认形态）。
+- 读取端同时接受完整 RFC3339（`2026-10-01T08:00:00Z`），兼容既有数据；两种形态语义一致。
+- 纯日期 `expires_at` 覆盖当天（UTC 当天结束才过期）；`verified_at` 的纯日期按当天 00:00 UTC 参与比较。
+- 写入端（MCP `kron_add` / `kron_update` / `kron_assume_create` / `kron_assume_update`）会校验可解析性，
+  不支持的形态直接拒绝，避免写进去后在过期判断里被静默忽略。
 
 `id` 命名建议：kebab-case，如 `single-region`、`blacklist-fits-ram`、`clock-skew-30s`。
 

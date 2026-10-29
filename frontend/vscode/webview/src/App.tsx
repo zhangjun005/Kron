@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import kronLogo from './assets/kronLogo.png'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { IntentCanvas } from '@/IntentCanvas'
-import { MarkdownPreview } from '@/components/MarkdownPreview'
 import { isWebviewInbound, type McpToolName, type TreeNode, type TreeResult, type WebviewOutbound } from '@/lib/mcp-types'
+import { applyWebviewFontScale, webviewFontScaleFromBody } from '@/lib/font-size'
 
 type Severity = 'hard' | 'soft'
 
@@ -20,6 +21,7 @@ type Intent = {
   slug: string
   kind: 'leaf' | 'node'
   title: string
+  createdBy: string
   summary: string
   symbol: string
   status: 'draft' | 'active' | 'superseded'
@@ -43,7 +45,40 @@ type Assumption = {
   id: string
   text: string
   defaultSeverity: Severity
+  status?: string
+  createdBy?: string
+  updatedAt?: string
+  expiresAt?: string
+  verifiedAt?: string
+  verifiedBy?: string
+  reviewers?: string[]
   usedBy?: string[]
+}
+
+type AssumptionUsageEntry = { intentSlug: string; severity: Severity; rationale: string }
+type AssumptionUsage = Record<string, AssumptionUsageEntry[]>
+
+type AssumptionPanelDraft = {
+  id: string
+  text: string
+  defaultSeverity: Severity
+  status: 'draft' | 'active' | 'superseded'
+  /** Value shown in the date input (YYYY-MM-DD). */
+  expiresAt: string
+  /** Raw frontmatter value, so precision is preserved unless the user edits it. */
+  expiresAtRaw: string
+  reviewersText: string
+}
+
+function emptyAssumptionPanelDraft(): AssumptionPanelDraft {
+  return { id: '', text: '', defaultSeverity: 'hard', status: 'active', expiresAt: '', expiresAtRaw: '', reviewersText: '' }
+}
+
+type AssumptionCheck = {
+  hard: number
+  soft: number
+  expired: number
+  warnings: Array<{ intentSlug: string; assumptionId: string; text: string; severity: string; verified: boolean }>
 }
 
 type IntentDraft = Pick<Intent, 'slug' | 'kind' | 'title' | 'symbol' | 'status' | 'body'> & {
@@ -117,6 +152,7 @@ function intentFromMcp(value: unknown, node: TreeNode): Intent {
     slug: typeof wire.slug === 'string' ? wire.slug : node.slug,
     kind,
     title: headingFromBody(body, node.title ?? node.name),
+    createdBy: typeof frontmatter.created_by === 'string' ? frontmatter.created_by : 'Unknown',
     summary: summaryFromBody(body),
     symbol: stringArray(frontmatter.symbol).join(', '),
     status,
@@ -160,6 +196,7 @@ const initialIntents: Intent[] = [
     slug: 'auth/jwt-sliding-window',
     kind: 'leaf',
     title: 'JWT sliding window renewal',
+    createdBy: '@zhangjun005',
     summary: 'Keep refresh tokens short lived while preserving a smooth session for active users.',
     symbol: 'auth.RefreshToken',
     status: 'active',
@@ -185,6 +222,7 @@ const initialIntents: Intent[] = [
     slug: 'auth/token-storage',
     kind: 'leaf',
     title: 'Refresh token storage',
+    createdBy: '@zhangjun005',
     summary: 'Store refresh tokens as hashes and support revocation by session.',
     symbol: 'auth.TokenStore',
     status: 'active',
@@ -204,6 +242,7 @@ const initialIntents: Intent[] = [
     slug: 'ui/console-errors',
     kind: 'leaf',
     title: 'Readable console errors',
+    createdBy: 'agent:preview',
     summary: 'Show actionable errors without exposing internal stack traces to end users.',
     symbol: 'ui.ErrorNotice',
     status: 'draft',
@@ -220,18 +259,30 @@ const initialAssumptions: Assumption[] = [
     id: 'single-region',
     text: 'Production traffic is served from one region.',
     defaultSeverity: 'hard',
+    status: 'active',
+    createdBy: '@zhangjun005',
+    updatedAt: '2026-10-01T08:00:00Z',
+    expiresAt: '2027-01-01',
+    verifiedAt: '2026-10-01',
+    verifiedBy: '@zhangjun005',
     usedBy: ['auth/jwt-sliding-window', 'auth/token-storage'],
   },
   {
     id: 'csrf-protected',
     text: 'State-changing browser requests include a valid CSRF token.',
     defaultSeverity: 'hard',
+    status: 'active',
+    createdBy: '@zhangjun005',
+    updatedAt: '2026-10-01T08:00:00Z',
+    verifiedAt: '2026-10-01',
+    verifiedBy: '@lanyue811',
     usedBy: ['auth/jwt-sliding-window'],
   },
   {
     id: 'clock-skew-30s',
     text: 'Application hosts stay within thirty seconds of the time source.',
     defaultSeverity: 'soft',
+    status: 'active',
     usedBy: [],
   },
 ]
@@ -249,6 +300,21 @@ declare global {
 const vscodeApi = typeof window.acquireVsCodeApi === 'function'
   ? window.acquireVsCodeApi()
   : null
+
+type PersistedWebviewState = { selectedSlug?: string; filter?: string }
+
+/** Selection/filter survive the panel being hidden (the Webview context is recreated). */
+function readPersistedState(): PersistedWebviewState {
+  if (vscodeApi === null) return {}
+  const raw = vscodeApi.getState()
+  if (!isRecord(raw)) return {}
+  return {
+    ...(typeof raw.selectedSlug === 'string' ? { selectedSlug: raw.selectedSlug } : {}),
+    ...(typeof raw.filter === 'string' ? { filter: raw.filter } : {}),
+  }
+}
+
+const persistedState = readPersistedState()
 
 function makeTree(intents: Intent[]): TreeNode {
   const root: BuildNode = { slug: 'workspace', name: 'workspace', is_dir: true, children: [] }
@@ -298,10 +364,14 @@ function splitLines(value: string): string[] {
   return value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean)
 }
 
-function newDraft(slug = ''): IntentDraft {
+function isWorkspaceRoot(node: TreeNode): boolean {
+  return node.is_dir && node.workspaceId !== undefined && node.slug === node.workspaceId
+}
+
+function newDraft(slug = '', kind: Intent['kind'] = 'leaf'): IntentDraft {
   return {
     slug,
-    kind: 'leaf',
+    kind,
     title: '',
     summary: '',
     symbol: '',
@@ -342,6 +412,40 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   )
 }
 
+type EditParam = 'status' | 'created' | 'review' | 'symbol' | 'depends' | 'references'
+
+function toggleEditParam(current: EditParam | null, next: EditParam): EditParam | null {
+  return current === next ? null : next
+}
+
+function paramChipClass(active: boolean): string {
+  return `min-w-0 truncate rounded-md border px-1.5 py-1 text-left text-[0.6875rem] ${active ? 'border-primary/50 bg-primary/10 text-foreground' : 'bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground'}`
+}
+
+/** Fixed-type field marker: draft is hollow, active green, superseded red. */
+function StatusDot({ status }: { status: string }): JSX.Element {
+  if (status === 'active') return <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+  if (status === 'superseded') return <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" />
+  return <span className="h-2 w-2 shrink-0 rounded-full border border-muted-foreground/70" />
+}
+
+/** Shows the current value without its field name; clicking expands the editor. */
+function EditChip({ label, value, active, onToggle }: { label: string; value: string; active: boolean; onToggle: () => void }): JSX.Element {
+  const empty = value.trim() === ''
+  return (
+    <button
+      type="button"
+      className={paramChipClass(active)}
+      aria-label={label}
+      aria-expanded={active}
+      title={empty ? label : `${label}: ${value}`}
+      onClick={onToggle}
+    >
+      {empty ? '…' : value}
+    </button>
+  )
+}
+
 function App(): JSX.Element {
   const [intents, setIntents] = useState<Intent[]>(initialIntents)
   const [archivedIntents, setArchivedIntents] = useState<Intent[]>([])
@@ -349,8 +453,10 @@ function App(): JSX.Element {
   const [tree, setTree] = useState<TreeResult | null>(null)
   const [treeRelations, setTreeRelations] = useState<Record<string, IntentRelations>>({})
   const [liveIntent, setLiveIntent] = useState<Intent | null>(null)
-  const [selectedSlug, setSelectedSlug] = useState<string>(initialIntents[0]?.slug ?? '')
-  const [filter, setFilter] = useState('')
+  const [selectedSlug, setSelectedSlug] = useState<string>(persistedState.selectedSlug ?? initialIntents[0]?.slug ?? '')
+  const [revealToken, setRevealToken] = useState(0)
+  const [filter, setFilter] = useState<string>(persistedState.filter ?? '')
+  const [uiScale, setUiScale] = useState<number>(() => webviewFontScaleFromBody())
   const [loading, setLoading] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailReload, setDetailReload] = useState(0)
@@ -363,7 +469,16 @@ function App(): JSX.Element {
   const [formError, setFormError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [pendingDeleteSlug, setPendingDeleteSlug] = useState<string | null>(null)
+  const [pendingEditSlug, setPendingEditSlug] = useState<string | null>(null)
   const [showArchivePanel, setShowArchivePanel] = useState(false)
+  const [showAssumptionPanel, setShowAssumptionPanel] = useState(false)
+  const [assumptionPanelId, setAssumptionPanelId] = useState<string | null>(null)
+  const [assumptionPanelCreating, setAssumptionPanelCreating] = useState(false)
+  const [assumptionPanelDraft, setAssumptionPanelDraft] = useState<AssumptionPanelDraft>(emptyAssumptionPanelDraft)
+  const [assumptionPanelError, setAssumptionPanelError] = useState<string | null>(null)
+  const [assumptionPanelSaving, setAssumptionPanelSaving] = useState(false)
+  const [assumptionPanelPendingDelete, setAssumptionPanelPendingDelete] = useState<string | null>(null)
+  const [assumptionUsage, setAssumptionUsage] = useState<AssumptionUsage>({})
   const [showAssumptionForm, setShowAssumptionForm] = useState(false)
   const [assumptionMode, setAssumptionMode] = useState<'existing' | 'new'>('existing')
   const [selectedAssumptionId, setSelectedAssumptionId] = useState('')
@@ -375,10 +490,24 @@ function App(): JSX.Element {
     rationale: '',
     expiresAt: '',
   })
+  const [assumptionCheck, setAssumptionCheck] = useState<AssumptionCheck | null>(null)
+  const [assumptionCheckError, setAssumptionCheckError] = useState<string | null>(null)
+  const [assumptionFormError, setAssumptionFormError] = useState<string | null>(null)
+  const [editParam, setEditParam] = useState<EditParam | null>(null)
   const pendingMcpRequests = useRef(new Map<number, PendingMcpRequest>())
   const nextMcpRequestId = useRef(0)
   const detailRequestSequence = useRef(0)
   const treeRelationSequence = useRef(0)
+
+  useEffect(() => {
+    if (notice === null) return
+    const timer = setTimeout(() => setNotice(null), 5000)
+    return () => clearTimeout(timer)
+  }, [notice])
+
+  useEffect(() => {
+    vscodeApi?.setState({ selectedSlug, filter })
+  }, [selectedSlug, filter])
 
   const sendMcpRequest = useCallback((tool: McpToolName, args: Record<string, unknown>, workspaceId?: string): Promise<unknown> => {
     if (vscodeApi === null) return Promise.reject(new Error('MCP requests are only available inside VS Code.'))
@@ -413,7 +542,11 @@ function App(): JSX.Element {
   const rows = useMemo(() => flattenTree(activeTree).slice(1), [activeTree])
   const selectedNode = rows.find(({ node }) => node.slug === selectedSlug)?.node
   const selectedIntent = canEdit ? intents.find((intent) => intent.slug === selectedSlug) : undefined
-  const activeWorkspaceId = selectedNode?.workspaceId ?? liveIntent?.workspaceId
+  const activeWorkspaceId = selectedNode?.workspaceId ?? liveIntent?.workspaceId ?? activeTree.workspaceId
+  const selectedParent = selectedNode?.is_dir && !isWorkspaceRoot(selectedNode) ? selectedNode : undefined
+  const canCreateUnderSelection = selectedNode === undefined || selectedNode.is_dir
+  const canCreateIntent = canCreateUnderSelection && (canEdit || activeWorkspaceId !== undefined)
+  const createTargetHighlighted = canCreateIntent && formMode === 'create'
   const selectedDependents = selectedIntent === undefined
     ? liveIntent?.dependents ?? []
     : intents.filter((intent) => intent.slug !== selectedIntent.slug && intent.dependsOn.includes(selectedIntent.slug)).map((intent) => intent.slug)
@@ -428,6 +561,7 @@ function App(): JSX.Element {
     setShowAssumptionForm(false)
     setPendingDeleteSlug(null)
     setNotice(null)
+    setAssumptionCheckError(null)
   }
 
   const requestTree = useCallback((refresh = false): void => {
@@ -457,6 +591,23 @@ function App(): JSX.Element {
             setDetailError('The extension host returned an invalid response. Refresh and try again.')
           }
         }
+        return
+      }
+
+      if (message.type === 'kron_font_size') {
+        const scale = message.fontSize / 14
+        applyWebviewFontScale(scale)
+        setUiScale(scale)
+        return
+      }
+
+      if (message.type === 'kron_select') {
+        setSelectedSlug(message.slug)
+        setRevealToken((value) => value + 1)
+        setFormMode(null)
+        setShowAssumptionForm(false)
+        setPendingDeleteSlug(null)
+        setPendingEditSlug(message.edit ? message.slug : null)
         return
       }
 
@@ -579,21 +730,24 @@ function App(): JSX.Element {
     return () => { active = false }
   }, [sendMcpRequest, selectedNode?.workspaceId])
 
-  const startCreate = (): void => {
-    setDraft(newDraft())
-    setDraftParentSlug(null)
+  const startCreate = (kind: Intent['kind'] = 'leaf'): void => {
+    const parentSlug = selectedParent?.slug
+    setDraft(newDraft(parentSlug === undefined ? '' : `${parentSlug}/`, kind))
+    setDraftParentSlug(parentSlug ?? null)
     setFormError(null)
+    setEditParam(null)
     setFormMode('create')
     setPendingDeleteSlug(null)
     setShowAssumptionForm(false)
     setNotice(null)
   }
 
-  const startCreateChild = (parent: TreeNode): void => {
+  const startCreateChild = (parent: TreeNode, kind: Intent['kind'] = 'leaf'): void => {
     setSelectedSlug(parent.slug)
-    setDraft(newDraft(`${parent.slug}/`))
+    setDraft(newDraft(`${parent.slug}/`, kind))
     setDraftParentSlug(parent.slug)
     setFormError(null)
+    setEditParam(null)
     setFormMode('create')
     setPendingDeleteSlug(null)
     setShowAssumptionForm(false)
@@ -606,11 +760,21 @@ function App(): JSX.Element {
     setDraft(draftFromIntent(editableIntent))
     setDraftParentSlug(null)
     setFormError(null)
+    setEditParam(null)
     setFormMode('edit')
     setPendingDeleteSlug(null)
     setShowAssumptionForm(false)
     setNotice(null)
   }
+
+  // Host asked for "Edit Intent" from the editor anchor menu: enter edit mode
+  // once the selected intent's details have loaded.
+  useEffect(() => {
+    if (pendingEditSlug === null) return
+    if (liveIntent === null || liveIntent.slug !== pendingEditSlug) return
+    setPendingEditSlug(null)
+    startEdit()
+  }, [pendingEditSlug, liveIntent])
 
   const createGraphRelation = async (source: TreeNode, target: TreeNode, kind: 'depends' | 'references'): Promise<void> => {
     const relationField = kind === 'depends' ? 'dependsOn' : 'references'
@@ -672,8 +836,9 @@ function App(): JSX.Element {
         return
       }
     }
-    if (draft.title.trim() === '' || draft.summary.trim() === '') {
-      setFormError('Title and summary are required.')
+    const summary = draft.summary.trim() || summaryFromBody(draft.body) || draft.title.trim()
+    if (draft.title.trim() === '') {
+      setFormError('Title is required.')
       return
     }
     if (formMode === 'create' && (canEdit
@@ -688,7 +853,8 @@ function App(): JSX.Element {
       slug: draft.slug,
       kind: formMode === 'create' ? draft.kind : (previous?.kind ?? 'leaf'),
       title: draft.title.trim(),
-      summary: draft.summary.trim(),
+      createdBy: previous?.createdBy ?? 'agent:preview',
+      summary,
       symbol: draft.symbol.trim(),
       status: draft.status,
       reviewers: splitLines(draft.reviewersText),
@@ -728,7 +894,7 @@ function App(): JSX.Element {
           slug: draft.slug,
           kind: draft.kind,
           ...(symbolList[0] === undefined ? {} : { symbol: symbolList[0] }),
-          why: draft.summary.trim(),
+          why: summary,
         }, activeWorkspaceId)
         created = true
       }
@@ -768,15 +934,15 @@ function App(): JSX.Element {
     const currentIntent = selectedIntent ?? liveIntent
     if (currentIntent === null || currentIntent === undefined) return
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(assumptionDraft.id) || assumptionDraft.text.trim() === '') {
-      setFormError('Use a valid assumption ID and enter its text.')
+      setAssumptionFormError('Use a valid assumption ID and enter its text.')
       return
     }
     if (assumptionDraft.rationale.trim().length < 10) {
-      setFormError('Explain this intent’s severity in at least 10 characters.')
+      setAssumptionFormError('Explain this intent’s severity in at least 10 characters.')
       return
     }
     if (assumptions.some((assumption) => assumption.id === assumptionDraft.id)) {
-      setFormError('An assumption with this ID already exists.')
+      setAssumptionFormError('An assumption with this ID already exists. Pick it under “Use existing”.')
       return
     }
 
@@ -788,7 +954,7 @@ function App(): JSX.Element {
     }
     if (!canEdit) {
       if (currentIntent.workspaceId === undefined) {
-        setFormError('The selected intent is not associated with a workspace.')
+        setAssumptionFormError('The selected intent is not associated with a workspace.')
         return
       }
       const link: IntentAssumption = {
@@ -798,7 +964,7 @@ function App(): JSX.Element {
         ...(assumptionDraft.expiresAt ? { expiresAt: assumptionDraft.expiresAt } : {}),
       }
       setSaving(true)
-      setFormError(null)
+      setAssumptionFormError(null)
       let created = false
       try {
         await sendMcpRequest('kron_assume_create', {
@@ -818,7 +984,7 @@ function App(): JSX.Element {
         setDetailReload((value) => value + 1)
       } catch (requestError: unknown) {
         const message = requestError instanceof Error ? requestError.message : 'Kron could not save this assumption.'
-        setFormError(created ? `The shared assumption was created but not attached. ${message}` : message)
+        setAssumptionFormError(created ? `The shared assumption was created but not attached. ${message}` : message)
       } finally {
         setSaving(false)
       }
@@ -838,7 +1004,7 @@ function App(): JSX.Element {
       : intent))
     setAssumptionDraft({ id: '', text: '', defaultSeverity: 'hard', severity: 'hard', rationale: '', expiresAt: '' })
     setShowAssumptionForm(false)
-    setFormError(null)
+    setAssumptionFormError(null)
     setNotice(`Preview assumption “${assumption.id}” created and attached.`)
   }
 
@@ -848,15 +1014,15 @@ function App(): JSX.Element {
     if (currentIntent === null || currentIntent === undefined) return
     const shared = assumptions.find((assumption) => assumption.id === selectedAssumptionId)
     if (shared === undefined) {
-      setFormError('Choose an existing assumption.')
+      setAssumptionFormError('Choose an existing assumption.')
       return
     }
     if (currentIntent.assumptions.some((item) => item.id === shared.id)) {
-      setFormError('This assumption is already linked to the selected intent.')
+      setAssumptionFormError('This assumption is already linked to the selected intent.')
       return
     }
     if (assumptionDraft.rationale.trim().length < 10) {
-      setFormError('Explain this intent’s severity in at least 10 characters.')
+      setAssumptionFormError('Explain this intent’s severity in at least 10 characters.')
       return
     }
 
@@ -868,11 +1034,11 @@ function App(): JSX.Element {
     }
     if (!canEdit) {
       if (currentIntent.workspaceId === undefined) {
-        setFormError('The selected intent is not associated with a workspace.')
+        setAssumptionFormError('The selected intent is not associated with a workspace.')
         return
       }
       setSaving(true)
-      setFormError(null)
+      setAssumptionFormError(null)
       try {
         await sendMcpRequest('kron_update', {
           slug: currentIntent.slug,
@@ -883,7 +1049,7 @@ function App(): JSX.Element {
         setNotice(`Attached assumption “${shared.id}”.`)
         setDetailReload((value) => value + 1)
       } catch (requestError: unknown) {
-        setFormError(requestError instanceof Error ? requestError.message : 'Kron could not attach this assumption.')
+        setAssumptionFormError(requestError instanceof Error ? requestError.message : 'Kron could not attach this assumption.')
       } finally {
         setSaving(false)
       }
@@ -901,7 +1067,7 @@ function App(): JSX.Element {
       : assumption))
     setAssumptionDraft({ id: '', text: '', defaultSeverity: 'hard', severity: 'hard', rationale: '', expiresAt: '' })
     setShowAssumptionForm(false)
-    setFormError(null)
+    setAssumptionFormError(null)
     setNotice(`Preview assumption “${shared.id}” attached to this intent.`)
   }
 
@@ -934,18 +1100,57 @@ function App(): JSX.Element {
     setNotice(`Preview association to “${id}” removed. The shared assumption was kept.`)
   }
 
+  const checkAssumptions = async (): Promise<void> => {
+    const currentIntent = selectedIntent ?? liveIntent
+    if (currentIntent?.workspaceId === undefined) {
+      setAssumptionCheckError('Select a live workspace intent before checking assumptions.')
+      return
+    }
+    setSaving(true)
+    setAssumptionCheckError(null)
+    try {
+      const result = await sendMcpRequest('kron_assume_check', { file_path: '' }, currentIntent.workspaceId)
+      if (!isRecord(result) || !isRecord(result.summary) || !Array.isArray(result.warnings)) throw new Error('Kron returned an invalid assumption check result.')
+      const summary = result.summary
+      const warnings = result.warnings.flatMap((item): AssumptionCheck['warnings'] => {
+        if (!isRecord(item) || typeof item.intent_slug !== 'string' || typeof item.assumption_id !== 'string' || typeof item.text !== 'string' || typeof item.severity !== 'string') return []
+        return [{ intentSlug: item.intent_slug, assumptionId: item.assumption_id, text: item.text, severity: item.severity, verified: item.verified === true }]
+      })
+      setAssumptionCheck({
+        hard: typeof summary.hard === 'number' ? summary.hard : 0,
+        soft: typeof summary.soft === 'number' ? summary.soft : 0,
+        expired: typeof summary.expired === 'number' ? summary.expired : 0,
+        warnings,
+      })
+      setNotice('Assumption check completed.')
+    } catch (requestError: unknown) {
+      setAssumptionCheckError(requestError instanceof Error ? requestError.message : 'Kron could not check assumptions.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const archiveIntent = async (): Promise<void> => {
     const archived = selectedIntent ?? liveIntent
     if (archived === null || archived === undefined || pendingDeleteSlug !== archived.slug) return
     if (!canEdit) {
       setSaving(true)
       try {
-        await sendMcpRequest('kron_delete', { slug: archived.slug }, archived.workspaceId)
+        const result = await sendMcpRequest('kron_delete', {
+          slug: archived.slug,
+          // Node commits require an explicit acknowledgement of the cascade.
+          ...(archived.kind === 'node' ? { confirm_subtree: true } : {}),
+        }, archived.workspaceId)
+        const deletedSlugs = isRecord(result) && Array.isArray(result.deleted_slugs)
+          ? result.deleted_slugs.filter((slug): slug is string => typeof slug === 'string')
+          : [archived.slug]
         setArchivedIntents((current) => [archived, ...current])
         setSelectedSlug('')
         setPendingDeleteSlug(null)
         setShowAssumptionForm(false)
-        setNotice(`Moved "${archived.slug}" to Kron trash. Restore is available during this Webview session.`)
+        setNotice(deletedSlugs.length > 1
+          ? `Moved "${archived.slug}" and ${deletedSlugs.length - 1} intent(s) in its subtree to Kron trash. Restore is available during this Webview session.`
+          : `Moved "${archived.slug}" to Kron trash. Restore is available during this Webview session.`)
         setDetailReload((value) => value + 1)
         requestTree(true)
       } catch (requestError: unknown) {
@@ -955,8 +1160,10 @@ function App(): JSX.Element {
       }
       return
     }
+    // Mock preview: drop the node's whole subtree from the in-memory tree.
+    const subtreePrefix = `${archived.slug}/`
     setArchivedIntents((current) => [archived, ...current])
-    setIntents((current) => current.filter((intent) => intent.slug !== archived.slug))
+    setIntents((current) => current.filter((intent) => intent.slug !== archived.slug && !intent.slug.startsWith(subtreePrefix)))
     setAssumptions((current) => current.map((assumption) => ({
       ...assumption,
       usedBy: (assumption.usedBy ?? []).filter((slug) => slug !== archived.slug),
@@ -978,10 +1185,15 @@ function App(): JSX.Element {
     if (!canEdit) {
       setSaving(true)
       try {
-        await sendMcpRequest('kron_restore', { slug }, archived.workspaceId)
+        const result = await sendMcpRequest('kron_restore', { slug }, archived.workspaceId)
+        const restoredSlugs = isRecord(result) && Array.isArray(result.restored_slugs)
+          ? result.restored_slugs.filter((entry): entry is string => typeof entry === 'string')
+          : [slug]
         setArchivedIntents((current) => current.filter((intent) => intent.slug !== slug))
         setSelectedSlug(slug)
-        setNotice(`Restored "${slug}" from Kron trash.`)
+        setNotice(restoredSlugs.length > 1
+          ? `Restored "${slug}" and ${restoredSlugs.length - 1} intent(s) in its subtree from Kron trash.`
+          : `Restored "${slug}" from Kron trash.`)
         setDetailReload((value) => value + 1)
         setShowArchivePanel(false)
         requestTree(true)
@@ -1006,18 +1218,243 @@ function App(): JSX.Element {
   const toggleAssumptionForm = (): void => {
     const opening = !showAssumptionForm
     setShowAssumptionForm(opening)
-    setFormError(null)
+    setAssumptionFormError(null)
     if (opening) {
       setAssumptionMode(availableAssumptions.length > 0 ? 'existing' : 'new')
       setSelectedAssumptionId(availableAssumptions[0]?.id ?? '')
     }
   }
 
+  // ---------------------------------------------------------------------
+  // Assumption registry panel (global "Assumptions" button)
+  // ---------------------------------------------------------------------
+
+  const assumptionPanelWorkspaceId = activeWorkspaceId
+
+  const selectPanelAssumption = (assumption: Assumption): void => {
+    setAssumptionPanelId(assumption.id)
+    setAssumptionPanelCreating(false)
+    setAssumptionPanelPendingDelete(null)
+    setAssumptionPanelError(null)
+    const expiresAtRaw = assumption.expiresAt ?? ''
+    setAssumptionPanelDraft({
+      id: assumption.id,
+      text: assumption.text,
+      defaultSeverity: assumption.defaultSeverity,
+      status: assumption.status === 'draft' || assumption.status === 'superseded' ? assumption.status : 'active',
+      // <input type="date"> only accepts YYYY-MM-DD; keep the raw value for saving.
+      expiresAt: expiresAtRaw.slice(0, 10),
+      expiresAtRaw,
+      reviewersText: (assumption.reviewers ?? []).join(', '),
+    })
+  }
+
+  const startPanelCreate = (): void => {
+    setAssumptionPanelCreating(true)
+    setAssumptionPanelId(null)
+    setAssumptionPanelPendingDelete(null)
+    setAssumptionPanelError(null)
+    setAssumptionPanelDraft(emptyAssumptionPanelDraft())
+  }
+
+  const openAssumptionPanel = (): void => {
+    setShowAssumptionPanel(true)
+    setAssumptionPanelError(null)
+    setAssumptionPanelPendingDelete(null)
+    setAssumptionPanelCreating(false)
+  }
+
+  const refreshAssumptionRegistry = useCallback(async (workspaceId: string | undefined): Promise<Assumption[]> => {
+    if (vscodeApi === null) {
+      setAssumptionUsage({})
+      return []
+    }
+    const listResult = await sendMcpRequest('kron_assume_list', {}, workspaceId)
+    if (!isRecord(listResult) || !Array.isArray(listResult.assumptions)) {
+      throw new Error('Kron returned an invalid assumption list.')
+    }
+    const next: Assumption[] = listResult.assumptions.flatMap((item): Assumption[] => {
+      if (!isRecord(item) || typeof item.id !== 'string') return []
+      return [{
+        id: item.id,
+        text: typeof item.text === 'string' ? item.text : '',
+        defaultSeverity: item.default_severity === 'soft' ? 'soft' : 'hard',
+        ...(typeof item.status === 'string' ? { status: item.status } : {}),
+        ...(typeof item.created_by === 'string' && item.created_by !== '' ? { createdBy: item.created_by } : {}),
+        ...(typeof item.updated_at === 'string' && item.updated_at !== '' ? { updatedAt: item.updated_at } : {}),
+        ...(typeof item.expires_at === 'string' && item.expires_at !== '' ? { expiresAt: item.expires_at } : {}),
+        ...(typeof item.verified_at === 'string' && item.verified_at !== '' ? { verifiedAt: item.verified_at } : {}),
+        ...(typeof item.verified_by === 'string' && item.verified_by !== '' ? { verifiedBy: item.verified_by } : {}),
+        ...(Array.isArray(item.reviewers) ? { reviewers: stringArray(item.reviewers) } : {}),
+      }]
+    })
+    const usage: AssumptionUsage = {}
+    try {
+      const checkResult = await sendMcpRequest('kron_assume_check', { file_path: '' }, workspaceId)
+      if (isRecord(checkResult) && Array.isArray(checkResult.warnings)) {
+        for (const warning of checkResult.warnings) {
+          if (!isRecord(warning) || typeof warning.intent_slug !== 'string'
+            || typeof warning.assumption_id !== 'string' || typeof warning.severity !== 'string') continue
+          const entry: AssumptionUsageEntry = {
+            intentSlug: warning.intent_slug,
+            severity: warning.severity === 'soft' ? 'soft' : 'hard',
+            rationale: typeof warning.rationale === 'string' ? warning.rationale : '',
+          }
+          usage[warning.assumption_id] = [...(usage[warning.assumption_id] ?? []), entry]
+        }
+      }
+    } catch {
+      // Usage is best-effort; the registry list is still useful without it.
+    }
+    setAssumptions(next)
+    setAssumptionUsage(usage)
+    setAssumptionPanelId((current) => current !== null && next.some((item) => item.id === current) ? current : null)
+    return next
+  }, [sendMcpRequest])
+
+  const createPanelAssumption = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault()
+    const id = assumptionPanelDraft.id.trim()
+    const text = assumptionPanelDraft.text.trim()
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) {
+      setAssumptionPanelError('Use a lowercase kebab-case assumption ID.')
+      return
+    }
+    if (text === '') {
+      setAssumptionPanelError('Enter the assumption text.')
+      return
+    }
+    if (assumptions.some((item) => item.id === id)) {
+      setAssumptionPanelError('An assumption with this ID already exists.')
+      return
+    }
+    setAssumptionPanelSaving(true)
+    setAssumptionPanelError(null)
+    try {
+      if (!canEdit) {
+        if (assumptionPanelWorkspaceId === undefined) throw new Error('Select a project before editing assumptions.')
+        await sendMcpRequest('kron_assume_create', {
+          id,
+          text,
+          default_severity: assumptionPanelDraft.defaultSeverity,
+        }, assumptionPanelWorkspaceId)
+        const next = await refreshAssumptionRegistry(assumptionPanelWorkspaceId)
+        const created = next.find((item) => item.id === id)
+        setAssumptionPanelCreating(false)
+        if (created !== undefined) selectPanelAssumption(created)
+      } else {
+        setAssumptions((current) => [...current, { id, text, defaultSeverity: assumptionPanelDraft.defaultSeverity, status: 'active' }])
+        setAssumptionPanelCreating(false)
+        setAssumptionPanelId(id)
+      }
+      setNotice(`Created assumption “${id}”.`)
+    } catch (error: unknown) {
+      setAssumptionPanelError(error instanceof Error ? error.message : 'Kron could not create this assumption.')
+    } finally {
+      setAssumptionPanelSaving(false)
+    }
+  }
+
+  const savePanelAssumption = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault()
+    const id = assumptionPanelId
+    if (id === null) return
+    const text = assumptionPanelDraft.text.trim()
+    if (text === '') {
+      setAssumptionPanelError('Enter the assumption text.')
+      return
+    }
+    // Keep the original timestamp precision unless the user changed the date.
+    const rawExpires = assumptionPanelDraft.expiresAtRaw
+    const expiresToSend = assumptionPanelDraft.expiresAt.trim() === rawExpires.slice(0, 10).trim()
+      ? rawExpires
+      : assumptionPanelDraft.expiresAt.trim()
+    setAssumptionPanelSaving(true)
+    setAssumptionPanelError(null)
+    try {
+      if (!canEdit) {
+        if (assumptionPanelWorkspaceId === undefined) throw new Error('Select a project before editing assumptions.')
+        await sendMcpRequest('kron_assume_update', {
+          id,
+          text,
+          default_severity: assumptionPanelDraft.defaultSeverity,
+          status: assumptionPanelDraft.status,
+          expires_at: expiresToSend,
+          reviewers: splitLines(assumptionPanelDraft.reviewersText),
+        }, assumptionPanelWorkspaceId)
+        const next = await refreshAssumptionRegistry(assumptionPanelWorkspaceId)
+        const updated = next.find((item) => item.id === id)
+        if (updated !== undefined) selectPanelAssumption(updated)
+      } else {
+        setAssumptions((current) => current.map((item) => item.id === id
+          ? {
+              ...item,
+              text,
+              defaultSeverity: assumptionPanelDraft.defaultSeverity,
+              status: assumptionPanelDraft.status,
+              ...(expiresToSend === '' ? {} : { expiresAt: expiresToSend }),
+            }
+          : item))
+      }
+      setNotice(`Updated assumption “${id}”.`)
+    } catch (error: unknown) {
+      setAssumptionPanelError(error instanceof Error ? error.message : 'Kron could not save this assumption.')
+    } finally {
+      setAssumptionPanelSaving(false)
+    }
+  }
+
+  const deletePanelAssumption = async (): Promise<void> => {
+    const id = assumptionPanelPendingDelete
+    if (id === null) return
+    setAssumptionPanelSaving(true)
+    setAssumptionPanelError(null)
+    try {
+      if (!canEdit) {
+        if (assumptionPanelWorkspaceId === undefined) throw new Error('Select a project before editing assumptions.')
+        await sendMcpRequest('kron_assume_delete', { id }, assumptionPanelWorkspaceId)
+        await refreshAssumptionRegistry(assumptionPanelWorkspaceId)
+      } else {
+        setAssumptions((current) => current.filter((item) => item.id !== id))
+      }
+      setAssumptionPanelPendingDelete(null)
+      setAssumptionPanelId(null)
+      setNotice(`Moved assumption “${id}” to the Kron trash. Intents that still reference it need to be detached.`)
+    } catch (error: unknown) {
+      setAssumptionPanelError(error instanceof Error ? error.message : 'Kron could not delete this assumption.')
+    } finally {
+      setAssumptionPanelSaving(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!showAssumptionPanel) return
+    if (canEdit) {
+      // Standalone preview: derive usage from the in-memory intents.
+      const usage: AssumptionUsage = {}
+      for (const intent of intents) {
+        for (const link of intent.assumptions) {
+          usage[link.id] = [...(usage[link.id] ?? []), { intentSlug: intent.slug, severity: link.severity, rationale: link.rationale }]
+        }
+      }
+      setAssumptionUsage(usage)
+      return
+    }
+    if (assumptionPanelWorkspaceId === undefined) {
+      setAssumptionPanelError('Select a project in the intent tree before opening the assumption registry.')
+      return
+    }
+    void refreshAssumptionRegistry(assumptionPanelWorkspaceId).catch((error: unknown) => {
+      setAssumptionPanelError(error instanceof Error ? error.message : 'Kron could not load the assumption registry.')
+    })
+  }, [showAssumptionPanel, canEdit, assumptionPanelWorkspaceId, intents, refreshAssumptionRegistry])
+
   const activeDetail: Intent | null = selectedIntent ?? liveIntent ?? (selectedNode !== undefined
     ? {
         slug: selectedNode.slug,
         kind: selectedNode.is_dir ? 'node' : 'leaf',
         title: selectedNode.title ?? selectedNode.name,
+        createdBy: '',
         summary: 'Select an intent to load its details.',
         symbol: '',
         status: (selectedNode.status === 'draft' || selectedNode.status === 'superseded' ? selectedNode.status : 'active'),
@@ -1029,76 +1466,214 @@ function App(): JSX.Element {
       }
     : null)
 
-  const sharedAssumptions = assumptions.filter((assumption) => activeDetail?.assumptions.some((item) => item.id === assumption.id))
-  const availableAssumptions = assumptions.filter((assumption) => !activeDetail?.assumptions.some((item) => item.id === assumption.id))
+  const assumptionTarget = selectedIntent ?? liveIntent
+  const linkedAssumptions = assumptionTarget?.assumptions ?? []
+
+  // Node deletes cascade to the whole subtree; the confirm dialog must say so.
+  const deleteSubtreeCount = activeDetail !== null && activeDetail.kind === 'node'
+    ? intents.filter((intent) => intent.slug === activeDetail.slug || intent.slug.startsWith(`${activeDetail.slug}/`)).length
+    : 1
+
+  /**
+   * The intent's own `assumptions[]` is the source of truth for what is linked;
+   * the registry only fills in the shared text. A failed/empty registry load
+   * must not hide links that the intent actually has.
+   */
+  const sharedAssumptions = linkedAssumptions.map((link) => {
+    const registry = assumptions.find((item) => item.id === link.id)
+    return {
+      id: link.id,
+      severity: link.severity,
+      rationale: link.rationale,
+      text: registry?.text ?? '',
+      defaultSeverity: registry?.defaultSeverity ?? link.severity,
+    }
+  })
+  const availableAssumptions = assumptions.filter((assumption) => !linkedAssumptions.some((item) => item.id === assumption.id))
+
+  const assumptionContent = assumptionTarget === null ? null : (
+    <section className="rounded-md border">
+      <div className="flex items-center justify-between gap-2 border-b px-2 py-1">
+        <span className="flex items-center gap-1.5 text-[0.6875rem] font-medium">
+          Assumptions
+          {sharedAssumptions.length > 0 ? <span className="rounded-full bg-muted px-1.5 text-[0.625rem] text-muted-foreground">{sharedAssumptions.length}</span> : null}
+        </span>
+        <div className="flex items-center gap-1">
+          {!canEdit ? <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-[0.6875rem]" title="Check every assumption in this workspace" onClick={() => void checkAssumptions()} disabled={saving}>Check</Button> : null}
+          <Button type="button" size="sm" variant="outline" className="h-6 px-2 text-[0.6875rem]" onClick={toggleAssumptionForm} disabled={saving}>{showAssumptionForm ? 'Close' : 'Add'}</Button>
+        </div>
+      </div>
+      {sharedAssumptions.length > 0 ? (
+        <div className="divide-y">
+          {sharedAssumptions.map((assumption) => (
+            <details key={assumption.id}>
+              <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2 py-1 text-[0.6875rem] hover:bg-accent/50" title={assumption.text}>
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${assumption.severity === 'soft' ? 'bg-muted-foreground' : 'bg-destructive'}`} />
+                <span className="truncate font-mono">{assumption.id}</span>
+                <span className="ml-auto shrink-0 text-muted-foreground">{assumption.severity}</span>
+              </summary>
+              <div className="space-y-1.5 px-2 pb-2 text-xs">
+                <p className="text-muted-foreground">{assumption.text || 'Shared text not found in the assumption registry.'}</p>
+                {assumption.rationale ? <p className="text-[0.6875rem] text-muted-foreground">Why: {assumption.rationale}</p> : null}
+                <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-[0.6875rem]" onClick={() => void detachAssumption(assumption.id)} disabled={saving}>Remove</Button>
+              </div>
+            </details>
+          ))}
+        </div>
+      ) : <div className="px-2 py-1.5 text-[0.6875rem] text-muted-foreground">No assumptions linked.</div>}
+      {assumptionCheck !== null ? (
+        <div className="border-t px-2 py-1.5 text-[0.6875rem]">
+          <span className="text-muted-foreground">workspace: {assumptionCheck.hard} hard · {assumptionCheck.soft} soft · {assumptionCheck.expired} expired</span>
+          {assumptionCheck.warnings.length > 0 ? <div className="mt-1 space-y-0.5">{assumptionCheck.warnings.slice(0, 5).map((warning) => <div key={`${warning.intentSlug}:${warning.assumptionId}`} className="text-muted-foreground">{warning.intentSlug} · {warning.assumptionId}: {warning.text}{warning.verified ? ' (verified)' : ''}</div>)}</div> : null}
+        </div>
+      ) : null}
+      {assumptionCheckError !== null ? <div role="alert" className="border-t px-2 py-1.5 text-[0.6875rem] text-destructive">{assumptionCheckError}</div> : null}
+      {assumptionFormError !== null ? <div role="alert" className="border-t px-2 py-1.5 text-[0.6875rem] text-destructive">{assumptionFormError}</div> : null}
+      {showAssumptionForm ? (
+        <div className="border-t p-2">
+          {availableAssumptions.length > 0 ? (
+            <div className="mb-3 flex gap-1 rounded-md bg-muted p-1">
+              <Button type="button" size="sm" variant={assumptionMode === 'existing' ? 'secondary' : 'ghost'} onClick={() => setAssumptionMode('existing')}>Use existing</Button>
+              <Button type="button" size="sm" variant={assumptionMode === 'new' ? 'secondary' : 'ghost'} onClick={() => setAssumptionMode('new')}>Create new</Button>
+            </div>
+          ) : null}
+          {assumptionMode === 'existing' && availableAssumptions.length > 0 ? (
+            <form className="space-y-3" onSubmit={attachExistingAssumption}>
+              <Field label="Assumption">
+                <select className={fieldClass()} value={selectedAssumptionId} onChange={(event) => setSelectedAssumptionId(event.target.value)}>
+                  {availableAssumptions.map((assumption) => <option key={assumption.id} value={assumption.id}>{assumption.id} — {assumption.text}</option>)}
+                </select>
+              </Field>
+              <Field label="Severity">
+                <select className={fieldClass()} value={assumptionDraft.severity} onChange={(event) => setAssumptionDraft({ ...assumptionDraft, severity: event.target.value === 'soft' ? 'soft' : 'hard' })}>
+                  <option value="hard">hard</option><option value="soft">soft</option>
+                </select>
+              </Field>
+              <Field label="Rationale" hint="At least 10 characters. Why does this intent use this severity?">
+                <textarea className={`${fieldClass()} min-h-16 resize-y`} value={assumptionDraft.rationale} onChange={(event) => setAssumptionDraft({ ...assumptionDraft, rationale: event.target.value })} />
+              </Field>
+              <Button type="submit" size="sm" disabled={saving}>Attach assumption</Button>
+            </form>
+          ) : (
+            <form className="space-y-3" onSubmit={attachAssumption}>
+              <Field label="Assumption ID" hint="Lowercase kebab-case.">
+                <Input value={assumptionDraft.id} placeholder="single-region" onChange={(event) => setAssumptionDraft({ ...assumptionDraft, id: event.target.value })} />
+              </Field>
+              <Field label="Claim">
+                <textarea className={`${fieldClass()} min-h-16 resize-y`} value={assumptionDraft.text} placeholder="Production traffic is served from one region." onChange={(event) => setAssumptionDraft({ ...assumptionDraft, text: event.target.value })} />
+              </Field>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Default severity">
+                  <select className={fieldClass()} value={assumptionDraft.defaultSeverity} onChange={(event) => setAssumptionDraft({ ...assumptionDraft, defaultSeverity: event.target.value === 'soft' ? 'soft' : 'hard' })}>
+                    <option value="hard">hard</option><option value="soft">soft</option>
+                  </select>
+                </Field>
+                <Field label="Intent severity">
+                  <select className={fieldClass()} value={assumptionDraft.severity} onChange={(event) => setAssumptionDraft({ ...assumptionDraft, severity: event.target.value === 'soft' ? 'soft' : 'hard' })}>
+                    <option value="hard">hard</option><option value="soft">soft</option>
+                  </select>
+                </Field>
+              </div>
+              <Field label="Rationale" hint="At least 10 characters.">
+                <textarea className={`${fieldClass()} min-h-16 resize-y`} value={assumptionDraft.rationale} onChange={(event) => setAssumptionDraft({ ...assumptionDraft, rationale: event.target.value })} />
+              </Field>
+              <Field label="Expires at" hint="Optional RFC3339 date or leave blank.">
+                <Input type="date" value={assumptionDraft.expiresAt} onChange={(event) => setAssumptionDraft({ ...assumptionDraft, expiresAt: event.target.value })} />
+              </Field>
+              <Button type="submit" size="sm" disabled={saving}>Create and attach</Button>
+            </form>
+          )}
+        </div>
+      ) : null}
+    </section>
+  )
 
   const editorContent = formMode === null ? null : (
-    <form className="grid items-start gap-4 md:grid-cols-2" onSubmit={saveIntent}>
-      <div className="md:col-span-2 flex items-start justify-between gap-3">
-        <div>
-          <div className="text-base font-semibold">{formMode === 'create' ? 'New intent' : 'Edit intent'}</div>
-          <div className="mt-1 text-xs text-muted-foreground">{canEdit ? 'Preview form for the supported intent fields.' : 'Edits are written through the Kron MCP tools.'}</div>
-        </div>
-        <span className="rounded-full bg-muted px-2 py-1 text-[10px] text-muted-foreground">Editing</span>
+    <form className="grid gap-3" onSubmit={saveIntent}>
+      <div className="flex items-start justify-between gap-2 pr-5">
+        <span className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
+          {formMode === 'create' ? (draft.kind === 'node' ? 'New intent folder' : 'New intent document') : 'Edit intent'}
+        </span>
+        <span className="truncate font-mono text-[0.625rem] text-muted-foreground">{draft.slug || '…'}</span>
       </div>
-      <Field label="Intent slug" hint={draftParentSlug === null ? 'Lowercase kebab-case; use / for a group.' : `Child of “${draftParentSlug}” is locked; enter one child name after the slash.`}>
-        <Input value={draft.slug} disabled={formMode === 'edit'} placeholder="auth/session-renewal" onChange={(event) => {
-          const value = event.target.value
-          const prefix = draftParentSlug === null ? '' : `${draftParentSlug}/`
-          setDraft({ ...draft, slug: prefix !== '' && !value.startsWith(prefix) ? `${prefix}${value.replace(/^\/+/, '')}` : value })
-        }} />
-      </Field>
+      {formMode === 'create' ? (
+        <Field label="Intent slug" hint={draftParentSlug === null ? 'Lowercase kebab-case; use / for a group.' : `Child of “${draftParentSlug}” is locked; enter one child name after the slash.`}>
+          <Input value={draft.slug} placeholder="auth/session-renewal" onChange={(event) => {
+            const value = event.target.value
+            const prefix = draftParentSlug === null ? '' : `${draftParentSlug}/`
+            setDraft({ ...draft, slug: prefix !== '' && !value.startsWith(prefix) ? `${prefix}${value.replace(/^\/+/, '')}` : value })
+          }} />
+        </Field>
+      ) : null}
       <Field label="Title">
-        <Input value={draft.title} placeholder="Session renewal" onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
+        <Input className="h-10 text-lg font-semibold" value={draft.title} placeholder="Session renewal" onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
       </Field>
-      <div className="md:col-span-2">
-        <Field label="Summary" hint={formMode === 'create' ? 'Required. Shown in the intent tree and used as the opening paragraph.' : canEdit ? 'A short description shown in the tree and detail header.' : 'Derived from the first paragraph of the Markdown body.'}>
-          <textarea className={`${fieldClass()} min-h-20 resize-y`} value={draft.summary} readOnly={!canEdit && formMode !== 'create'} placeholder="What decision does this intent record?" onChange={(event) => setDraft({ ...draft, summary: event.target.value })} />
-        </Field>
-      </div>
-      <div className="md:col-span-2 grid min-h-[24rem] gap-4 lg:grid-cols-2">
-        <Field label="Markdown body" hint={canEdit ? 'Edit the decision body; the preview updates as you type.' : 'The Markdown body is saved through Kron MCP.'}>
-          <textarea className={`${fieldClass()} min-h-[20rem] resize-y font-mono text-sm leading-6`} value={draft.body} placeholder={'## Why\n\nExplain the decision and its trade-offs.'} onChange={(event) => setDraft({ ...draft, body: event.target.value })} />
-        </Field>
-        <div className="grid min-h-0 gap-1.5 text-sm">
-          <span className="font-medium">Preview</span>
-          <div className="min-h-[20rem] overflow-auto rounded-md border border-input bg-muted/20 p-4">
-            <MarkdownPreview body={draft.body || 'Nothing to preview yet.'} />
+      {formMode === 'edit' ? (
+        <>
+          <Field label="Summary" hint={canEdit ? 'Shown in the tree and detail header.' : 'Derived from the first paragraph of the Markdown body.'}>
+            <textarea className={`${fieldClass()} min-h-14 resize-y`} value={draft.summary} readOnly={!canEdit} placeholder="What decision does this intent record?" onChange={(event) => setDraft({ ...draft, summary: event.target.value })} />
+          </Field>
+          <div className="flex max-w-full flex-wrap items-center gap-1">
+            <button
+              type="button"
+              className={`flex shrink-0 items-center gap-1 ${paramChipClass(editParam === 'status')}`}
+              aria-label="Status"
+              aria-expanded={editParam === 'status'}
+              title={`Status: ${draft.status}`}
+              onClick={() => setEditParam(toggleEditParam(editParam, 'status'))}
+            >
+              <StatusDot status={draft.status} />
+              <span>{draft.status}</span>
+            </button>
+            <EditChip label="Created by" value={(selectedIntent ?? liveIntent)?.createdBy ?? ''} active={editParam === 'created'} onToggle={() => setEditParam(toggleEditParam(editParam, 'created'))} />
+            <EditChip label="Reviewers" value={splitLines(draft.reviewersText)[0] ?? ''} active={editParam === 'review'} onToggle={() => setEditParam(toggleEditParam(editParam, 'review'))} />
           </div>
-        </div>
-      </div>
-      <details className="md:col-span-2 rounded-md border p-3">
-        <summary className="cursor-pointer text-sm font-medium">Advanced fields (optional)</summary>
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          {formMode === 'create' ? (
-            <Field label="Intent kind" hint="Leaf is a single intent; node groups child intents.">
-              <select className={fieldClass()} value={draft.kind} onChange={(event) => setDraft({ ...draft, kind: event.target.value as Intent['kind'] })}>
-                <option value="leaf">leaf</option><option value="node">node</option>
-              </select>
-            </Field>
+          <div className="grid grid-cols-3 gap-1">
+            <EditChip label="Symbol" value={draft.symbol} active={editParam === 'symbol'} onToggle={() => setEditParam(toggleEditParam(editParam, 'symbol'))} />
+            <EditChip label="Depends on" value={splitLines(draft.dependsOnText)[0] ?? ''} active={editParam === 'depends'} onToggle={() => setEditParam(toggleEditParam(editParam, 'depends'))} />
+            <EditChip label="References" value={splitLines(draft.referencesText)[0] ?? ''} active={editParam === 'references'} onToggle={() => setEditParam(toggleEditParam(editParam, 'references'))} />
+          </div>
+          {editParam !== null ? (
+            <div className="rounded-md border bg-muted/20 p-2.5">
+              {editParam === 'status' ? (
+                <Field label="Status">
+                  <select className={fieldClass()} value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value === 'active' || event.target.value === 'superseded' ? event.target.value : 'draft' })}>
+                    <option value="draft">draft</option><option value="active">active</option><option value="superseded">superseded</option>
+                  </select>
+                </Field>
+              ) : editParam === 'created' ? (
+                <p className="text-xs text-muted-foreground">
+                  {(selectedIntent ?? liveIntent)?.createdBy || 'Not specified'} — filled by kron_add from the MCP identity or git config; not editable.
+                </p>
+              ) : editParam === 'review' ? (
+                <Field label="Reviewers" hint="Separate handles with commas or new lines.">
+                  <Input value={draft.reviewersText} placeholder="@reviewer" onChange={(event) => setDraft({ ...draft, reviewersText: event.target.value })} />
+                </Field>
+              ) : editParam === 'symbol' ? (
+                <Field label="Symbol" hint="Optional code symbol or symbol list.">
+                  <Input value={draft.symbol} placeholder="auth.RefreshToken" onChange={(event) => setDraft({ ...draft, symbol: event.target.value })} />
+                </Field>
+              ) : editParam === 'depends' ? (
+                <Field label="Depends on" hint="Required intent slugs, one per line.">
+                  <textarea className={`${fieldClass()} min-h-16 resize-y`} value={draft.dependsOnText} placeholder="auth/token-storage" onChange={(event) => setDraft({ ...draft, dependsOnText: event.target.value })} />
+                </Field>
+              ) : (
+                <Field label="References" hint="Intent slugs, one per line.">
+                  <textarea className={`${fieldClass()} min-h-16 resize-y`} value={draft.referencesText} placeholder="security/session-timeout" onChange={(event) => setDraft({ ...draft, referencesText: event.target.value })} />
+                </Field>
+              )}
+            </div>
           ) : null}
-          <Field label="Status">
-            <select className={fieldClass()} value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as Intent['status'] })}>
-              <option value="draft">draft</option><option value="active">active</option><option value="superseded">superseded</option>
-            </select>
-          </Field>
-          <Field label="Symbol" hint="Optional code symbol or symbol list.">
-            <Input value={draft.symbol} placeholder="auth.RefreshToken" onChange={(event) => setDraft({ ...draft, symbol: event.target.value })} />
-          </Field>
-          <Field label="Reviewers" hint="Separate handles with commas or new lines.">
-            <Input value={draft.reviewersText} placeholder="@reviewer" onChange={(event) => setDraft({ ...draft, reviewersText: event.target.value })} />
-          </Field>
-          <Field label="References" hint="Intent slugs, one per line.">
-            <textarea className={`${fieldClass()} min-h-20 resize-y`} value={draft.referencesText} placeholder="security/session-timeout" onChange={(event) => setDraft({ ...draft, referencesText: event.target.value })} />
-          </Field>
-          <Field label="Depends on" hint="Required intent slugs, one per line.">
-            <textarea className={`${fieldClass()} min-h-20 resize-y`} value={draft.dependsOnText} placeholder="auth/token-storage" onChange={(event) => setDraft({ ...draft, dependsOnText: event.target.value })} />
-          </Field>
-        </div>
-      </details>
-      {formError ? <p role="alert" className="md:col-span-2 text-sm text-destructive">{formError}</p> : null}
-      <div className="flex justify-end gap-2 md:col-span-2">
-        <Button type="button" variant="outline" onClick={() => { setFormMode(null); setDraftParentSlug(null) }}>Cancel</Button>
+        </>
+      ) : (
+        <p className="text-[0.6875rem] text-muted-foreground">The summary is taken from the first paragraph of the body after you save.</p>
+      )}
+      <Field label="Markdown body">
+        <textarea className={`${fieldClass()} h-48 resize-y font-mono text-sm leading-6`} value={draft.body} placeholder={'## Why\n\nExplain the decision and its trade-offs.'} onChange={(event) => setDraft({ ...draft, body: event.target.value })} />
+      </Field>
+      {formError ? <p role="alert" className="text-sm text-destructive">{formError}</p> : null}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="outline" onClick={() => { setFormMode(null); setDraftParentSlug(null); setEditParam(null) }}>Cancel</Button>
         <Button type="submit" disabled={saving}>{saving ? 'Saving…' : canEdit ? 'Save preview' : 'Save intent'}</Button>
       </div>
     </form>
@@ -1111,6 +1686,8 @@ function App(): JSX.Element {
           root={activeTree}
           filter={filter}
           selectedSlug={selectedSlug}
+          uiScale={uiScale}
+          revealToken={revealToken}
           relations={treeRelations}
           detail={canEdit ? selectedIntent ?? null : liveIntent}
           detailLoading={detailLoading}
@@ -1125,27 +1702,34 @@ function App(): JSX.Element {
             }
           }}
           editorContent={editorContent}
-          onCloseDetails={() => { setFormMode(null); setDraftParentSlug(null); setFormError(null) }}
-          onClearSelection={() => { setSelectedSlug(''); setFormMode(null); setDraftParentSlug(null); setFormError(null) }}
-          onSelect={(node) => { setSelectedSlug(node.slug); setFormMode(null); setShowAssumptionForm(false); setPendingDeleteSlug(null) }}
+          assumptionContent={assumptionContent}
+          onCloseDetails={() => { setFormMode(null); setDraftParentSlug(null); setFormError(null); setAssumptionFormError(null) }}
+          onClearSelection={() => { setSelectedSlug(''); setFormMode(null); setDraftParentSlug(null); setFormError(null); setAssumptionCheck(null); setAssumptionCheckError(null); setAssumptionFormError(null) }}
+          onSelect={(node) => { setSelectedSlug(node.slug); setFormMode(null); setShowAssumptionForm(false); setPendingDeleteSlug(null); setAssumptionCheck(null); setAssumptionCheckError(null); setAssumptionFormError(null) }}
         />
 
         <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex flex-wrap items-center justify-between gap-2">
           <div className="pointer-events-auto flex items-center gap-2 rounded-lg bg-background/85 px-2 py-1 shadow-sm backdrop-blur-sm">
-            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">K</div>
-            <div className="font-semibold leading-tight">Intent tree</div>
-            <Badge variant={canEdit ? 'secondary' : 'default'}>{canEdit ? 'Mock preview' : 'Live tree'}</Badge>
+            <img src={kronLogo} alt="Kron" className="h-8 w-8 shrink-0 object-contain" />
           </div>
           <div className="pointer-events-auto flex flex-wrap items-center justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={openAssumptionPanel}>
+              Assumptions <Badge variant="secondary" className="ml-2">{assumptions.length}</Badge>
+            </Button>
             <Button variant="outline" size="sm" onClick={() => setShowArchivePanel(true)}>
               Archived <Badge variant="secondary" className="ml-2">{archivedIntents.length}</Badge>
             </Button>
             <Button variant="outline" size="sm" onClick={() => requestTree(true)} disabled={loading} aria-label="Refresh intents">
               <span className="mr-2" aria-hidden="true">↻</span>{loading ? 'Loading…' : 'Refresh'}
             </Button>
-            <Button size="sm" onClick={startCreate} disabled={!canEdit && activeWorkspaceId === undefined}>
-              <span className="mr-2" aria-hidden="true">＋</span>New intent
-            </Button>
+            <div className={`flex items-center gap-1 rounded-md border p-1 ${createTargetHighlighted ? 'border-primary/40 bg-primary/10' : 'border-border/60 bg-muted/30'}`}>
+              <Button size="sm" variant={createTargetHighlighted ? 'secondary' : 'ghost'} onClick={() => startCreate('leaf')} disabled={!canCreateIntent} title={canCreateIntent ? 'Create an intent document' : 'Select a workspace or folder node first'}>
+                <span className="mr-1" aria-hidden="true">＋</span>Document
+              </Button>
+              <Button size="sm" variant={createTargetHighlighted ? 'secondary' : 'ghost'} onClick={() => startCreate('node')} disabled={!canCreateIntent} title={canCreateIntent ? 'Create an intent folder' : 'Select a workspace or folder node first'}>
+                <span className="mr-1" aria-hidden="true">＋</span>Folder
+              </Button>
+            </div>
           </div>
         </div>
         <div className="pointer-events-none absolute left-3 top-[3.75rem] z-20 flex items-center gap-2 rounded-lg bg-background/85 p-1.5 shadow-sm backdrop-blur-sm">
@@ -1153,6 +1737,179 @@ function App(): JSX.Element {
           <Input className="pointer-events-auto w-64 max-w-[45vw]" aria-label="Filter intents" placeholder="Filter intents…" value={filter} onChange={(event) => setFilter(event.target.value)} />
         </div>
         {error ? <p role="alert" className="pointer-events-none absolute bottom-10 left-3 z-20 max-w-[min(560px,calc(100%-1.5rem))] rounded-md border border-destructive/40 bg-destructive/90 px-3 py-2 text-sm text-destructive-foreground shadow">{error}</p> : null}
+        <div className="pointer-events-none absolute bottom-10 right-3 z-20 flex max-w-[min(460px,calc(100%-1.5rem))] flex-col items-end gap-2">
+          {detailError !== null ? <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/90 px-3 py-2 text-sm text-destructive-foreground shadow">{detailError}</p> : null}
+          {notice !== null ? <p role="status" className="rounded-md border border-border bg-muted/90 px-3 py-2 text-sm shadow">{notice}</p> : null}
+        </div>
+
+            <aside className="fixed inset-0 z-50 overflow-y-auto bg-background p-4 md:p-8" hidden={!showAssumptionPanel} aria-label="Assumption registry">
+              <Card className="mx-auto w-full max-w-5xl shadow-none">
+                <CardHeader className="p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-3">
+                      <CardTitle className="text-lg">Assumptions</CardTitle>
+                      <Badge variant="secondary">{assumptions.length}</Badge>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={startPanelCreate} disabled={assumptionPanelSaving}>New assumption</Button>
+                      <Button variant="outline" size="sm" onClick={() => setShowAssumptionPanel(false)}>Close</Button>
+                    </div>
+                  </div>
+                  <CardDescription>
+                    Shared assumptions live in <code>.kron/assumptions/&lt;id&gt;.md</code>. Intents reference them from their frontmatter;
+                    deleting here soft-deletes the file and leaves existing references for you to detach.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-3 p-3 pt-0 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+                  <div className="max-h-[62vh] space-y-1 overflow-y-auto rounded-md border p-2">
+                    {assumptions.length === 0
+                      ? <p className="px-1 py-2 text-xs text-muted-foreground">No assumptions in this project yet.</p>
+                      : assumptions.map((assumption) => (
+                        <button
+                          key={assumption.id}
+                          type="button"
+                          className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs ${assumptionPanelId === assumption.id ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'}`}
+                          title={[
+                            assumption.text,
+                            assumption.expiresAt !== undefined ? `expires ${assumption.expiresAt}` : 'no expiry',
+                            assumption.verifiedAt !== undefined ? `verified ${assumption.verifiedAt}` : 'never verified',
+                          ].join('\n')}
+                          onClick={() => selectPanelAssumption(assumption)}
+                        >
+                          <span className="truncate font-mono">{assumption.id}</span>
+                          {assumption.expiresAt !== undefined
+                            ? <span className="shrink-0 text-[0.625rem] text-muted-foreground">{assumption.expiresAt.slice(0, 10)}</span>
+                            : null}
+                          <span className="ml-auto shrink-0 text-muted-foreground">{assumption.defaultSeverity}</span>
+                          {(assumptionUsage[assumption.id]?.length ?? 0) > 0
+                            ? <span className="shrink-0 rounded-full bg-muted px-1.5 text-[0.625rem] text-muted-foreground">{assumptionUsage[assumption.id]?.length}</span>
+                            : null}
+                        </button>
+                      ))}
+                  </div>
+                  <div className="space-y-3">
+                    {assumptionPanelError !== null ? <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">{assumptionPanelError}</p> : null}
+                    {assumptionPanelCreating ? (
+                      <form className="space-y-3" onSubmit={createPanelAssumption}>
+                        <div className="text-sm font-medium">New assumption</div>
+                        <Field label="Assumption ID" hint="Lowercase kebab-case; becomes the file name.">
+                          <Input value={assumptionPanelDraft.id} placeholder="single-region" onChange={(event) => setAssumptionPanelDraft({ ...assumptionPanelDraft, id: event.target.value })} />
+                        </Field>
+                        <Field label="Shared text" hint="What must stay true for intents that use it?">
+                          <textarea className={`${fieldClass()} min-h-20 resize-y`} value={assumptionPanelDraft.text} placeholder="Production traffic is served from a single region." onChange={(event) => setAssumptionPanelDraft({ ...assumptionPanelDraft, text: event.target.value })} />
+                        </Field>
+                        <Field label="Default severity">
+                          <select className={fieldClass()} value={assumptionPanelDraft.defaultSeverity} onChange={(event) => setAssumptionPanelDraft({ ...assumptionPanelDraft, defaultSeverity: event.target.value === 'soft' ? 'soft' : 'hard' })}>
+                            <option value="hard">hard</option><option value="soft">soft</option>
+                          </select>
+                        </Field>
+                        <div className="flex justify-end gap-2">
+                          <Button type="button" variant="outline" size="sm" onClick={() => { setAssumptionPanelCreating(false); setAssumptionPanelError(null) }}>Cancel</Button>
+                          <Button type="submit" size="sm" disabled={assumptionPanelSaving}>{assumptionPanelSaving ? 'Creating…' : 'Create assumption'}</Button>
+                        </div>
+                      </form>
+                    ) : assumptionPanelId === null ? (
+                      <p className="px-1 py-2 text-xs text-muted-foreground">Select an assumption on the left, or create a new one.</p>
+                    ) : (
+                      <form className="space-y-3" onSubmit={savePanelAssumption}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate font-mono text-xs">{assumptionPanelId}</span>
+                          <Badge variant="secondary">{assumptionPanelDraft.status}</Badge>
+                        </div>
+                        <Field label="Shared text">
+                          <textarea className={`${fieldClass()} min-h-24 resize-y`} value={assumptionPanelDraft.text} onChange={(event) => setAssumptionPanelDraft({ ...assumptionPanelDraft, text: event.target.value })} />
+                        </Field>
+                        <div className="grid gap-2 md:grid-cols-2">
+                          <Field label="Default severity">
+                            <select className={fieldClass()} value={assumptionPanelDraft.defaultSeverity} onChange={(event) => setAssumptionPanelDraft({ ...assumptionPanelDraft, defaultSeverity: event.target.value === 'soft' ? 'soft' : 'hard' })}>
+                              <option value="hard">hard</option><option value="soft">soft</option>
+                            </select>
+                          </Field>
+                          <Field label="Status">
+                            <select className={fieldClass()} value={assumptionPanelDraft.status} onChange={(event) => setAssumptionPanelDraft({ ...assumptionPanelDraft, status: event.target.value === 'draft' || event.target.value === 'superseded' ? event.target.value : 'active' })}>
+                              <option value="active">active</option><option value="draft">draft</option><option value="superseded">superseded</option>
+                            </select>
+                          </Field>
+                        </div>
+                        <div className="grid gap-2 md:grid-cols-2">
+                          <Field label="Expires at" hint="Optional date; clearing it removes the expiry.">
+                            <Input type="date" value={assumptionPanelDraft.expiresAt} onChange={(event) => setAssumptionPanelDraft({ ...assumptionPanelDraft, expiresAt: event.target.value })} />
+                          </Field>
+                          <Field label="Reviewers" hint="Comma or newline separated.">
+                            <Input value={assumptionPanelDraft.reviewersText} placeholder="@reviewer" onChange={(event) => setAssumptionPanelDraft({ ...assumptionPanelDraft, reviewersText: event.target.value })} />
+                          </Field>
+                        </div>
+                        {(() => {
+                          const stored = assumptions.find((item) => item.id === assumptionPanelId)
+                          if (stored === undefined) return null
+                          const rows: Array<[string, string]> = []
+                          if (stored.createdBy !== undefined) rows.push(['Created by', stored.createdBy])
+                          if (stored.updatedAt !== undefined) rows.push(['Updated at', stored.updatedAt])
+                          if (stored.expiresAt !== undefined) rows.push(['Expires at (stored)', stored.expiresAt])
+                          if (stored.verifiedAt !== undefined) rows.push(['Verified at', stored.verifiedAt])
+                          if (stored.verifiedBy !== undefined) rows.push(['Verified by', stored.verifiedBy])
+                          if (rows.length === 0) return null
+                          return (
+                            <div className="space-y-0.5 rounded-md bg-muted/40 px-2 py-1.5 text-[0.6875rem] text-muted-foreground">
+                              {rows.map(([label, value]) => (
+                                <div key={label} className="flex gap-2">
+                                  <span className="w-32 shrink-0">{label}</span>
+                                  <span className="truncate font-mono">{value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )
+                        })()}
+                        <Field label="Used by">
+                          {(assumptionUsage[assumptionPanelId]?.length ?? 0) === 0 ? (
+                            <p className="text-xs text-muted-foreground">Not referenced by any intent.</p>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {(assumptionUsage[assumptionPanelId] ?? []).map((entry) => (
+                                <button
+                                  key={entry.intentSlug}
+                                  type="button"
+                                  className="rounded-md border bg-background px-2 py-1 text-left text-[0.6875rem] hover:border-primary/40"
+                                  title={`${entry.severity}: ${entry.rationale}`}
+                                  onClick={() => {
+                                    setSelectedSlug(entry.intentSlug)
+                                    setRevealToken((value) => value + 1)
+                                    setShowAssumptionPanel(false)
+                                    setFormMode(null)
+                                    setShowAssumptionForm(false)
+                                  }}
+                                >
+                                  <span className="font-mono">{entry.intentSlug}</span>
+                                  <span className="ml-1 text-muted-foreground">{entry.severity}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </Field>
+                        {assumptionPanelPendingDelete === assumptionPanelId ? (
+                          <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 p-2">
+                            <p className="text-xs text-destructive">
+                              Move “{assumptionPanelId}” to the Kron trash? {(assumptionUsage[assumptionPanelId]?.length ?? 0) > 0
+                                ? `${assumptionUsage[assumptionPanelId]?.length} intent(s) still reference it; their links stay until you detach them.`
+                                : 'Nothing references it.'}
+                            </p>
+                            <div className="flex justify-end gap-2">
+                              <Button type="button" variant="outline" size="sm" onClick={() => setAssumptionPanelPendingDelete(null)}>Cancel</Button>
+                              <Button type="button" variant="destructive" size="sm" onClick={() => void deletePanelAssumption()} disabled={assumptionPanelSaving}>Delete assumption</Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex justify-between gap-2 border-t pt-2">
+                            <Button type="button" variant="outline" size="sm" onClick={() => setAssumptionPanelPendingDelete(assumptionPanelId)} disabled={assumptionPanelSaving}>Delete</Button>
+                            <Button type="submit" size="sm" disabled={assumptionPanelSaving}>{assumptionPanelSaving ? 'Saving…' : 'Save assumption'}</Button>
+                          </div>
+                        )}
+                      </form>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </aside>
 
             <aside className="fixed inset-0 z-50 overflow-y-auto bg-background p-4 md:p-8" hidden={!showArchivePanel} aria-label="Archived intents">
               <Card className="mx-auto w-full max-w-3xl shadow-none">
@@ -1174,7 +1931,7 @@ function App(): JSX.Element {
                         <div key={intent.slug} className="flex items-center gap-2 rounded-md border p-2">
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-sm font-medium">{intent.title}</div>
-                            <div className="truncate font-mono text-[10px] text-muted-foreground">{intent.slug}</div>
+                            <div className="truncate font-mono text-[0.625rem] text-muted-foreground">{intent.slug}</div>
                           </div>
                           <Button size="sm" variant="outline" disabled={slugConflict || saving} onClick={() => void restoreIntent(intent.slug)}>Restore</Button>
                         </div>
@@ -1231,6 +1988,11 @@ function App(): JSX.Element {
                     <div>
                       <div className="font-medium">{canEdit ? `Archive “${(selectedIntent ?? liveIntent)?.slug}”?` : `Move “${(selectedIntent ?? liveIntent)?.slug}” to trash?`}</div>
                       <p className="mt-1 text-sm text-muted-foreground">{canEdit ? 'This preview moves the intent to Archived intents. It does not remove the file.' : 'Kron soft-deletes the intent. You can restore it from this panel during the current Webview session.'}</p>
+                      {(selectedIntent ?? liveIntent)?.kind === 'node' ? (
+                        <p className="mt-2 text-sm text-amber-600">
+                          This node is a folder: its whole subtree ({deleteSubtreeCount} intent(s)) moves to trash together.
+                        </p>
+                      ) : null}
                       {selectedDependents.length > 0 ? <p className="mt-2 text-sm text-amber-600">Referenced as a prerequisite by: {selectedDependents.join(', ')}. The dependency will remain visible.</p> : null}
                     </div>
                     <div className="flex justify-end gap-2">

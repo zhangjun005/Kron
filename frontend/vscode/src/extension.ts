@@ -1,28 +1,69 @@
+import fs = require('node:fs')
+import path = require('node:path')
 import vscode = require('vscode')
 import zod = require('zod')
-import { KronLspClient, DEFAULT_LSP_LANGUAGES } from './lsp/client'
+import { findAnchors, type AnchorHit } from './anchors'
+import { DEFAULT_LSP_LANGUAGES, KronLspClient } from './lsp/client'
 import { KronMcpClient, type ConnectionState, type TreeNode } from './mcp/client'
-import { IntentTreeProvider, type WorkspaceMcpConnection } from './views/intentTree'
-import { openIntentWorkspace } from './views/intentEditor'
+import { AnchorMenuController } from './views/anchorMenu'
+import { IntentItem, IntentTreeProvider, type WorkspaceMcpConnection } from './views/intentTree'
+import { openIntentAt, openIntentWorkspace, postWebviewFontSize } from './views/intentEditor'
+import { AssumptionTreeProvider, SupersededTreeProvider } from './views/sidebarSections'
 import { KronStatusBar } from './views/statusBar'
 
 const languageListSchema = zod.z.array(zod.z.string().trim().min(1)).min(1)
+
+/** Canonical project marker: every workspace folder has one `.kron/` root. */
+const KRON_DIR = '.kron'
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
 
 let output: vscode.OutputChannel | undefined
 let statusBar: KronStatusBar | undefined
 let mcpConnections: WorkspaceMcpConnection[] = []
 let lspConnections: KronLspClient[] = []
 let treeProvider: IntentTreeProvider | undefined
+let explorerTreeView: vscode.TreeView<IntentItem> | undefined
+let sidebarTreeView: vscode.TreeView<IntentItem> | undefined
+let assumptionProvider: AssumptionTreeProvider | undefined
+let supersededProvider: SupersededTreeProvider | undefined
+let anchorMenu: AnchorMenuController | undefined
 let restartPromise: Promise<void> | undefined
 const anchorCreateTimers = new Map<string, NodeJS.Timeout>()
 const anchorDecorationTimers = new Map<string, NodeJS.Timeout>()
 const promptedAnchors = new Set<string>()
 let anchorDecoration: vscode.TextEditorDecorationType | undefined
 
-const INTENT_ANCHOR = /^\s*(?:\/\/|#|--)\s*@kron:intent\s+([a-z0-9][a-z0-9_-]*(?:\/[a-z0-9][a-z0-9_-]*)*)\s*$/
-
 function log(message: string): void {
   output?.appendLine(message)
+}
+
+function readSettings(): { serverPath: string; languages: readonly string[] } {
+  const configuredPath = vscode.workspace.getConfiguration('kron').get<string>('serverPath', 'kron').trim()
+  const configuredLanguages: unknown = vscode.workspace.getConfiguration('kron').get('lspLanguages', DEFAULT_LSP_LANGUAGES)
+  const parsedLanguages = languageListSchema.safeParse(configuredLanguages)
+  if (!parsedLanguages.success) log('Invalid kron.lspLanguages setting; using the documented default language list.')
+  return {
+    serverPath: configuredPath || 'kron',
+    languages: parsedLanguages.success ? parsedLanguages.data : [...DEFAULT_LSP_LANGUAGES],
+  }
+}
+
+/**
+ * Single-root policy: one window serves the first workspace folder that has a
+ * `.kron/` directory. Additional folders are ignored on purpose — the IDE is a
+ * single-project client; multi-project overview belongs to the GUI.
+ */
+function findKronProjectFolder(): vscode.WorkspaceFolder | undefined {
+  return (vscode.workspace.workspaceFolders ?? []).find((folder) => {
+    try {
+      return fs.statSync(path.join(folder.uri.fsPath, KRON_DIR)).isDirectory()
+    } catch {
+      return false
+    }
+  })
 }
 
 function updateMcpStates(): void {
@@ -33,28 +74,24 @@ function updateLspStates(): void {
   statusBar?.setLspStates(lspConnections.map((client) => client.state))
 }
 
-async function startMcpConnections(): Promise<void> {
-  const results = await Promise.allSettled(mcpConnections.map(({ client }) => client.start()))
-  for (const result of results) {
-    if (result.status === 'rejected') log(`MCP startup failed: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`)
-  }
-}
-
-async function startLspConnections(): Promise<void> {
-  const results = await Promise.allSettled(lspConnections.map((client) => client.start()))
-  for (const result of results) {
-    if (result.status === 'rejected') log(`LSP startup failed: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`)
-  }
-}
-
 async function startConnections(): Promise<void> {
-  await Promise.all([startMcpConnections(), startLspConnections()])
+  const results = await Promise.allSettled([
+    ...mcpConnections.map(({ client }) => client.start()),
+    ...lspConnections.map((client) => client.start()),
+  ])
+  for (const result of results) {
+    if (result.status === 'rejected') log(`Kron connection startup failed: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`)
+  }
 }
 
 async function refreshIntents(showError: boolean): Promise<void> {
-  if (treeProvider === undefined) return
+  if (treeProvider === undefined || mcpConnections.length === 0) return
   try {
-    await treeProvider.refresh()
+    const result = await treeProvider.refresh()
+    updateTreeViewDescriptions(result.root)
+    supersededProvider?.setTree(result.root)
+    void assumptionProvider?.refresh()
+    anchorMenu?.notifyIntentsChanged()
   } catch (error: unknown) {
     log(`Intent tree refresh failed: ${error instanceof Error ? error.message : String(error)}`)
     if (showError) {
@@ -64,37 +101,45 @@ async function refreshIntents(showError: boolean): Promise<void> {
   }
 }
 
-function treeContainsSlug(node: TreeNode, slug: string): boolean {
-  return node.slug === slug || (node.children ?? []).some((child) => treeContainsSlug(child, slug))
+type TreeLikeNode = { slug: string; children?: TreeLikeNode[] | undefined }
+
+/** Shows intent/folder counts in both sidebar views' titles. */
+function updateTreeViewDescriptions(root: TreeNode): void {
+  let leaves = 0
+  let groups = 0
+  const walk = (node: TreeNode): void => {
+    if (node.is_dir) groups += 1
+    else leaves += 1
+    for (const child of node.children ?? []) walk(child)
+  }
+  walk(root)
+  const description = `${leaves} intents · ${groups} folders`
+  if (explorerTreeView !== undefined) explorerTreeView.description = description
+  if (sidebarTreeView !== undefined) sidebarTreeView.description = description
 }
 
-function scheduleQuickIntentPrompt(document: vscode.TextDocument, line: number): void {
-  if (line < 0 || line >= document.lineCount) return
-  const key = `${document.uri.toString()}\u0000${line}`
-  const previous = anchorCreateTimers.get(key)
-  if (previous !== undefined) clearTimeout(previous)
-  const timer = setTimeout(() => {
-    anchorCreateTimers.delete(key)
-    void maybeOfferQuickIntent(document, line)
-  }, 900)
-  anchorCreateTimers.set(key, timer)
+function treeContainsSlug(node: TreeLikeNode, slug: string): boolean {
+  if (node.slug === slug) return true
+  return (node.children ?? []).some((child) => treeContainsSlug(child, slug))
+}
+
+function isKronInternalDocument(document: vscode.TextDocument): boolean {
+  if (document.uri.scheme !== 'file') return true
+  return document.uri.fsPath.split(/[\\/]/).includes(KRON_DIR)
+}
+
+/** Anchors parsed with the same grammar as `internal/parser` (see src/anchors.ts). */
+function anchorsInDocument(document: vscode.TextDocument): AnchorHit[] {
+  if (isKronInternalDocument(document)) return []
+  return findAnchors(document.getText(), document.languageId === 'markdown')
 }
 
 function updateIntentAnchorDecorations(document: vscode.TextDocument): void {
-  if (anchorDecoration === undefined || document.uri.scheme !== 'file') return
-  const ranges: vscode.Range[] = []
-  for (let line = 0; line < document.lineCount; line += 1) {
-    const text = document.lineAt(line).text
-    const match = INTENT_ANCHOR.exec(text)
-    const slug = match?.[1]
-    if (match === null || slug === undefined) continue
-    const start = match[0].lastIndexOf(slug)
-    ranges.push(new vscode.Range(line, start, line, start + slug.length))
-  }
+  if (anchorDecoration === undefined) return
+  const ranges = anchorsInDocument(document).map((anchor) =>
+    new vscode.Range(anchor.line, anchor.character, anchor.line, anchor.character + anchor.slug.length))
   for (const editor of vscode.window.visibleTextEditors) {
-    if (editor.document.uri.toString() === document.uri.toString()) {
-      editor.setDecorations(anchorDecoration, ranges)
-    }
+    if (editor.document.uri.toString() === document.uri.toString()) editor.setDecorations(anchorDecoration, ranges)
   }
 }
 
@@ -109,11 +154,24 @@ function scheduleIntentAnchorDecorations(document: vscode.TextDocument): void {
   anchorDecorationTimers.set(key, timer)
 }
 
+function scheduleQuickIntentPrompt(document: vscode.TextDocument, line: number): void {
+  const key = `${document.uri.toString()}\u0000${line}`
+  const previous = anchorCreateTimers.get(key)
+  if (previous !== undefined) clearTimeout(previous)
+  const timer = setTimeout(() => {
+    anchorCreateTimers.delete(key)
+    void maybeOfferQuickIntent(document, line)
+  }, 900)
+  anchorCreateTimers.set(key, timer)
+}
+
 async function maybeOfferQuickIntent(document: vscode.TextDocument, line: number): Promise<void> {
-  if (line < 0 || line >= document.lineCount) return
-  const match = INTENT_ANCHOR.exec(document.lineAt(line).text)
-  const slug = match?.[1]
-  if (slug === undefined) return
+  // Markdown anchors are documentation links: underline + go-to-definition only,
+  // never an auto-create prompt (docs would spam it).
+  if (document.languageId === 'markdown') return
+  const anchor = anchorsInDocument(document).find((hit) => hit.line === line)
+  if (anchor === undefined) return
+  const slug = anchor.slug
 
   const folder = vscode.workspace.getWorkspaceFolder(document.uri)
   const connection = folder === undefined
@@ -155,40 +213,78 @@ async function maybeOfferQuickIntent(document: vscode.TextDocument, line: number
   }
 }
 
-async function restartConnections(): Promise<void> {
-  if (restartPromise !== undefined) return restartPromise
-  if (mcpConnections.length === 0) {
-    void vscode.window.showWarningMessage('Open a workspace folder before restarting Kron connections.')
+/**
+ * Rebuilds the single Kron project connection from the current settings.
+ * Settings are re-read here (not captured at activation) so changing
+ * `kron.serverPath` / `kron.lspLanguages` and running "Restart Connections"
+ * takes effect without reloading the window.
+ */
+async function rebuildConnections(): Promise<void> {
+  await Promise.allSettled([
+    ...mcpConnections.map(({ client }) => client.stop()),
+    ...lspConnections.map((client) => client.stop()),
+  ])
+
+  const settings = readSettings()
+  const folder = findKronProjectFolder()
+  void vscode.commands.executeCommand('setContext', 'kronHasProject', folder !== undefined)
+  mcpConnections = folder === undefined
+    ? []
+    : [{
+        workspace: folder,
+        client: new KronMcpClient(settings.serverPath, folder.uri.fsPath, log, (_state: ConnectionState) => updateMcpStates()),
+      }]
+  lspConnections = folder === undefined
+    ? []
+    : [new KronLspClient(settings.serverPath, folder, settings.languages, log, (_state: ConnectionState) => updateLspStates())]
+  treeProvider?.setConnections(mcpConnections)
+  updateMcpStates()
+  updateLspStates()
+
+  if (folder === undefined) {
+    statusBar?.setNoProject()
     return
   }
-  restartPromise = (async () => {
-    await Promise.allSettled([
-      ...mcpConnections.map(({ client }) => client.stop()),
-      ...lspConnections.map((client) => client.stop()),
-    ])
-    await startConnections()
-    const failures: string[] = []
-    if (lspConnections.some((client) => client.state !== 'ready')) failures.push('LSP hover/definition')
-    try {
-      await refreshIntents(false)
-    } catch {
-      if (!failures.includes('MCP tree')) failures.push('MCP tree')
-    }
-    if (mcpConnections.some(({ client }) => client.state !== 'ready') && !failures.includes('MCP tree')) {
-      failures.push('MCP tree')
-    }
-    if (failures.length > 0) {
-      void vscode.window.showWarningMessage(`Kron ${failures.join(' and ')} could not start. Check kron.serverPath and the Kron output channel.`)
-    } else {
+
+  statusBar?.setProject(folder.name)
+  await startConnections()
+  try {
+    await refreshIntents(false)
+  } catch (error: unknown) {
+    log(`Workspace tree refresh failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+
+  const failures: string[] = []
+  if (mcpConnections.some(({ client }) => client.state !== 'ready')) failures.push('MCP tree')
+  if (lspConnections.some((client) => client.state !== 'ready')) failures.push('LSP hover/definition')
+  if (failures.length > 0) {
+    void vscode.window.showWarningMessage(
+      `Kron ${failures.join(' and ')} did not start for “${folder.name}”. Check kron.serverPath and the Kron output channel.`,
+    )
+  }
+}
+
+async function restartConnections(): Promise<void> {
+  if (restartPromise !== undefined) return restartPromise
+  restartPromise = rebuildConnections()
+    .then(() => {
+      if (mcpConnections.length === 0) {
+        void vscode.window.showWarningMessage('No workspace folder with a .kron directory is open.')
+        return
+      }
       void vscode.window.showInformationMessage('Kron connections restarted.')
-    }
-  })().finally(() => {
-    restartPromise = undefined
-  })
+    })
+    .catch((error: unknown) => {
+      log(`Kron restart failed: ${error instanceof Error ? error.message : String(error)}`)
+      void vscode.window.showErrorMessage('Kron could not restart its connections. Check the Kron output channel.')
+    })
+    .finally(() => {
+      restartPromise = undefined
+    })
   return restartPromise
 }
 
-/** Starts independent MCP and LSP clients for the workspaces present at activation. */
+/** Starts the single Kron project connection for the active window. */
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   output = vscode.window.createOutputChannel('Kron')
   statusBar = new KronStatusBar()
@@ -199,54 +295,72 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(output, statusBar, anchorDecoration)
   for (const editor of vscode.window.visibleTextEditors) scheduleIntentAnchorDecorations(editor.document)
 
-  const serverPath = vscode.workspace.getConfiguration('kron').get<string>('serverPath', 'kron').trim() || 'kron'
-  const configuredLanguages: unknown = vscode.workspace.getConfiguration('kron').get('lspLanguages', DEFAULT_LSP_LANGUAGES)
-  const parsedLanguages = languageListSchema.safeParse(configuredLanguages)
-  const languages = parsedLanguages.success ? parsedLanguages.data : [...DEFAULT_LSP_LANGUAGES]
-  if (!parsedLanguages.success) log('Invalid kron.lspLanguages setting; using the documented default language list.')
-
   treeProvider = new IntentTreeProvider(mcpConnections)
+  assumptionProvider = new AssumptionTreeProvider(() => mcpConnections, log)
+  supersededProvider = new SupersededTreeProvider()
 
-  const rebuildConnections = async (): Promise<void> => {
-    await Promise.allSettled([
-      ...mcpConnections.map(({ client }) => client.stop()),
-      ...lspConnections.map((client) => client.stop()),
-    ])
-    const workspaces = vscode.workspace.workspaceFolders ?? []
-    mcpConnections = workspaces.map((workspace) => ({
-      workspace,
-      client: new KronMcpClient(
-        serverPath,
-        workspace.uri.fsPath,
-        log,
-        (_state: ConnectionState) => updateMcpStates(),
-      ),
-    }))
-    lspConnections = workspaces.map((workspace) => new KronLspClient(
-      serverPath,
-      workspace,
-      languages,
-      log,
-      (_state: ConnectionState) => updateLspStates(),
-    ))
-    treeProvider?.setConnections(mcpConnections)
-    updateMcpStates()
-    updateLspStates()
-    if (workspaces.length === 0) {
-      statusBar?.setNoWorkspace()
-      return
+  const collectIntentSlugs = async (): Promise<string[]> => {
+    if (treeProvider === undefined) return []
+    const result = await treeProvider.refresh()
+    const slugs = new Set<string>()
+    const walk = (node: TreeNode): void => {
+      if (!node.is_dir || node.title !== undefined || node.status !== undefined) slugs.add(node.slug)
+      for (const child of node.children ?? []) walk(child)
     }
-    await startConnections()
-    try {
-      await refreshIntents(false)
-    } catch (error: unknown) {
-      log(`Workspace tree refresh failed: ${error instanceof Error ? error.message : String(error)}`)
-    }
+    walk(result.root)
+    return [...slugs].sort()
   }
 
+  anchorMenu = new AnchorMenuController({
+    getClient: () => mcpConnections[0]?.client,
+    getIntentSlugs: collectIntentSlugs,
+    openIntentWorkspace: (slug, edit) => {
+      const provider = treeProvider
+      const channel = output
+      if (provider === undefined || channel === undefined) return
+      void openIntentAt(context, provider, channel, slug, edit)
+    },
+    refreshTree: () => refreshIntents(true),
+    log,
+    showOutput: () => output?.show(true),
+  })
+  context.subscriptions.push(anchorMenu)
+
+  explorerTreeView = vscode.window.createTreeView('kron.intents', { treeDataProvider: treeProvider, showCollapseAll: true })
+  sidebarTreeView = vscode.window.createTreeView('kron.intentsSidebar', { treeDataProvider: treeProvider, showCollapseAll: true })
+  const assumptionView = vscode.window.createTreeView('kron.assumptions', { treeDataProvider: assumptionProvider })
+  const supersededView = vscode.window.createTreeView('kron.superseded', { treeDataProvider: supersededProvider })
   context.subscriptions.push(
-    vscode.window.createTreeView('kron.intents', { treeDataProvider: treeProvider }),
+    explorerTreeView,
+    sidebarTreeView,
+    assumptionView,
+    supersededView,
     treeProvider,
+    vscode.commands.registerCommand('kron.openIntentCard', (slug: unknown) => {
+      if (typeof slug !== 'string' || slug === '' || treeProvider === undefined || output === undefined) return
+      void openIntentAt(context, treeProvider, output, slug, false)
+    }),
+    vscode.commands.registerCommand('kron.openAssumption', async (id: unknown) => {
+      if (typeof id !== 'string' || id === '') return
+      const client = mcpConnections[0]?.client
+      if (client === undefined || client.state !== 'ready') {
+        void vscode.window.showWarningMessage('Kron is not connected.')
+        return
+      }
+      try {
+        const result = await client.callTool('kron_assume_get', { id })
+        const sourcePath = isRecord(result) && isRecord(result.assumption)
+          && typeof result.assumption.source_path === 'string' ? result.assumption.source_path : undefined
+        if (sourcePath === undefined) {
+          void vscode.window.showErrorMessage(`Kron did not return a file for assumption "${id}".`)
+          return
+        }
+        await vscode.window.showTextDocument(vscode.Uri.file(sourcePath))
+      } catch (error: unknown) {
+        log(`Open assumption failed: ${error instanceof Error ? error.message : String(error)}`)
+        void vscode.window.showErrorMessage(`Kron could not open assumption "${id}". See the Kron output channel for details.`)
+      }
+    }),
     vscode.commands.registerCommand('kron.refreshIntents', async () => {
       try {
         await refreshIntents(true)
@@ -255,8 +369,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
     vscode.commands.registerCommand('kron.openIntentWorkspace', () => {
-      if ((vscode.workspace.workspaceFolders?.length ?? 0) === 0 || treeProvider === undefined || output === undefined) {
-        void vscode.window.showWarningMessage('Open a workspace folder before opening the Kron intent workspace.')
+      if (treeProvider === undefined || output === undefined) return
+      if (mcpConnections.length === 0) {
+        void vscode.window.showWarningMessage('Open a workspace folder that contains a .kron directory before opening the Kron intent workspace.')
         return
       }
       openIntentWorkspace(context, treeProvider, output)
@@ -264,6 +379,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('kron.restartConnections', restartConnections),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       void rebuildConnections()
+    }),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration('kron.serverPath') || event.affectsConfiguration('kron.lspLanguages')) {
+        void rebuildConnections()
+      }
+      if (event.affectsConfiguration('kron.webviewFontSize')) {
+        postWebviewFontSize()
+      }
     }),
     vscode.workspace.onDidChangeTextDocument((event) => {
       if (event.document.uri.scheme !== 'file') return
@@ -298,7 +421,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   void rebuildConnections()
 }
 
-/** Stops each protocol process independently during Extension Host shutdown. */
+/** Stops the protocol process during Extension Host shutdown. */
 export async function deactivate(): Promise<void> {
   for (const timer of anchorCreateTimers.values()) clearTimeout(timer)
   for (const timer of anchorDecorationTimers.values()) clearTimeout(timer)
@@ -311,6 +434,9 @@ export async function deactivate(): Promise<void> {
   ]
   await Promise.allSettled(shutdowns)
   treeProvider = undefined
+  assumptionProvider = undefined
+  supersededProvider = undefined
+  anchorMenu = undefined
   mcpConnections = []
   lspConnections = []
   statusBar = undefined

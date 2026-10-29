@@ -19,6 +19,7 @@ type CanvasIntentDetail = {
   kind: string
   status: string
   summary: string
+  createdBy: string
   symbol: string
   reviewers: string[]
   body: string
@@ -33,14 +34,33 @@ type CanvasLayout = {
   height: number
 }
 
-const COLUMN_WIDTH = 300
-const ROW_HEIGHT = 92
-const NODE_WIDTH = 236
-const NODE_HEIGHT = 64
-const PADDING = 40
-const CANVAS_TOP_INSET = 104
+/**
+ * Canvas geometry follows `kron.webviewFontSize` so node boxes grow with the
+ * text they contain. Produced from the current scale on every render so a
+ * live font-size change does not need a Webview reload.
+ */
+type CanvasGeometry = {
+  columnWidth: number
+  rowHeight: number
+  nodeWidth: number
+  nodeHeight: number
+  padding: number
+  topInset: number
+}
 
-function buildLayout(root: TreeNode): CanvasLayout {
+function geometryForScale(scale: number): CanvasGeometry {
+  return {
+    columnWidth: Math.round(300 * scale),
+    rowHeight: Math.round(92 * scale),
+    nodeWidth: Math.round(236 * scale),
+    nodeHeight: Math.round(64 * scale),
+    padding: Math.round(40 * scale),
+    topInset: Math.round(104 * scale),
+  }
+}
+
+function buildLayout(root: TreeNode, geometry: CanvasGeometry): CanvasLayout {
+  const { columnWidth, rowHeight, nodeWidth, nodeHeight, padding } = geometry
   const nodes: PositionedNode[] = []
   const edges: TreeEdge[] = []
   const childrenOf = (node: TreeNode): TreeNode[] => node.children ?? []
@@ -53,8 +73,8 @@ function buildLayout(root: TreeNode): CanvasLayout {
   const place = (node: TreeNode, depth: number, start: number, slots: number, isWorkspace = false): PositionedNode => {
     const current: PositionedNode = {
       node,
-      x: PADDING + depth * COLUMN_WIDTH,
-      y: PADDING + (start + slots / 2) * ROW_HEIGHT - NODE_HEIGHT / 2,
+      x: padding + depth * columnWidth,
+      y: padding + (start + slots / 2) * rowHeight - nodeHeight / 2,
       isWorkspace,
     }
     nodes.push(current)
@@ -70,12 +90,12 @@ function buildLayout(root: TreeNode): CanvasLayout {
 
   const totalSlots = measure(root)
   place(root, 0, 0, totalSlots, true)
-  const maxDepth = nodes.reduce((max, node) => Math.max(max, Math.round((node.x - PADDING) / COLUMN_WIDTH)), 0)
+  const maxDepth = nodes.reduce((max, node) => Math.max(max, Math.round((node.x - padding) / columnWidth)), 0)
   return {
     nodes,
     edges,
-    width: PADDING * 2 + maxDepth * COLUMN_WIDTH + NODE_WIDTH,
-    height: PADDING * 2 + Math.max(totalSlots, 1) * ROW_HEIGHT,
+    width: padding * 2 + maxDepth * columnWidth + nodeWidth,
+    height: padding * 2 + Math.max(totalSlots, 1) * rowHeight,
   }
 }
 
@@ -97,35 +117,99 @@ function statusIcon(status: string | undefined): JSX.Element {
   return <CircleDashed className="h-3.5 w-3.5 text-muted-foreground" />
 }
 
+type ParamKey = 'created' | 'review' | 'symbol' | 'depends' | 'references'
+
+const PARAM_LABELS: Record<ParamKey, string> = {
+  created: 'Created by',
+  review: 'Reviewers',
+  symbol: 'Symbol',
+  depends: 'Depends on',
+  references: 'References',
+}
+
+function toggleParam(current: ParamKey | null, next: ParamKey): ParamKey | null {
+  return current === next ? null : next
+}
+
+function paramValue(detail: CanvasIntentDetail, key: ParamKey): string {
+  switch (key) {
+    case 'created': return detail.createdBy
+    case 'review': return detail.reviewers.join(', ')
+    case 'symbol': return detail.symbol
+    case 'depends': return detail.dependsOn.join(', ')
+    case 'references': return detail.references.join(', ')
+  }
+}
+
+/** Fixed-type field marker: draft is hollow, active green, superseded red. */
+function StatusDot({ status }: { status: string }): JSX.Element {
+  if (status === 'active') return <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+  if (status === 'superseded') return <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" />
+  return <span className="h-2 w-2 shrink-0 rounded-full border border-muted-foreground/70" />
+}
+
+/** Status chip: same height as every other fixed-type chip. */
+function StatusChip({ status }: { status: string }): JSX.Element {
+  return (
+    <span className="flex shrink-0 items-center gap-1 rounded-md border bg-background px-1.5 py-1 text-[0.6875rem] text-muted-foreground" title={`Status: ${status}`}>
+      <StatusDot status={status} />
+      <span>{status}</span>
+    </span>
+  )
+}
+
+/** Shows the current value without its field name; clicking expands the details. */
+function ParamChip({ label, value, expanded, onToggle }: { label: string; value: string; expanded: boolean; onToggle: () => void }): JSX.Element {
+  const empty = value.trim() === ''
+  return (
+    <button
+      type="button"
+      className={`min-w-0 truncate rounded-md border px-1.5 py-1 text-left text-[0.6875rem] ${expanded ? 'border-primary/50 bg-primary/10 text-foreground' : 'bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground'}`}
+      aria-label={label}
+      aria-expanded={expanded}
+      title={empty ? label : `${label}: ${value}`}
+      onClick={onToggle}
+    >
+      {empty ? '…' : value}
+    </button>
+  )
+}
+
 type IntentCanvasProps = {
   root: TreeNode
   filter: string
   selectedSlug: string
+  /** 1 == default `kron.webviewFontSize`; scales canvas geometry with the text. */
+  uiScale: number
+  /** Incremented by the host / "used by" jumps to reveal the selected node's card. */
+  revealToken: number
   relations: Record<string, { references: string[]; dependsOn: string[]; kind?: 'leaf' | 'node'; exists?: boolean }>
   detail: CanvasIntentDetail | null
   detailLoading: boolean
   onCreateRelation: (source: TreeNode, target: TreeNode, kind: LinkKind) => Promise<void>
-  onCreateChild: (parent: TreeNode) => void
+  onCreateChild: (parent: TreeNode, kind: 'leaf' | 'node') => void
   onEditIntent: () => void
   onDeleteIntent: () => void
   editorContent: ReactNode | null
+  assumptionContent: ReactNode | null
   onCloseDetails: () => void
   onClearSelection: () => void
   onSelect: (node: TreeNode) => void
 }
 
 /** Left-to-right, pannable hierarchy canvas, adapted for the VS Code Webview tree contract. */
-export function IntentCanvas({ root, filter, selectedSlug, relations, detail, detailLoading, onCreateRelation, onCreateChild, onEditIntent, onDeleteIntent, editorContent, onCloseDetails, onClearSelection, onSelect }: IntentCanvasProps): JSX.Element {
+export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken, relations, detail, detailLoading, onCreateRelation, onCreateChild, onEditIntent, onDeleteIntent, editorContent, assumptionContent, onCloseDetails, onClearSelection, onSelect }: IntentCanvasProps): JSX.Element {
+  const geometry = useMemo(() => geometryForScale(uiScale), [uiScale])
   const layout = useMemo(() => buildLayout({
     ...root,
     title: root.title ?? root.name,
     children: root.children ?? [],
-  }), [root])
+  }, geometry), [root, geometry])
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
   const [panning, setPanning] = useState(false)
   const [inspectedSlug, setInspectedSlug] = useState<string | null>(null)
-  const [expandedDetails, setExpandedDetails] = useState(false)
+  const [expandedParam, setExpandedParam] = useState<ParamKey | null>(null)
   const [contextMenu, setContextMenu] = useState<{ node: TreeNode; x: number; y: number } | null>(null)
   const [linking, setLinking] = useState<{ source: TreeNode; kind: LinkKind; cursor: { x: number; y: number } } | null>(null)
   const [linkSaving, setLinkSaving] = useState(false)
@@ -143,18 +227,38 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
   const inspectedNode = inspectedSlug === null ? null : layout.nodes.find(({ node }) => node.slug === inspectedSlug)?.node ?? null
   const inspectedPosition = inspectedSlug === null ? null : layout.nodes.find(({ node }) => node.slug === inspectedSlug) ?? null
   const fitScale = viewportSize.width > 0 && viewportSize.height > 0
-    ? Math.max(0.1, Math.min(1, (viewportSize.width - 32) / layout.width, (viewportSize.height - CANVAS_TOP_INSET - 24) / layout.height))
+    ? Math.max(0.1, Math.min(1, (viewportSize.width - 32) / layout.width, (viewportSize.height - geometry.topInset - 24) / layout.height))
     : 1
   const fitOffset = {
     x: Math.max(16, (viewportSize.width - layout.width * fitScale) / 2),
-    y: CANVAS_TOP_INSET + Math.max(12, (viewportSize.height - CANVAS_TOP_INSET - layout.height * fitScale) / 2),
+    y: geometry.topInset + Math.max(12, (viewportSize.height - geometry.topInset - layout.height * fitScale) / 2),
   }
+  // Cards are anchored to a node; clamp them into the canvas so a wide card
+  // (big font size, edit form) never runs off the right or bottom edge.
+  const cardWidth = Math.round((editorContent !== null ? 760 : 380) * uiScale)
+  const cardLeft = fitOffset.x + pan.x + (inspectedPosition?.x ?? 0) * fitScale + detailOffset.x
+  const cardTop = fitOffset.y + pan.y + ((inspectedPosition?.y ?? 0) + geometry.nodeHeight + 12) * fitScale + detailOffset.y
+  const clampedCardLeft = viewportSize.width > 0
+    ? Math.max(8, Math.min(cardLeft, viewportSize.width - cardWidth - 8))
+    : cardLeft
+  const clampedCardTop = viewportSize.height > 0
+    ? Math.max(8, Math.min(cardTop, viewportSize.height - 96))
+    : cardTop
 
   useEffect(() => {
     setDetailOffset({ x: 0, y: 0 })
     setDraggingDetail(false)
+    setExpandedParam(null)
     detailDragRef.current = null
   }, [inspectedSlug])
+
+  // External jumps (host "Open Intent", assumption "Used by") reveal the card
+  // for the already-selected node; ordinary clicking is handled by the node.
+  useEffect(() => {
+    if (revealToken === 0 || selectedSlug === '') return
+    if (!layout.nodes.some(({ node }) => node.slug === selectedSlug)) return
+    setInspectedSlug(selectedSlug)
+  }, [revealToken])
 
   useEffect(() => {
     const viewport = viewportRef.current
@@ -173,7 +277,7 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
         setLinking(null)
         setLinkError(null)
         setInspectedSlug(null)
-        setExpandedDetails(false)
+        setExpandedParam(null)
         onClearSelection()
       }
     }
@@ -248,7 +352,7 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
       setPanning(false)
       if (drag !== null && !drag.moved) {
         setInspectedSlug(null)
-        setExpandedDetails(false)
+        setExpandedParam(null)
         onClearSelection()
       }
     }
@@ -284,7 +388,7 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
     if (metadata?.exists !== true && contextMenu.node.is_dir) return
     const source = layout.nodes.find(({ node }) => node.slug === contextMenu.node.slug)
     if (source === undefined) return
-    setLinking({ source: contextMenu.node, kind, cursor: { x: source.x + NODE_WIDTH, y: source.y + NODE_HEIGHT / 2 } })
+    setLinking({ source: contextMenu.node, kind, cursor: { x: source.x + geometry.nodeWidth, y: source.y + geometry.nodeHeight / 2 } })
     setLinkError(null)
     setLinkMessage(null)
     setContextMenu(null)
@@ -341,19 +445,19 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
               </marker>
             </defs>
             {layout.edges.map(({ parent, child }) => {
-              const x1 = parent.x + NODE_WIDTH
-              const y1 = parent.y + NODE_HEIGHT / 2
+              const x1 = parent.x + geometry.nodeWidth
+              const y1 = parent.y + geometry.nodeHeight / 2
               const x2 = child.x
-              const y2 = child.y + NODE_HEIGHT / 2
+              const y2 = child.y + geometry.nodeHeight / 2
               const bend = (x2 - x1) / 2
               return <path key={`${parent.node.slug}->${child.node.slug}`} d={`M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`} fill="none" stroke="hsl(var(--border))" strokeWidth="1.5" />
             })}
             {relationEdges.map(({ from, to, kind }) => {
               const isDepends = kind === 'depends'
-              const x1 = from.x + NODE_WIDTH
-              const y1 = from.y + NODE_HEIGHT / 2 + (isDepends ? -3 : 3)
+              const x1 = from.x + geometry.nodeWidth
+              const y1 = from.y + geometry.nodeHeight / 2 + (isDepends ? -3 : 3)
               const x2 = to.x
-              const y2 = to.y + NODE_HEIGHT / 2 + (isDepends ? -3 : 3)
+              const y2 = to.y + geometry.nodeHeight / 2 + (isDepends ? -3 : 3)
               const bend = (x2 - x1) / 2
               return (
                 <path
@@ -371,8 +475,8 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
             {linking !== null ? (() => {
               const source = layout.nodes.find(({ node }) => node.slug === linking.source.slug)
               if (source === undefined) return null
-              const x1 = source.x + NODE_WIDTH
-              const y1 = source.y + NODE_HEIGHT / 2
+              const x1 = source.x + geometry.nodeWidth
+              const y1 = source.y + geometry.nodeHeight / 2
               const x2 = linking.cursor.x
               const y2 = linking.cursor.y
               const bend = (x2 - x1) / 2
@@ -392,7 +496,7 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
                 {isGroup ? <Folder className="h-4 w-4 shrink-0 text-muted-foreground" /> : <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />}
                 <span className="min-w-0 flex-1 text-left">
                   <span className="block truncate text-sm font-medium leading-tight">{title}</span>
-                  <span className="block truncate text-[10px] text-muted-foreground">{isWorkspace ? `${intents} intents` : isGroup ? `group · ${countLeafIntents(node)} intents` : node.slug}</span>
+                  <span className="block truncate text-[0.625rem] text-muted-foreground">{isWorkspace ? `${intents} intents` : isGroup ? `group · ${countLeafIntents(node)} intents` : node.slug}</span>
                 </span>
                 {!isGroup ? statusIcon(node.status) : null}
               </>
@@ -401,8 +505,8 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
             const styles = {
               left: x,
               top: y,
-              width: NODE_WIDTH,
-              height: NODE_HEIGHT,
+              width: geometry.nodeWidth,
+              height: geometry.nodeHeight,
               ...(relationFrame !== undefined && !selected ? {
                 outline: `2px ${relationFrame === 'depends' ? 'solid' : 'dashed'} hsl(${relationFrame === 'depends' ? 'var(--primary)' : 'var(--muted-foreground)'})`,
                 outlineOffset: '3px',
@@ -410,7 +514,18 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
             }
 
             return isWorkspace ? (
-              <div key="kron-workspace-root" className={classes} style={styles} aria-label={title}>{card}</div>
+              <button
+                key={`workspace:${node.workspaceId ?? node.slug}`}
+                type="button"
+                className={classes}
+                style={styles}
+                aria-label={`Select workspace ${title}`}
+                onClick={() => {
+                  onSelect(node)
+                  setInspectedSlug(null)
+                  setExpandedParam(null)
+                }}
+              >{card}</button>
             ) : (
               <button
                 key={`${node.workspaceId ?? ''}:${node.slug}`}
@@ -426,13 +541,13 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
                   }
                   if (selectedSlug === node.slug && inspectedSlug === node.slug) {
                     setInspectedSlug(null)
-                    setExpandedDetails(false)
+                    setExpandedParam(null)
                     onClearSelection()
                     return
                   }
                   onSelect(node)
                   setInspectedSlug(node.slug)
-                  setExpandedDetails(false)
+                  setExpandedParam(null)
                 }}
                 onContextMenu={(event) => {
                   event.preventDefault()
@@ -454,8 +569,11 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
       {linking === null && linkMessage !== null ? <div data-canvas-overlay="true" role="status" className="absolute bottom-10 left-2 z-20 max-w-[min(480px,calc(100%-1rem))] rounded-md border bg-background/95 px-3 py-2 text-xs shadow-sm">{linkMessage}<button type="button" className="ml-3 text-muted-foreground hover:text-foreground" onClick={() => setLinkMessage(null)}>×</button></div> : null}
       {contextMenu !== null ? (
         <div data-canvas-overlay="true" className="absolute z-30 grid min-w-56 gap-1 rounded-md border bg-popover p-1 text-popover-foreground shadow-lg" style={{ left: Math.min(contextMenu.x, Math.max(8, (containerRef.current?.clientWidth ?? 600) - 240)), top: Math.min(contextMenu.y, Math.max(8, (containerRef.current?.clientHeight ?? 400) - 100)), backgroundColor: 'hsl(var(--popover))', opacity: 1 }} onMouseDown={(event) => event.stopPropagation()}>
-          <div className="px-3 pt-2 text-[10px] text-muted-foreground">Parent: {contextMenu.node.slug}</div>
-          <button type="button" className="rounded px-3 py-2 text-left text-xs hover:bg-accent" onClick={() => { onCreateChild(contextMenu.node); setContextMenu(null) }}>Create child intent</button>
+          <div className="px-3 pt-2 text-[0.625rem] text-muted-foreground">{contextMenu.node.is_dir ? `Parent: ${contextMenu.node.slug}` : 'Leaf intents cannot contain children'}</div>
+          {contextMenu.node.is_dir ? <>
+            <button type="button" className="rounded px-3 py-2 text-left text-xs hover:bg-accent" onClick={() => { onCreateChild(contextMenu.node, 'leaf'); setContextMenu(null) }}>Create child document</button>
+            <button type="button" className="rounded px-3 py-2 text-left text-xs hover:bg-accent" onClick={() => { onCreateChild(contextMenu.node, 'node'); setContextMenu(null) }}>Create child folder</button>
+          </> : null}
           {!contextMenu.node.is_dir || relations[contextMenu.node.slug]?.exists === true ? (
             <>
               {contextMenu.node.is_dir || relations[contextMenu.node.slug]?.exists === true ? <div className="my-0.5 border-t" /> : null}
@@ -465,24 +583,24 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
           ) : null}
         </div>
       ) : null}
-      <div className="pointer-events-none absolute right-2 top-[3.75rem] flex flex-wrap items-center justify-end gap-3 rounded bg-background/90 px-2 py-1 text-[10px] text-muted-foreground">
+      <div className="pointer-events-none absolute right-2 top-[3.75rem] flex flex-wrap items-center justify-end gap-3 rounded bg-background/90 px-2 py-1 text-[0.625rem] text-muted-foreground">
           <span className="flex items-center gap-1"><svg width="24" height="8" aria-hidden="true"><line x1="1" y1="4" x2="21" y2="4" stroke="hsl(var(--primary))" strokeWidth="2" /></svg>depends_on (hard)</span>
           <span className="flex items-center gap-1"><svg width="24" height="8" aria-hidden="true"><line x1="1" y1="4" x2="21" y2="4" stroke="hsl(var(--muted-foreground))" strokeWidth="1.5" strokeDasharray="6 4" /></svg>references (soft)</span>
       </div>
       {hasChildren && relationEdges.length === 0 ? (
-        <div className="pointer-events-none absolute bottom-2 right-2 rounded bg-background/90 px-2 py-1 text-[10px] text-muted-foreground">
+        <div className="pointer-events-none absolute bottom-2 right-2 rounded bg-background/90 px-2 py-1 text-[0.625rem] text-muted-foreground">
           No cross-intent links yet. Add them with Edit intent → depends_on or references.
         </div>
       ) : null}
-      <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-background/85 px-2 py-1 text-[10px] text-muted-foreground">
+      <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-background/85 px-2 py-1 text-[0.625rem] text-muted-foreground">
         Drag empty space to pan · click a node for details · right-click a node to link
       </div>
       </div>
       {inspectedNode !== null && inspectedPosition !== null ? (
         <aside
           data-canvas-overlay="true"
-          className={`absolute z-40 flex max-h-[78vh] ${editorContent !== null ? 'w-[min(760px,calc(100vw-1.5rem))]' : 'w-[min(380px,calc(100vw-1.5rem))]'} flex-col overflow-hidden rounded-xl border bg-card shadow-2xl ${draggingDetail ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
-          style={{ left: fitOffset.x + pan.x + inspectedPosition.x * fitScale + detailOffset.x, top: fitOffset.y + pan.y + (inspectedPosition.y + NODE_HEIGHT + 12) * fitScale + detailOffset.y }}
+          className={`absolute z-40 flex max-h-[78vh] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden rounded-xl border bg-card shadow-2xl ${draggingDetail ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
+          style={{ left: clampedCardLeft, top: clampedCardTop, width: cardWidth }}
           onMouseDown={(event) => {
             const target = event.target as HTMLElement
             if (target.closest('button, a, input, textarea, select, code') !== null) return
@@ -510,37 +628,48 @@ export function IntentCanvas({ root, filter, selectedSlug, relations, detail, de
           }}
           aria-label={`Intent details: ${inspectedNode.title ?? inspectedNode.name}`}
         >
-          <div className="flex items-start justify-between gap-2 border-b p-3">
-            <div className="min-w-0">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Intent details</div>
-              <div className="mt-1 truncate text-sm font-semibold">{detail?.slug === inspectedSlug ? detail.title : inspectedNode.title ?? inspectedNode.name}</div>
-              <div className="truncate font-mono text-[10px] text-muted-foreground">{inspectedNode.slug}</div>
-            </div>
-            <button type="button" className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent" aria-label="Close intent details" title="Close intent details" onClick={() => { onCloseDetails(); setInspectedSlug(null); setExpandedDetails(false); onClearSelection() }}>×</button>
-          </div>
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-xs">
+          <button type="button" className="absolute right-1.5 top-1.5 z-10 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent" aria-label="Close intent details" title="Close intent details" onClick={() => { onCloseDetails(); setInspectedSlug(null); onClearSelection() }}>×</button>
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2.5">
             {editorContent !== null ? editorContent : null}
             {detailLoading ? <p role="status" className="text-muted-foreground">Loading intent details…</p> : null}
             {editorContent === null && detail?.slug === inspectedSlug ? (
               <>
-                <div className="flex gap-1.5"><span className="rounded bg-secondary px-2 py-0.5">{detail.status}</span><span className="rounded bg-secondary px-2 py-0.5">{detail.kind}</span></div>
-                <p className="whitespace-pre-wrap leading-5 text-muted-foreground">{detail.summary || 'No summary is available.'}</p>
-                {expandedDetails ? (
-                  <>
-                    <div className="rounded-md bg-muted/50 p-2"><div className="text-[10px] uppercase text-muted-foreground">Symbol</div><div className="mt-1 break-all font-mono">{detail.symbol || 'Not specified'}</div></div>
-                    <div><div className="text-[10px] uppercase text-muted-foreground">Reviewers</div><div className="mt-1 break-words">{detail.reviewers.length ? detail.reviewers.join(', ') : 'None'}</div></div>
-                    <div><div className="text-[10px] uppercase text-muted-foreground">Decision</div><div className="mt-1 max-h-56 overflow-auto rounded-md bg-muted/50 p-2"><MarkdownPreview body={detail.body || 'No decision text.'}/></div></div>
-                    <div><div className="text-[10px] uppercase text-muted-foreground">depends_on · solid</div><div className="mt-1 break-words">{detail.dependsOn.join(', ') || 'None'}</div></div>
-                    <div><div className="text-[10px] uppercase text-muted-foreground">references · dashed</div><div className="mt-1 break-words">{detail.references.join(', ') || 'None'}</div></div>
-                  </>
+                <p className="pr-5 text-lg font-semibold leading-7">{detail.title}</p>
+                <p className="whitespace-pre-wrap text-[0.9375rem] leading-6 text-muted-foreground">{detail.summary || 'No summary is available.'}</p>
+                <div className="flex max-w-full flex-wrap items-center gap-1">
+                  <StatusChip status={detail.status} />
+                  <ParamChip label={PARAM_LABELS.created} value={detail.createdBy} expanded={expandedParam === 'created'} onToggle={() => setExpandedParam(toggleParam(expandedParam, 'created'))} />
+                  <ParamChip label={PARAM_LABELS.review} value={detail.reviewers.join(', ')} expanded={expandedParam === 'review'} onToggle={() => setExpandedParam(toggleParam(expandedParam, 'review'))} />
+                </div>
+                <div className="grid grid-cols-3 gap-1">
+                  <ParamChip label={PARAM_LABELS.symbol} value={detail.symbol} expanded={expandedParam === 'symbol'} onToggle={() => setExpandedParam(toggleParam(expandedParam, 'symbol'))} />
+                  <ParamChip label={PARAM_LABELS.depends} value={detail.dependsOn.join(', ')} expanded={expandedParam === 'depends'} onToggle={() => setExpandedParam(toggleParam(expandedParam, 'depends'))} />
+                  <ParamChip label={PARAM_LABELS.references} value={detail.references.join(', ')} expanded={expandedParam === 'references'} onToggle={() => setExpandedParam(toggleParam(expandedParam, 'references'))} />
+                </div>
+                {expandedParam !== null ? (
+                  <div className="rounded-md bg-muted/50 px-2 py-1.5 text-xs">
+                    <div className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">{PARAM_LABELS[expandedParam]}</div>
+                    <div className="mt-0.5 whitespace-pre-wrap break-words">{paramValue(detail, expandedParam) || 'Not specified'}</div>
+                  </div>
                 ) : null}
-                <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={() => setExpandedDetails((value) => !value)}>{expandedDetails ? 'Show summary' : 'Show full details'}</button>
-                <div className="flex gap-2 border-t pt-3">
+                {assumptionContent}
+                <div className="max-h-40 max-w-full overflow-auto rounded-md bg-muted/40 p-2.5 text-sm leading-6">
+                  <MarkdownPreview body={detail.body || 'No body.'} />
+                </div>
+                <div className="flex gap-2 border-t pt-2.5">
                   <button type="button" className="rounded border px-2.5 py-1.5 hover:bg-accent" onClick={onEditIntent}>Edit</button>
-                  <button type="button" className="rounded border border-destructive/50 px-2.5 py-1.5 text-destructive hover:bg-destructive/10" onClick={onDeleteIntent} disabled={detail.kind !== 'leaf'}>Delete</button>
+                  <button
+                    type="button"
+                    className="rounded border border-destructive/50 px-2.5 py-1.5 text-destructive hover:bg-destructive/10"
+                    onClick={onDeleteIntent}
+                    disabled={detail.slug === ''}
+                    title={detail.kind === 'node' ? 'Moves this node and its whole subtree to trash' : 'Moves this intent to trash'}
+                  >
+                    Delete
+                  </button>
                 </div>
               </>
-            ) : !detailLoading ? <p className="text-muted-foreground">Details are not available for this node.</p> : null}
+            ) : editorContent === null && !detailLoading ? <p className="text-muted-foreground">Details are not available for this node.</p> : null}
           </div>
         </aside>
       ) : null}

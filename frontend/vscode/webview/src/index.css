@@ -68,24 +68,10 @@
 body {
   color: var(--vscode-foreground, hsl(var(--foreground)));
   background: var(--vscode-editor-background, hsl(var(--background)));
-  font-size: var(--kron-font-size, 14px);
 }
 
-body[data-kron-font-size="10"] { --kron-font-size: 10px; }
-body[data-kron-font-size="11"] { --kron-font-size: 11px; }
-body[data-kron-font-size="12"] { --kron-font-size: 12px; }
-body[data-kron-font-size="13"] { --kron-font-size: 13px; }
-body[data-kron-font-size="14"] { --kron-font-size: 14px; }
-body[data-kron-font-size="15"] { --kron-font-size: 15px; }
-body[data-kron-font-size="16"] { --kron-font-size: 16px; }
-body[data-kron-font-size="17"] { --kron-font-size: 17px; }
-body[data-kron-font-size="18"] { --kron-font-size: 18px; }
-body[data-kron-font-size="19"] { --kron-font-size: 19px; }
-body[data-kron-font-size="20"] { --kron-font-size: 20px; }
-body[data-kron-font-size="21"] { --kron-font-size: 21px; }
-body[data-kron-font-size="22"] { --kron-font-size: 22px; }
-body[data-kron-font-size="23"] { --kron-font-size: 23px; }
-body[data-kron-font-size="24"] { --kron-font-size: 24px; }
+/* `kron.webviewFontSize` is applied by scaling the document root in main.tsx;
+   <body> must not pin a font-size or every rem-based utility ignores it. */
 
 .markdown-body {
   line-height: 1.65;

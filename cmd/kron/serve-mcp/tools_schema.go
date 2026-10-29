@@ -174,7 +174,7 @@ type AssumeEntry struct {
 	Severity        string `json:"severity"                    jsonschema:"hard or soft (per-intent; overrides registry default)"`
 	DefaultSeverity string `json:"default_severity,omitempty"  jsonschema:"registry default severity (B-3); empty if registry absent"`
 	Rationale       string `json:"rationale,omitempty"         jsonschema:"per-intent explanation of why this severity (B-3)"`
-	ExpiresAt       string `json:"expires_at,omitempty"        jsonschema:"optional RFC3339 expiry"`
+	ExpiresAt       string `json:"expires_at,omitempty"        jsonschema:"optional expiry (YYYY-MM-DD or RFC3339)"`
 	VerifiedAt      string `json:"verified_at,omitempty"       jsonschema:"last verification time (empty if never verified)"`
 	VerifiedBy      string `json:"verified_by,omitempty"       jsonschema:"handle that last verified"`
 }
@@ -188,8 +188,8 @@ type AssumptionRef struct {
 	ID         string `json:"id"         jsonschema:"assumption id (must pass parser.ValidateSlug)"`
 	Severity   string `json:"severity"   jsonschema:"hard or soft (per-intent severity; required)"`
 	Rationale  string `json:"rationale,omitempty"  jsonschema:"required, ≥10 chars (B-3 rationale-required rule)"`
-	ExpiresAt  string `json:"expires_at,omitempty" jsonschema:"optional RFC3339 expiry"`
-	VerifiedAt string `json:"verified_at,omitempty" jsonschema:"optional RFC3339 verification time"`
+	ExpiresAt  string `json:"expires_at,omitempty" jsonschema:"optional expiry (YYYY-MM-DD or RFC3339)"`
+	VerifiedAt string `json:"verified_at,omitempty" jsonschema:"optional verification date (YYYY-MM-DD or RFC3339)"`
 	VerifiedBy string `json:"verified_by,omitempty" jsonschema:"optional @handle of verifier"`
 }
 
@@ -267,8 +267,8 @@ type AssumptionUpdateInput struct {
 	DefaultSeverity *string  `json:"default_severity,omitempty" jsonschema:"replace default_severity (null/absent = no change; hard or soft)"`
 	Body            *string  `json:"body,omitempty"            jsonschema:"replace body (null/absent = no change)"`
 	Status          *string  `json:"status,omitempty"          jsonschema:"replace status (null/absent = no change; draft, active, or superseded)"`
-	ExpiresAt       *string  `json:"expires_at,omitempty"       jsonschema:"replace expires_at (null/absent = no change; RFC3339)"`
-	VerifiedAt      *string  `json:"verified_at,omitempty"      jsonschema:"replace verified_at (null/absent = no change; RFC3339)"`
+	ExpiresAt       *string  `json:"expires_at,omitempty"       jsonschema:"replace expires_at (null/absent = no change; YYYY-MM-DD or RFC3339)"`
+	VerifiedAt      *string  `json:"verified_at,omitempty"      jsonschema:"replace verified_at (null/absent = no change; YYYY-MM-DD or RFC3339)"`
 	VerifiedBy      *string  `json:"verified_by,omitempty"      jsonschema:"replace verified_by (null/absent = no change)"`
 	Reviewers       []string `json:"reviewers,omitempty"        jsonschema:"replace reviewers (null/absent = no change; [] = clear)"`
 }
@@ -324,8 +324,8 @@ type AssumptionDetail struct {
 	Status          string   `json:"status"                      jsonschema:"draft / active / superseded"`
 	CreatedBy       string   `json:"created_by"                  jsonschema:"@handle or agent:<model>"`
 	UpdatedAt       string   `json:"updated_at"                  jsonschema:"RFC3339 timestamp"`
-	ExpiresAt       string   `json:"expires_at,omitempty"        jsonschema:"optional RFC3339 expiry"`
-	VerifiedAt      string   `json:"verified_at,omitempty"       jsonschema:"optional last verification time (RFC3339)"`
+	ExpiresAt       string   `json:"expires_at,omitempty"        jsonschema:"optional expiry (YYYY-MM-DD or RFC3339)"`
+	VerifiedAt      string   `json:"verified_at,omitempty"       jsonschema:"optional last verification (YYYY-MM-DD or RFC3339)"`
 	VerifiedBy      string   `json:"verified_by,omitempty"       jsonschema:"optional last verifier @handle"`
 	Reviewers       []string `json:"reviewers,omitempty"         jsonschema:"reviewer handles (sorted)"`
 	Body            string   `json:"body,omitempty"              jsonschema:"raw markdown body below the frontmatter (empty if none)"`
@@ -343,8 +343,8 @@ type AssumptionSummary struct {
 	Status          string   `json:"status"           jsonschema:"draft or active or superseded"`
 	CreatedBy       string   `json:"created_by"       jsonschema:"@handle or agent:<model>"`
 	UpdatedAt       string   `json:"updated_at"       jsonschema:"RFC3339 timestamp"`
-	ExpiresAt       string   `json:"expires_at,omitempty" jsonschema:"optional RFC3339 expiry"`
-	VerifiedAt      string   `json:"verified_at,omitempty" jsonschema:"optional last verification time (RFC3339)"`
+	ExpiresAt       string   `json:"expires_at,omitempty" jsonschema:"optional expiry (YYYY-MM-DD or RFC3339)"`
+	VerifiedAt      string   `json:"verified_at,omitempty" jsonschema:"optional last verification (YYYY-MM-DD or RFC3339)"`
 	VerifiedBy      string   `json:"verified_by,omitempty" jsonschema:"optional last verifier @handle"`
 	Reviewers       []string `json:"reviewers,omitempty"   jsonschema:"reviewer handles (sorted)"`
 }
@@ -352,13 +352,15 @@ type AssumptionSummary struct {
 // --- kron_delete ------------------------------------------------------
 
 type DeleteInput struct {
-	Slug string `json:"slug" jsonschema:"slug of the intent to soft-delete"`
+	Slug           string `json:"slug"                      jsonschema:"slug of the intent to soft-delete"`
+	ConfirmSubtree bool   `json:"confirm_subtree,omitempty" jsonschema:"required for node intents: acknowledge that the whole subtree moves to trash"`
 }
 
 type DeleteOutput struct {
-	OK          bool     `json:"ok"           jsonschema:"true on success"`
-	TrashedPath string   `json:"trashed_path" jsonschema:"relative path the file was moved to"`
-	Dependents  []string `json:"dependents"   jsonschema:"intents that listed slug in depends_on (sorted, for caller awareness)"`
+	OK           bool     `json:"ok"            jsonschema:"true on success"`
+	TrashedPath  string   `json:"trashed_path"  jsonschema:"relative path the entry was moved to (file for leaf, directory for node)"`
+	Dependents   []string `json:"dependents"    jsonschema:"intents that depend on the deleted entry or its subtree (sorted)"`
+	DeletedSlugs []string `json:"deleted_slugs,omitempty" jsonschema:"every intent slug removed by this call (node subtree included)"`
 }
 
 // --- kron_restore -----------------------------------------------------
@@ -368,8 +370,9 @@ type RestoreInput struct {
 }
 
 type RestoreOutput struct {
-	OK   bool   `json:"ok"   jsonschema:"true on success"`
-	Path string `json:"path" jsonschema:"relative path the file was moved to (.kron/intents/<slug>.md)"`
+	OK            bool     `json:"ok"             jsonschema:"true on success"`
+	Path          string   `json:"path"           jsonschema:"relative path the entry was restored to (.kron/intents/<slug>.md or <slug>/)"`
+	RestoredSlugs []string `json:"restored_slugs,omitempty" jsonschema:"every intent slug brought back by this call (node subtree included)"`
 }
 
 // --- kron_assume_check -----------------------------------------------
@@ -385,7 +388,7 @@ type AssumeWarning struct {
 	DefaultSeverity string `json:"default_severity,omitempty" jsonschema:"registry default severity (B-3); empty if registry absent"`
 	Text            string `json:"text"                     jsonschema:"human-readable claim (preferred from registry)"`
 	Rationale       string `json:"rationale,omitempty"     jsonschema:"per-intent explanation of why this severity (B-3)"`
-	ExpiresAt       string `json:"expires_at,omitempty"     jsonschema:"optional RFC3339 expiry"`
+	ExpiresAt       string `json:"expires_at,omitempty"     jsonschema:"optional expiry (YYYY-MM-DD or RFC3339)"`
 	DaysRemaining   *int   `json:"days_remaining,omitempty" jsonschema:"optional days until expiry (negative if expired)"`
 	Verified        bool   `json:"verified"                jsonschema:"true if VerifiedAt is set"`
 }

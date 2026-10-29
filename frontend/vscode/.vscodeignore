@@ -14,6 +14,10 @@ webview/**
 *.log
 webview/node_modules/
 
+# Local verification artifacts (screenshots / probe scripts under dist/)
+dist/shots/**
+dist/tmp-*
+
 # Repo-level ignore
 .git/
 .github/

@@ -1,97 +1,78 @@
-# frontend/vscode/ — Kron VSCode extension
+# Kron for VS Code
 
-Kron intent ledger IDE integration. See [`docs/rfc/2026-10-09-gui-ide-plan.md`](../../docs/rfc/2026-10-09-gui-ide-plan.md) §4 for the IDE-end design and [`docs/rfc/2026-10-18-vscode-skeleton-sdk.md`](../../docs/rfc/2026-10-18-vscode-skeleton-sdk.md) for the SDK version + skeleton layout this commit implements.
+**Kron** is a markdown intent ledger for software projects. Intents are small, reviewable documents
+(`.kron/intents/<slug>.md`) that record *what* a piece of the product must do, *why* it exists, which
+assumptions it leans on, and which code it owns. This extension brings that ledger into the editor:
+browse the tree, read and edit intents in a canvas, follow code anchors, and keep assumptions honest.
 
-## Layout
+- Repository: [github.com/zhangjun005/Kron](https://github.com/zhangjun005/Kron)
+- Authors: **zhangjun005**, **HomoFluctus**, **lanyue811**
 
-```
-frontend/vscode/
-├── package.json              # extension host SDK (vscode-languageclient ^10.0.0, @modelcontextprotocol/sdk ^1.32.0)
-├── tsconfig.json             # extension host TS — strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes
-├── .vscodeignore             # VSIX packaging rules (excludes src/, webview/src/, node_modules)
-├── .vscode/                  # F5 launch config (yo code default)
-│   ├── launch.json
-│   ├── tasks.json
-│   ├── settings.json
-│   └── extensions.json
-└── webview/                  # Vite 5 + React 18 + shadcn/ui
-    ├── package.json
-    ├── tsconfig.json
-    ├── tsconfig.node.json
-    ├── vite.config.ts        # base: './', outDir: ../dist/webview
-    ├── tailwind.config.js
-    ├── postcss.config.js
-    ├── components.json       # shadcn/ui config
-    ├── index.html
-    └── src/
-        ├── main.tsx          # React entry, force dark mode
-        ├── App.tsx           # kron_tree request, filter, refresh, and tree rendering
-        ├── index.css         # Tailwind + shadcn HSL vars
-        ├── lib/utils.ts      # cn() helper
-        ├── lib/mcp-types.ts  # Webview/extension-host message and tree types
-        └── components/ui/    # shadcn 5 first-batch (Button/Card/Input/Badge/Separator)
-```
+## Features
 
-## Status (as of this commit)
+- **Intent tree in the sidebar** — a dedicated Kron Activity Bar view plus an optional Explorer view.
+  Status is colour-coded (active / draft / superseded), with intent/folder counts in the view title.
+  The dedicated sidebar also lists **Assumptions** (open the registry `.md` with one click) and
+  **Superseded** intents.
+- **Canvas workspace** — select an intent to open its card in a Webview: title, summary, symbols,
+  status, reviewers, references, prerequisites, assumptions and body. Create child intents and edit
+  frontmatter/body through forms (backed by `kron_add` / `kron_update`).
+- **Assumption registry panel** — manage shared assumptions (`.kron/assumptions/<id>.md`): create,
+  edit text/severity/status/expiry/reviewers, delete, and see which intents use each one.
+- **Code anchors** — `@kron:intent <slug>` comments are underlined and Ctrl+click jumps to the intent
+  document (served by `kron serve-lsp`). The editor context menu offers open/edit/impact actions for
+  valid anchors, and create/attach/retarget/remove actions for missing or dangling ones.
+- **Quick intent creation** — finish an anchor for a slug that does not exist yet and Kron offers to
+  create it through `kron_add`.
 
-PR 1 implements RFC 2026-10-18 §4 #1-#4:
+## Requirements
 
-- [x] #1 yo code skeleton (F5 launch + tasks + settings + extensions.json)
-- [x] #2 Vite 5 webview scaffold (package.json + index.html + vite.config + tsconfig)
-- [x] #3 shadcn 5 first-batch components (Button / Card / Input / Badge / Separator)
-- [x] #4 config lock to RFC §2.1/§2.2/§2.3 versions + tsconfig strict + components.json
+The extension starts `kron serve-mcp` and `kron serve-lsp` for the current project, so a `kron`
+executable is required:
 
-Implementation status against RFC §4:
+1. Build or install Kron (Go 1.24+): `go build ./cmd/kron` or download a release binary.
+2. Point the extension at it with the `kron.serverPath` setting (default: `kron` from `PATH`).
+3. Open a workspace folder that contains a `.kron/` directory. The first folder with `.kron/` is the
+   active project (single-project policy).
 
-- [x] #5 `src/extension.ts` + independent MCP and LSP process clients
-- [x] #6 `src/views/intentTree.ts` — native Explorer TreeView backed by `kron_tree`
-- [x] #7 `src/views/statusBar.ts` — independent connection status and restart command
-- [x] #8 `src/views/intentEditor.ts` — WebviewPanel with CSP and validated tree messages
-- [x] #9 `webview/src/App.tsx` tree display, intent details, and mock-only intent/assumption forms + `src/lib/mcp-types.ts` — lanyue811
-- [ ] #10 Manual F5 smoke — implementation is available; not yet manually accepted in an Extension Host
-- [x] #11 `docs/implementation/vscode-extension.md` — implementation guide and host/Webview contract documented
-- [ ] D1-D4 (Activity Bar icon / webview theme sync / VSIX update / multi-project) — v.s. PR, RFC §3.4
+The extension only activates in workspaces containing `.kron/**`, or when you open a Kron view — it
+does not spawn background processes for unrelated projects.
 
-## How to verify (step-by-step)
+## Settings
+
+| Setting | Default | Description |
+|---|---|---|
+| `kron.serverPath` | `kron` | Path to the Kron executable used for MCP and LSP. |
+| `kron.lspLanguages` | `go`, `typescript`, `javascript` | File languages where anchors are underlined/jumpable. |
+| `kron.webviewFontSize` | `14` | Base font size for the intent canvas Webview. |
+| `kron.sidebar.independent` | `true` | Show the dedicated Kron view in the Activity Bar. |
+| `kron.sidebar.explorer` | `false` | Also show the intent tree inside the Explorer sidebar. |
+
+Both sidebar options can be enabled or disabled independently. After changing `kron.serverPath` or
+`kron.lspLanguages`, run **Kron: Restart Connections**; the font size applies to open canvases
+immediately.
+
+## Commands
+
+- **Kron: Open Intent Workspace** — open the canvas for the current project.
+- **Kron: Refresh Intents** — re-read the tree, assumptions and superseded list.
+- **Kron: Restart Connections** — restart the MCP/LSP subprocesses (after settings changes).
+- **Kron: Open Intent Details / Edit Intent / Open Intent Markdown / Show Intent Impact** — anchor
+  context menu actions for a valid anchor.
+- **Kron: Create Intent and Attach Anchor / Attach Existing Intent Anchor** — add an anchor at the cursor.
+
+## Development
 
 ```bash
-# 0. Preview the UI without VSCode or a Kron binary
-cd frontend/vscode/webview
-pnpm dev   # Vite serves the mock tree and detail/forms preview
-
-# 1. Build the webview
-cd frontend/vscode/webview
-pnpm install --frozen-lockfile   # install the pinned webview dependency graph
-pnpm build     # → ../dist/webview/index.html + assets/
-# Check output:
-ls ../dist/webview/
-
-# 2. F5 smoke test — open frontend/vscode as a VS Code workspace and run "Run Kron Extension".
-# The pre-launch task builds the Webview and compiles the extension host.
+cd frontend/vscode
+npm install
+npm run compile          # extension host → out/
+cd webview && npm run build   # Webview → dist/webview/
+cd .. && npm run package      # VSIX (also rebuilds Webview + host)
 ```
 
-The standalone preview uses sample data. Form changes stay in page memory and are never written to project files. Inside VS Code, the host supplies the live tree; detail reads and write actions are not connected yet, so the Webview identifies those details as unavailable and disables edits.
+Press **F5** to launch the Extension Development Host. The Webview can also be previewed without
+VS Code: `cd webview && npm run dev` renders the mock tree.
 
-For current implementation state, lifecycle/CSP/LSP integration constraints, and the recommended next steps, see [the VS Code implementation handoff](../../docs/implementation/vscode-extension.md#当前分支交接状态). The skeleton RFC's engineering supplement is in §2.7 and §4.1.
-
-## How to develop
-
-- Extension host code lives under `src/` (TS, Node 16 module) — compiled to `out/` by `tsc -p ./`
-- Webview code lives under `webview/src/` (TS, ESNext) — built by Vite to `dist/webview/`
-- The two are independent TypeScript projects with separate `node_modules/` (webview uses Vite + React + shadcn; extension host uses `vscode` + `vscode-languageclient` + `@modelcontextprotocol/sdk`).
-- See `docs/rfc/2026-10-18-vscode-skeleton-sdk.md` §2.4 for the full directory + build diagram.
-
-## Quick-create intents from code anchors
-
-When a valid `// @kron:intent <slug>` anchor is completed and left unchanged briefly, the extension checks the current workspace. If that intent does not exist, it offers to create it. Confirming creates it through `kron_add`, refreshes the Intent tree, and lets Kron fill creator/time metadata and derive the title from the final slug segment. Optional metadata is not requested.
-
-## Code navigation
-
-Kron intent slugs in valid `@kron:intent` anchors are underlined. Use **Ctrl+left-click** on an anchor to follow its LSP definition in the editor. F12 remains available as VS Code's standard keyboard shortcut.
-
-## Not in scope
-
-- ❌ No direct import of `internal/` (architecture iron rule #1 + #9)
-- ❌ No cross-import with `frontend/wails/` (iron rule #9)
-- ❌ No chart library preset (`<Chart>` spike deferred, RFC §3.3)
-- ❌ No `textDocument/completion` / `publishDiagnostics` in v1.3 (RFC §3.4)
+See [`docs/implementation/vscode-extension.md`](../../docs/implementation/vscode-extension.md) for the
+host/Webview contract, anchor grammar and current limitations.

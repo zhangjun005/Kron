@@ -6,7 +6,14 @@ export type WorkspaceMcpConnection = {
   client: KronMcpClient
 }
 
-class IntentItem extends vscode.TreeItem {
+/** Status colours mirror the Webview chips: active=green, draft=yellow, superseded=dim. */
+const STATUS_COLOR: Record<string, string> = {
+  active: 'charts.green',
+  draft: 'charts.yellow',
+  superseded: 'descriptionForeground',
+}
+
+export class IntentItem extends vscode.TreeItem {
   constructor(readonly node: TreeNode, id: string) {
     super(node.title || node.name, node.is_dir
       ? vscode.TreeItemCollapsibleState.Collapsed
@@ -14,7 +21,16 @@ class IntentItem extends vscode.TreeItem {
     this.id = id
     this.contextValue = node.is_dir ? 'kron.intentFolder' : 'kron.intent'
     if (node.status !== undefined) this.description = node.status
-    this.iconPath = new vscode.ThemeIcon(node.is_dir ? 'folder' : 'symbol-misc')
+    const colour = node.status === undefined ? undefined : STATUS_COLOR[node.status]
+    const icon = node.is_dir ? 'folder' : 'symbol-misc'
+    this.iconPath = colour === undefined
+      ? new vscode.ThemeIcon(icon)
+      : new vscode.ThemeIcon(icon, new vscode.ThemeColor(colour))
+    const tooltip = new vscode.MarkdownString()
+    tooltip.appendMarkdown(`**${node.slug}**\n\n`)
+    tooltip.appendMarkdown(`${node.is_dir ? 'Folder intent' : 'Leaf intent'}${node.status === undefined ? '' : ` · ${node.status}`}\n`)
+    if (node.title !== undefined && node.title !== node.name) tooltip.appendMarkdown(`\n_${node.title}_`)
+    this.tooltip = tooltip
   }
 }
 

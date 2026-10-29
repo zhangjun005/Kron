@@ -107,3 +107,17 @@ Webview 中仍有多处 `as Intent[...]` 类型断言。它们绕过了 `ts-styl
 - `Kron`：使用独立 Activity Bar 容器。
 
 该设置需要同步 `package.json` 的 `viewsContainers` / `views` 声明和激活逻辑，并验证 Cursor 兼容性；在完成 UX 方案前不直接修改 manifest。
+
+## 2026-10-29 本轮已处理
+
+- Intent 详情和编辑卡片现在显示已关联的 assumptions，并支持解除关联。
+- 支持从卡片中选择已有 assumption，或填写 id、文本、默认 severity、意图 severity、rationale 和过期日期后创建并关联。
+- VSIX MCP 契约补齐 `kron_assume_get`、`kron_assume_update`、`kron_assume_delete`、`kron_assume_check`；底层 MCP 已提供这些工具。
+- 真实工作区的假设卡片增加 `Check`，显示 hard/soft/expired 汇总和检查警告。
+- Intent 详情补充 Created by；该值来自 `kron_add` 时 MCP 服务端的 identity/git 配置，不是普通编辑字段；Reviewers 则是可维护的协作者列表。
+- 假设卡片标题行收敛为 `Assumptions + Check + Add`，移除额外说明句；Check 失败时在卡片内显示错误。
+- 新建入口明确区分 `Intent document` 与 `Intent folder`；顶部入口和节点右键菜单都支持这两种创建方式。
+- 创建表单收敛为 slug、标题和正文；摘要由正文首段派生，状态、关系等字段只在编辑已有 Intent 时展开。
+- 选中 folder/workspace 时新建按钮会预填父级 slug；选中 leaf 时按钮禁用，且右键菜单不再提供创建子节点，因为当前存储层不支持 leaf → node 转换。
+
+仍未处理的假设相关事项：共享 assumption 的完整编辑/删除界面、校验结果专门视图、打开 assumption Markdown 文件，以及正文 `@kron:assumes` marker 的可视化提示。

@@ -314,22 +314,21 @@ return nil, TreeOutput{Root: treeNodeFromView(internalTree)}, nil
 - `view.BuildIntentTree` 把 `[]*model.Intent` 拍成 `*view.IntentTreeNode` 树(目录结构 = slug 分隔)
 - `treeNodeFromView` 投影到 wire `*TreeNode`;**`Children []any`** 避开 SDK 递归 struct panic
 
-#### 4.3.6 `HandleDelete`(`kron_delete`)——[handlers_delete.go:34-71](handlers_delete.go)
+#### 4.3.6 `HandleDelete`(`kron_delete`)——[`handlers_delete.go`](handlers_delete.go) (2026-10-29 子树化)
 
 ```go
-dependents := []string{}
-if r, rerr := store.NewReader(root); rerr == nil {
-    if all, lerr := r.LoadAll(ctx); lerr == nil {
-        dependents = relations.Dependents(all, in.Slug)  // ① 软读
-    }
-}
-w, err := store.NewWriter(root)
-if err := w.MoveToTrash(ctx, in.Slug); err != nil { return ... }
-return nil, DeleteOutput{OK: true, TrashedPath: ..., Dependents: dependents}, nil
+all, _ := LoadAllCached(ctx, root)              // ① 软读
+// kind / 子树 slugs / dependents 并集都来自这一份快照
+if kind == node && !in.ConfirmSubtree { return nil, ..., 要求 confirm_subtree }
+w.MoveToTrash(ctx, in.Slug)                     // node → 整个 <slug>/ 目录 rename 进 trash
+return DeleteOutput{TrashedPath: <真实路径>, Dependents: <子树并集>, DeletedSlugs: <全部删除 slug>}
 ```
 
 ① **move 前算** dependents——避免 move 后 LoadAll 漏数据(并发安全)
 ② `dependents` **不阻塞** delete——v1 软警告(RFC `2026-10-03-frontmatter-references` §5.3)
+③ node 删除必须显式 `confirm_subtree: true`，否则返回 IsError 并告知子树意图数；trash 布局与恢复语义见
+[`docs/implementation/2026-10-29-trash-subtree.md`](../implementation/2026-10-29-trash-subtree.md)
+④ `kron_restore` 按 trash 形状还原（node 目录 → 整棵子树）；旧 flat trash 条目按 leaf 恢复
 
 #### 4.3.7 `HandleAssumptionGet`(`kron_assume_get`)——[`handlers_assumption.go`](handlers_assumption.go) (2026-10-14 追加)
 

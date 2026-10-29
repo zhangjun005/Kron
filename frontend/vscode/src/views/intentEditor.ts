@@ -78,11 +78,27 @@ function renderHtml(context: vscode.ExtensionContext, webview: vscode.Webview, f
   })
 }
 
+/** Selection queued for the Webview; flushed after it asks for the tree. */
+let pendingSelection: { slug: string; edit: boolean } | undefined
+
+/**
+ * Flushes a queued selection. Only called after the Webview asked for the tree,
+ * i.e. after its message listener is mounted — a `kron_select` posted into a
+ * freshly created Webview would otherwise be dropped.
+ */
+async function flushPendingSelection(panel: vscode.WebviewPanel): Promise<void> {
+  if (pendingSelection === undefined) return
+  const selection = pendingSelection
+  pendingSelection = undefined
+  await panel.webview.postMessage({ type: 'kron_select', slug: selection.slug, edit: selection.edit })
+}
+
 async function sendTree(panel: vscode.WebviewPanel, provider: IntentTreeProvider, output: vscode.OutputChannel): Promise<void> {
   try {
     const result = await timeout(provider.refresh())
     await panel.webview.postMessage({ type: 'kron_tree:result', result })
   } catch (error: unknown) {
+    pendingSelection = undefined
     output.appendLine(`Webview tree request failed: ${error instanceof Error ? error.message : String(error)}`)
     await panel.webview.postMessage({
       type: 'kron_tree:error',
@@ -91,7 +107,36 @@ async function sendTree(panel: vscode.WebviewPanel, provider: IntentTreeProvider
   }
 }
 
-/** Opens the read-only details workspace and owns its host/Webview message boundary. */
+/**
+ * Opens (or focuses) the workspace panel with `slug` selected; `edit` switches
+ * the detail card into the edit form once the intent is loaded.
+ */
+export async function openIntentAt(
+  context: vscode.ExtensionContext,
+  provider: IntentTreeProvider,
+  output: vscode.OutputChannel,
+  slug: string,
+  edit: boolean,
+): Promise<void> {
+  pendingSelection = { slug, edit }
+  if (currentPanel !== undefined) {
+    currentPanel.reveal(vscode.ViewColumn.Beside)
+    await sendTree(currentPanel, provider, output)
+    await flushPendingSelection(currentPanel)
+    return
+  }
+  openIntentWorkspace(context, provider, output)
+}
+
+/** Pushes the current `kron.webviewFontSize` setting to an open workspace panel. */
+export function postWebviewFontSize(): void {
+  if (currentPanel === undefined) return
+  const fontSize = vscode.workspace.getConfiguration('kron').get<number>('webviewFontSize', 14)
+  const bounded = Math.min(24, Math.max(10, Math.round(fontSize)))
+  void currentPanel.webview.postMessage({ type: 'kron_font_size', fontSize: bounded })
+}
+
+/** Opens the details/edit workspace and owns its host/Webview message boundary. */
 export function openIntentWorkspace(
   context: vscode.ExtensionContext,
   provider: IntentTreeProvider,
@@ -147,6 +192,7 @@ export function openIntentWorkspace(
       return
     }
     await sendTree(panel, provider, output)
+    await flushPendingSelection(panel)
   })
   let disposeSubscription: vscode.Disposable | undefined
   disposeSubscription = panel.onDidDispose(() => {

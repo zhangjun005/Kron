@@ -1,15 +1,33 @@
 import vscode = require('vscode')
 import type { ConnectionState } from '../mcp/client'
 
-/** Displays independent MCP/LSP health and offers a single explicit restart action. */
+const NO_PROJECT_TEXT = '$(folder) Kron: no .kron project'
+const NO_PROJECT_TOOLTIP = 'Open a folder that contains a .kron directory, or check kron.serverPath and the Kron output channel.'
+
+/** Displays the active Kron project, MCP/LSP health, and the restart action. */
 export class KronStatusBar implements vscode.Disposable {
   private readonly item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 20)
   private mcpStates: readonly ConnectionState[] = []
   private lspStates: readonly ConnectionState[] = []
+  private projectName: string | undefined
 
   constructor() {
     this.item.command = 'kron.restartConnections'
     this.item.show()
+    this.update()
+  }
+
+  /** Marks the active single Kron project for this window. */
+  setProject(name: string): void {
+    this.projectName = name
+    this.update()
+  }
+
+  /** No workspace folder in this window contains a Kron project. */
+  setNoProject(): void {
+    this.projectName = undefined
+    this.mcpStates = []
+    this.lspStates = []
     this.update()
   }
 
@@ -23,22 +41,23 @@ export class KronStatusBar implements vscode.Disposable {
     this.update()
   }
 
-  setNoWorkspace(): void {
-    this.mcpStates = []
-    this.lspStates = []
-    this.item.text = '$(folder) Kron: open a workspace'
-    this.item.tooltip = 'Open a workspace folder to start Kron MCP and LSP.'
-  }
-
   dispose(): void {
     this.item.dispose()
   }
 
   private update(): void {
+    if (this.projectName === undefined) {
+      this.item.text = NO_PROJECT_TEXT
+      this.item.tooltip = NO_PROJECT_TOOLTIP
+      return
+    }
+
     const allStates = [...this.mcpStates, ...this.lspStates]
+    const tooltip = [`Project: ${this.projectName}`]
     if (allStates.length === 0) {
       this.item.text = '$(sync~spin) Kron: starting'
-      this.item.tooltip = 'Starting Kron connections. Click to restart both connections.'
+      tooltip.push('MCP: starting', 'LSP: starting', 'Click to restart connections.')
+      this.item.tooltip = tooltip.join('\n')
       return
     }
 
@@ -49,11 +68,12 @@ export class KronStatusBar implements vscode.Disposable {
       : isStarting
         ? '$(sync~spin) Kron: starting'
         : '$(check) Kron: connected'
-    this.item.tooltip = [
+    tooltip.push(
       `MCP: ${this.summarize(this.mcpStates)}`,
       `LSP: ${this.summarize(this.lspStates)}`,
       'Click to restart connections.',
-    ].join('\n')
+    )
+    this.item.tooltip = tooltip.join('\n')
   }
 
   private summarize(states: readonly ConnectionState[]): string {

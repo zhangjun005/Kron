@@ -2,23 +2,25 @@
   "name": "kron-vscode",
   "type": "commonjs",
   "displayName": "Kron",
-  "publisher": "homofluctus",
-  "description": "Kron intent ledger — IDE integration",
+  "publisher": "zhangjun005",
+  "description": "Kron intent ledger for VS Code: browse intent trees, inspect assumptions and jump through code anchors — backed by the kron MCP/LSP servers.",
   "version": "0.0.1",
   "repository": {
     "type": "git",
     "url": "https://github.com/zhangjun005/Kron.git"
   },
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.91.0"
   },
   "categories": [
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished",
+    "workspaceContains:.kron/**",
     "onView:kron.intents",
-    "onCommand:kron.openIntentWorkspace"
+    "onView:kron.intentsSidebar",
+    "onView:kron.assumptions",
+    "onView:kron.superseded"
   ],
   "contributes": {
     "commands": [
@@ -36,19 +38,102 @@
         "command": "kron.restartConnections",
         "title": "Kron: Restart Connections",
         "icon": "$(debug-restart)"
+      },
+      {
+        "command": "kron.openIntentDetails",
+        "title": "Kron: Open Intent Details"
+      },
+      {
+        "command": "kron.editIntentFromAnchor",
+        "title": "Kron: Edit Intent"
+      },
+      {
+        "command": "kron.openIntentMarkdown",
+        "title": "Kron: Open Intent Markdown"
+      },
+      {
+        "command": "kron.showIntentImpact",
+        "title": "Kron: Show Intent Impact"
+      },
+      {
+        "command": "kron.changeAnchorTarget",
+        "title": "Kron: Change Anchor Target"
+      },
+      {
+        "command": "kron.createIntentForAnchor",
+        "title": "Kron: Create Intent for Anchor"
+      },
+      {
+        "command": "kron.removeAnchor",
+        "title": "Kron: Remove Anchor"
+      },
+      {
+        "command": "kron.createIntentAndAttachAnchor",
+        "title": "Kron: Create Intent and Attach Anchor"
+      },
+      {
+        "command": "kron.attachExistingIntentAnchor",
+        "title": "Kron: Attach Existing Intent Anchor"
       }
     ],
     "menus": {
       "view/title": [
         {
           "command": "kron.refreshIntents",
-          "when": "view == kron.intents",
+          "when": "view =~ /^kron\\.(intents|intentsSidebar|assumptions|superseded)$/",
           "group": "navigation"
         },
         {
           "command": "kron.openIntentWorkspace",
-          "when": "view == kron.intents",
+          "when": "view =~ /^kron\\.(intents|intentsSidebar)$/",
           "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "kron.openIntentDetails",
+          "when": "resourceScheme == file && kronAnchorState == 'valid'",
+          "group": "kron@1"
+        },
+        {
+          "command": "kron.editIntentFromAnchor",
+          "when": "resourceScheme == file && kronAnchorState == 'valid'",
+          "group": "kron@2"
+        },
+        {
+          "command": "kron.openIntentMarkdown",
+          "when": "resourceScheme == file && kronAnchorState == 'valid'",
+          "group": "kron@3"
+        },
+        {
+          "command": "kron.showIntentImpact",
+          "when": "resourceScheme == file && kronAnchorState == 'valid'",
+          "group": "kron@4"
+        },
+        {
+          "command": "kron.changeAnchorTarget",
+          "when": "(resourceScheme == file) && (kronAnchorState == 'valid' || kronAnchorState == 'dangling')",
+          "group": "kron@5"
+        },
+        {
+          "command": "kron.createIntentForAnchor",
+          "when": "(resourceScheme == file) && (kronAnchorState == 'dangling')",
+          "group": "kron@6"
+        },
+        {
+          "command": "kron.removeAnchor",
+          "when": "(resourceScheme == file) && (kronAnchorState == 'dangling')",
+          "group": "kron@7"
+        },
+        {
+          "command": "kron.createIntentAndAttachAnchor",
+          "when": "(resourceScheme == file) && (kronAnchorState == 'none')",
+          "group": "kron@8"
+        },
+        {
+          "command": "kron.attachExistingIntentAnchor",
+          "when": "(resourceScheme == file) && (kronAnchorState == 'none')",
+          "group": "kron@9"
         }
       ]
     },
@@ -56,7 +141,28 @@
       "explorer": [
         {
           "id": "kron.intents",
-          "name": "Kron Intents"
+          "name": "Kron Intents",
+          "when": "config.kron.sidebar.explorer"
+        }
+      ],
+      "kron": [
+        {
+          "id": "kron.intentsSidebar",
+          "name": "Intents",
+          "when": "config.kron.sidebar.independent",
+          "icon": "$(list-tree)"
+        },
+        {
+          "id": "kron.assumptions",
+          "name": "Assumptions",
+          "when": "config.kron.sidebar.independent",
+          "icon": "$(symbol-constant)"
+        },
+        {
+          "id": "kron.superseded",
+          "name": "Superseded",
+          "when": "config.kron.sidebar.independent",
+          "icon": "$(history)"
         }
       ]
     },
@@ -70,10 +176,23 @@
         },
         "kron.lspLanguages": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [
-            "go", "markdown", "typescript", "javascript", "python", "rust", "java",
-            "c", "cpp", "csharp", "kotlin", "swift", "shellscript"
+            "go",
+            "markdown",
+            "typescript",
+            "javascript",
+            "python",
+            "rust",
+            "java",
+            "c",
+            "cpp",
+            "csharp",
+            "kotlin",
+            "swift",
+            "shellscript"
           ],
           "description": "VS Code language IDs that receive Kron hover and definition support."
         },
@@ -83,9 +202,50 @@
           "maximum": 24,
           "default": 14,
           "description": "Base font size in the Kron Intent Workspace Webview."
+        },
+        "kron.sidebar.independent": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Kron intents view in the dedicated Kron Activity Bar sidebar."
+        },
+        "kron.sidebar.explorer": {
+          "type": "boolean",
+          "default": false,
+          "description": "Also show the Kron intents view in the Explorer sidebar. Both sidebar options can be enabled or disabled independently."
         }
       }
-    }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "kron",
+          "title": "Kron",
+          "icon": "media/kron.svg"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "kron.intents",
+        "contents": "No `.kron/` project in this workspace.\n\n[Open Kron workspace](command:kron.openIntentWorkspace) · [Restart connections](command:kron.restartConnections)",
+        "when": "!kronHasProject"
+      },
+      {
+        "view": "kron.intentsSidebar",
+        "contents": "No `.kron/` project in this workspace.\n\nOpen a folder containing a `.kron/` directory, then run **Kron: Restart Connections**.\n\n[Open Kron workspace](command:kron.openIntentWorkspace) · [Restart connections](command:kron.restartConnections)",
+        "when": "!kronHasProject"
+      },
+      {
+        "view": "kron.assumptions",
+        "contents": "No assumption registry loaded.\n\nAssumptions live in `.kron/assumptions/`. [Refresh](command:kron.refreshIntents)",
+        "when": "!kronHasProject"
+      },
+      {
+        "view": "kron.superseded",
+        "contents": "No superseded intents.",
+        "when": "!kronHasProject"
+      }
+    ]
   },
   "main": "./out/extension.js",
   "scripts": {
@@ -102,8 +262,23 @@
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "^1.91.0",
     "@vscode/vsce": "^4.0.0",
     "typescript": "^5.6.3"
-  }
+  },
+  "icon": "media/kronLogo.png",
+  "author": "zhangjun005, HomoFluctus, lanyue811",
+  "homepage": "https://github.com/zhangjun005/Kron",
+  "bugs": {
+    "url": "https://github.com/zhangjun005/Kron/issues"
+  },
+  "keywords": [
+    "kron",
+    "intent",
+    "assumptions",
+    "knowledge-base",
+    "ai-agents",
+    "mcp",
+    "lsp"
+  ]
 }

@@ -56,7 +56,7 @@ func (d Diag) severity() Severity {
 type ExpiredAssumption struct {
 	Slug         string `json:"slug"           jsonschema:"slug of the owning intent"`
 	AssumptionID string `json:"assumption_id"  jsonschema:"stable assumption identifier"`
-	ExpiresAt    string `json:"expires_at"    jsonschema:"RFC3339 expiry timestamp"`
+	ExpiresAt    string `json:"expires_at"    jsonschema:"expiry timestamp (YYYY-MM-DD or RFC3339)"`
 	DaysOverdue  int    `json:"days_overdue"   jsonschema:"days past expiry (positive)"`
 }
 

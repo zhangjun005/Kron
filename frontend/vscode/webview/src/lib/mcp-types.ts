@@ -32,12 +32,21 @@ export type TreeResult = {
 export type WebviewInbound =
     | { type: 'kron_tree:result'; result: TreeResult }
     | { type: 'kron_tree:error'; message: string }
+    | { type: 'kron_font_size'; fontSize: number }
+    | { type: 'kron_select'; slug: string; edit: boolean }
     | { type: 'kron_mcp:response'; requestId: number; tool: McpToolName; result: Record<string, unknown> }
     | { type: 'kron_mcp:error'; requestId: number; tool: McpToolName; message: string }
 
-export type McpToolName =
-    | 'kron_get' | 'kron_lint' | 'kron_add' | 'kron_update' | 'kron_delete' | 'kron_restore'
-    | 'kron_assume_list' | 'kron_assume_create'
+/**
+ * Tools the Webview may request. Keep in sync with MCP_TOOL_NAMES in
+ * frontend/vscode/src/mcp/client.ts (single source: that file's comment).
+ */
+export const MCP_TOOL_NAMES = [
+    'kron_add', 'kron_assume_check', 'kron_assume_create', 'kron_assume_delete', 'kron_assume_get',
+    'kron_assume_list', 'kron_assume_update', 'kron_delete', 'kron_get', 'kron_restore', 'kron_update',
+] as const
+
+export type McpToolName = typeof MCP_TOOL_NAMES[number]
 
 /** Messages the webview can send to the extension host. */
 export type WebviewOutbound =
@@ -72,6 +81,13 @@ export function isWebviewInbound(value: unknown): value is WebviewInbound {
 
     if (value.type === 'kron_tree:result') return isTreeResult(value.result)
     if (value.type === 'kron_tree:error') return typeof value.message === 'string'
+    if (value.type === 'kron_font_size') {
+        return typeof value.fontSize === 'number' && Number.isFinite(value.fontSize)
+            && value.fontSize >= 10 && value.fontSize <= 24
+    }
+    if (value.type === 'kron_select') {
+        return typeof value.slug === 'string' && value.slug !== '' && typeof value.edit === 'boolean'
+    }
     if (value.type === 'kron_mcp:response') {
         return Number.isSafeInteger(value.requestId)
             && isMcpToolName(value.tool)
@@ -86,7 +102,5 @@ export function isWebviewInbound(value: unknown): value is WebviewInbound {
 }
 
 function isMcpToolName(value: unknown): value is McpToolName {
-    return value === 'kron_get' || value === 'kron_lint' || value === 'kron_add' || value === 'kron_update'
-        || value === 'kron_delete' || value === 'kron_restore'
-        || value === 'kron_assume_list' || value === 'kron_assume_create'
+    return typeof value === 'string' && (MCP_TOOL_NAMES as readonly string[]).includes(value)
 }

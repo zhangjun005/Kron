@@ -184,6 +184,18 @@ func maybeOpenAssumptionWriter(root string) (*assumption.Writer, error) {
 // auto-creation. If errors exist, the caller surfaces the first
 // one (fail-fast).
 func resolveAssumptionsForIntent(ctx context.Context, root string, w *assumption.Writer, actor string, refs []AssumptionRef) ([]model.Assumption, []error) {
+	// Date fields are optional but must be parseable; failing here keeps the
+	// on-disk data usable by lint / kron_assume_check instead of silently
+	// skipping expiry evaluation later.
+	var dateErrs []error
+	for _, r := range refs {
+		if derr := parser.ValidateAssumptionDateFields(r.ExpiresAt, r.VerifiedAt); derr != nil {
+			dateErrs = append(dateErrs, fmt.Errorf("assumption %q: %w", r.ID, derr))
+		}
+	}
+	if len(dateErrs) > 0 {
+		return nil, dateErrs
+	}
 	if w == nil {
 		// Pre-migration repo: no registry, use raw refs directly.
 		out := make([]model.Assumption, 0, len(refs))
