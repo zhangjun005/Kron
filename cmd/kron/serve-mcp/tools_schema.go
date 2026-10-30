@@ -531,10 +531,10 @@ func toolAnnotations(readOnly, destructive, idempotent bool) *mcp.ToolAnnotation
 // Every tool carries a human-readable Title plus MCP ToolAnnotations so
 // clients can render safe confirmations (read-only vs destructive) and
 // agents can reason about repeatability.
-func registerTools(server *mcp.Server) {
+func registerTools(server *mcp.Server, intentTemplate string) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "kron_add", Title: "Create intent",
-		Description: "Create a new intent file at .kron/intents/<slug>.md.",
+		Description: intentToolDescription("Create a new intent file at .kron/intents/<slug>.md.", intentTemplate),
 		Annotations: toolAnnotations(false, false, false),
 	}, HandleAdd)
 	mcp.AddTool(server, &mcp.Tool{
@@ -619,7 +619,7 @@ func registerTools(server *mcp.Server) {
 	}, HandleTree)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "kron_update", Title: "Update intent",
-		Description: "Patch an existing intent (PATCH semantics; only supplied fields are touched).",
+		Description: intentToolDescription("Patch an existing intent (PATCH semantics; only supplied fields are touched).", intentTemplate),
 		Annotations: toolAnnotations(false, false, true),
 	}, HandleUpdate)
 }

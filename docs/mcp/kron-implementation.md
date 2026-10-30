@@ -346,6 +346,18 @@ AI 接到新需求时: 走 `LoadAllCached` 拿全部 intent, `matchIntentsByKeyw
 
 走 `lint.RunWith` 拿 `[]Diag` 全规则集, 按 `Rule` 字段分组 → 渲染"按规则分组（location + detail + severity）+ 每个 in-scope intent 列表"；Action 含假设复核与重跑 lint。`status` 选填, 默认 "active"; 不可解析 → 默认值。
 
+#### 4.3.12 项目 intent 正文模板（AI 提示词注入，2026-10-29 追加）
+
+项目可在 `.kron/templates/intent-body.md` 定义正文 section 形状（例如 `## Why` / `## How`）。
+serve-mcp 只把它注入 **AI 可见文本**，不写入 intent、不做校验：
+
+- initialize `Instructions` 追加 "Project intent body template" 段；
+- `kron_add` / `kron_update` 的 tool description 追加模板；
+- `kron-implement` prompt 末尾追加模板 section。
+
+文件缺失/空 = 不注入（行为与之前一致）；模板在 server 启动时读取一次（tool description/instructions），
+prompt 每次调用实时读取。实现见 `intent_template.go`。
+
 #### 4.3.11 `registerPrompts`——[`prompts_register.go`](prompts_register.go) (2026-10-14 追加)
 
 3 个 `mcp.AddPrompt` 注册入口, SDK 自动推断 `prompts: { listChanged: true }` capability (与 Tools 同样路径)。`capabilities_test.go` 增 1 case 锁定 SDK 行为防止 regression。

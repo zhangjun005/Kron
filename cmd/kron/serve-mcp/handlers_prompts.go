@@ -115,6 +115,9 @@ func kronImplementPrompt(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.G
 	body.WriteString("2. Treat assumptions as hard constraints: expired or unverified hard assumptions are risks — verify them (kron_assume_check / kron_assume_update) before changing behavior.\n")
 	body.WriteString("3. If a prerequisite intent is missing, kron_add it first.\n")
 	body.WriteString("4. Apply changes via kron_update (PATCH semantics), and keep the code anchors (@kron:intent <slug>) in sync.\n")
+	if tmpl := readIntentBodyTemplate(root); tmpl != "" {
+		body.WriteString(intentBodyTemplateSection(tmpl))
+	}
 
 	return &mcp.GetPromptResult{
 		Description: "Pick the right intent to implement a new feature, with prerequisites.",

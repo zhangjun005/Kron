@@ -41,9 +41,9 @@ import (
 // returns its `capabilities` field. We decode that and assert the
 // expected shape.
 func TestCapabilities_ExplicitContract(t *testing.T) {
-	server := newKronServer()
+	server := newKronServer("")
 	server.AddReceivingMiddleware(callerInjectMiddleware(t.TempDir()))
-	registerTools(server)
+	registerTools(server, "")
 	// 2026-10-14: register the 3 prompts so the capability check
 	// below covers the new auto-inferred prompts capability too.
 	registerPrompts(server)

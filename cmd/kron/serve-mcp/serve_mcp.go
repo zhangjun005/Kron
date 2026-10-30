@@ -53,13 +53,13 @@ const (
 
 // newKronServer constructs the SDK server with Kron's identity and the
 // workflow instructions surfaced to every MCP client.
-func newKronServer() *mcp.Server {
+func newKronServer(intentTemplate string) *mcp.Server {
 	return mcp.NewServer(&mcp.Implementation{
 		Name:    serverName,
 		Title:   serverTitle,
 		Version: serverVersion,
 	}, &mcp.ServerOptions{
-		Instructions: serverInstructions,
+		Instructions: serverInstructionsFor(intentTemplate),
 	})
 }
 
@@ -102,6 +102,8 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 		fmt.Fprintln(errOut, "kron serve-mcp:", err)
 		return err
 	}
+	// Project convention that augments AI-facing prompts/metadata only.
+	intentTemplate := readIntentBodyTemplate(root)
 
 	// C-3: Route stdlib log and slog output through the MCP Logging
 	// capability (kronLoggingHandler) when a session is active; fall
@@ -145,7 +147,7 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 	// Instructions carries the recommended AI workflow to every client.
 	//
 	// G-4 (docs/mcp/backlog.md §G-4 + docs/mcp/missing-capabilities.md §G-4).
-	server := newKronServer()
+	server := newKronServer(intentTemplate)
 
 	// Inject the Kron caller identity into every handler ctx before
 	// dispatch. This satisfies architecture.md §〇 铁律 #4: access
@@ -169,7 +171,7 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 
 	// Register the 18 kron_* tools. Done after middleware so
 	// handlers see the injected caller on their ctx.
-	registerTools(server)
+	registerTools(server, intentTemplate)
 
 	// C-1: register the kron://intents/{slug} resource template.
 	// One template covers every intent (no per-intent static

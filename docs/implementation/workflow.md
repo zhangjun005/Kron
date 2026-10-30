@@ -20,6 +20,9 @@ kron init            # 建 .kron/、注册项目、设为 current_project
 
 - `init` 幂等：已有 `.kron/` 时保留骨架，但仍会注册 + 选中（与 MCP `kron_init` 一致）。
 - 组织方式：模块级 intent 用 `<slug>/README.md`（node），具体能力用 leaf；层级靠目录表达。
+- 可选：在 `.kron/templates/intent-body.md` 定义正文 section 模板（如 `## Why` / `## How`），
+  MCP server 会把它注入 `initialize.Instructions`、`kron_add`/`kron_update` 描述和
+  `kron-implement` prompt，约束 AI 通过 MCP 写 intent 的正文结构。
 - 共享前提（region、幂等、限流、精度…）写 `.kron/assumptions/<id>.md`，填
   `text` / `default_severity` / `created_by`；重要的设置 `expires_at`。
 
