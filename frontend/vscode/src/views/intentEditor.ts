@@ -18,6 +18,21 @@ function isTreeRequest(value: unknown): value is { type: 'kron_tree:request' | '
     && (value.type === 'kron_tree:request' || value.type === 'kron_tree:refresh')
 }
 
+type IntentCodeJumpRequest = { type: 'kron_open_intent_code'; slug: string }
+
+let intentCodeJumpHandler: ((slug: string) => void) | undefined
+
+/** Wires the Webview "Code" button to the host's anchor-jump implementation. */
+export function setIntentCodeJumpHandler(handler: (slug: string) => void): void {
+  intentCodeJumpHandler = handler
+}
+
+function isIntentCodeJumpRequest(value: unknown): value is IntentCodeJumpRequest {
+  return isRecord(value) && value.type === 'kron_open_intent_code'
+    && typeof value.slug === 'string' && value.slug !== ''
+    && Object.keys(value).length === 2
+}
+
 type McpRequest = {
   type: 'kron_mcp:request'
   requestId: number
@@ -185,6 +200,10 @@ export function openIntentWorkspace(
           message: `Kron could not complete ${message.tool}. Check the Kron output channel and try again.`,
         })
       }
+      return
+    }
+    if (isIntentCodeJumpRequest(message)) {
+      intentCodeJumpHandler?.(message.slug)
       return
     }
     if (!isTreeRequest(message)) {

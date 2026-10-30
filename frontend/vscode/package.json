@@ -70,6 +70,10 @@
       {
         "command": "kron.attachExistingIntentAnchor",
         "title": "Kron: Attach Existing Intent Anchor"
+      },
+      {
+        "command": "kron.goToIntentCode",
+        "title": "Kron: Go to Code Anchor(s)…"
       }
     ],
     "menus": {
@@ -126,6 +130,13 @@
           "when": "(resourceScheme == file) && (kronAnchorState == 'none')",
           "group": "kron@9"
         }
+      ],
+      "view/item/context": [
+        {
+          "command": "kron.goToIntentCode",
+          "when": "(view == kron.intents || view == kron.intentsSidebar) && (viewItem == kron.intent || viewItem == kron.intentFolder)",
+          "group": "kron@1"
+        }
       ]
     },
     "views": {
@@ -181,6 +192,11 @@
           "type": "boolean",
           "default": false,
           "description": "Also show the Kron intents view in the Explorer sidebar. Both sidebar options can be enabled or disabled independently."
+        },
+        "kron.anchors.includeMarkdown": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include Markdown anchors when jumping from an intent to its code anchors."
         }
       }
     },

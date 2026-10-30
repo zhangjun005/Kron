@@ -150,6 +150,20 @@ active 绿、draft 黄、superseded 灰；tooltip 显示 slug、leaf/folder、st
 没有 `.kron/` 的工作区不会在启动时激活扩展（`workspaceContains` 不匹配），只有用户点开 Kron 视图
 （`onView:*`）才加载扩展代码；此时不 spawn MCP/LSP 子进程、不注册文件监听，开销仅为一次小 JS 加载。
 
+## 意图 → 代码锚点跳转（已实现）
+
+一个 intent 的锚点是 N:1 的（同一 intent 可能有多个 `@kron:intent`，也可能只有 markdown anchor）。
+
+- 意图树（两个侧边栏）：对 intent / folder 节点右键 → **Kron: Go to Code Anchor(s)…**
+  - 0 个：提示没有代码锚点（只有 markdown 时提示打开设置）
+  - 1 个：直接打开文件并定位到行
+  - N 个：QuickPick 列出 **仓库相对路径:行号**，选择后跳转
+- Intent 卡片：底部 **Code** 按钮，走 host↔Webview 的 `kron_open_intent_code` 消息，复用同一逻辑。
+- 数据源：按需调用 host-only 的 `kron_impact`（不新增 MCP 工具、不做树内预取/缓存）；intent 图由 serve-mcp 的轻缓存加速，anchor 扫描只在点击时发生。
+- 路径：wire 里的 `file_path` 已是相对当前项目根（第一个含 `.kron/` 的 workspace folder），显示和打开都用它拼接。
+- 设置：`kron.anchors.includeMarkdown`（默认 `false`）控制是否把 markdown anchors 放进列表。
+- 原生 TreeView 不暴露 Ctrl 修饰键，不支持 Ctrl+左键；右键是入口。
+
 ## 刷新与项目范围
 
 **单项目策略**：一个窗口只服务第一个包含 `.kron/` 目录的 workspace folder；额外的 folder

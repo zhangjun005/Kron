@@ -190,6 +190,7 @@ type IntentCanvasProps = {
   onCreateChild: (parent: TreeNode, kind: 'leaf' | 'node') => void
   onEditIntent: () => void
   onDeleteIntent: () => void
+  onOpenCode: () => void
   editorContent: ReactNode | null
   assumptionContent: ReactNode | null
   onCloseDetails: () => void
@@ -198,7 +199,7 @@ type IntentCanvasProps = {
 }
 
 /** Left-to-right, pannable hierarchy canvas, adapted for the VS Code Webview tree contract. */
-export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken, relations, detail, detailLoading, onCreateRelation, onCreateChild, onEditIntent, onDeleteIntent, editorContent, assumptionContent, onCloseDetails, onClearSelection, onSelect }: IntentCanvasProps): JSX.Element {
+export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken, relations, detail, detailLoading, onCreateRelation, onCreateChild, onEditIntent, onDeleteIntent, onOpenCode, editorContent, assumptionContent, onCloseDetails, onClearSelection, onSelect }: IntentCanvasProps): JSX.Element {
   const geometry = useMemo(() => geometryForScale(uiScale), [uiScale])
   const layout = useMemo(() => buildLayout({
     ...root,
@@ -657,6 +658,15 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
                   <MarkdownPreview body={detail.body || 'No body.'} />
                 </div>
                 <div className="flex gap-2 border-t pt-2.5">
+                  <button
+                    type="button"
+                    className="rounded border px-2.5 py-1.5 hover:bg-accent"
+                    onClick={onOpenCode}
+                    disabled={detail.slug === ''}
+                    title="Open one of this intent's @kron:intent code anchors"
+                  >
+                    Code
+                  </button>
                   <button type="button" className="rounded border px-2.5 py-1.5 hover:bg-accent" onClick={onEditIntent}>Edit</button>
                   <button
                     type="button"

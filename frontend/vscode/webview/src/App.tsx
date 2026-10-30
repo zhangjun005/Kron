@@ -1701,6 +1701,16 @@ function App(): JSX.Element {
               setFormError(null)
             }
           }}
+          onOpenCode={() => {
+            const target = selectedIntent ?? liveIntent
+            if (target === null || target === undefined) return
+            if (vscodeApi === null) {
+              setNotice('Code-anchor jump is available inside VS Code.')
+              return
+            }
+            const message: WebviewOutbound = { type: 'kron_open_intent_code', slug: target.slug }
+            vscodeApi.postMessage(message)
+          }}
           editorContent={editorContent}
           assumptionContent={assumptionContent}
           onCloseDetails={() => { setFormMode(null); setDraftParentSlug(null); setFormError(null); setAssumptionFormError(null) }}

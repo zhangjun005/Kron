@@ -44,6 +44,7 @@ does not spawn background processes for unrelated projects.
 |---|---|---|
 | `kron.serverPath` | `kron` | Path to the Kron executable used for MCP and LSP. |
 | `kron.webviewFontSize` | `14` | Base font size for the intent canvas Webview. |
+| `kron.anchors.includeMarkdown` | `false` | Include Markdown anchors in "Go to Code Anchor(s)…" / the card Code button. |
 | `kron.sidebar.independent` | `true` | Show the dedicated Kron view in the Activity Bar. |
 | `kron.sidebar.explorer` | `false` | Also show the intent tree inside the Explorer sidebar. |
 

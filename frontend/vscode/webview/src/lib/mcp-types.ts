@@ -53,6 +53,7 @@ export type WebviewOutbound =
     | { type: 'kron_tree:request' }
     | { type: 'kron_tree:refresh' }
     | { type: 'kron_mcp:request'; requestId: number; tool: McpToolName; args: Record<string, unknown>; workspaceId?: string }
+    | { type: 'kron_open_intent_code'; slug: string }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value)

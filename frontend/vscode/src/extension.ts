@@ -7,12 +7,21 @@ import { KronLspClient } from './lsp/client'
 import { KronMcpClient, type ConnectionState, type TreeNode } from './mcp/client'
 import { AnchorMenuController } from './views/anchorMenu'
 import { IntentItem, IntentTreeProvider, type WorkspaceMcpConnection } from './views/intentTree'
-import { openIntentAt, openIntentWorkspace, postWebviewFontSize } from './views/intentEditor'
+import { openIntentAt, openIntentWorkspace, postWebviewFontSize, setIntentCodeJumpHandler } from './views/intentEditor'
+import { goToCodeAnchors } from './views/codeAnchorJump'
 import { AssumptionTreeProvider, SupersededTreeProvider } from './views/sidebarSections'
 import { KronStatusBar } from './views/statusBar'
 
 /** Canonical project marker: every workspace folder has one `.kron/` root. */
 const KRON_DIR = '.kron'
+
+function treeItemSlug(item: unknown): string | undefined {
+  if (typeof item !== 'object' || item === null) return undefined
+  const node = (item as { node?: unknown }).node
+  if (typeof node !== 'object' || node === null) return undefined
+  const slug = (node as { slug?: unknown }).slug
+  return typeof slug === 'string' && slug !== '' ? slug : undefined
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -328,6 +337,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   })
   context.subscriptions.push(anchorMenu)
 
+  setIntentCodeJumpHandler((slug) => {
+    void goToCodeAnchors({
+      getClient: () => mcpConnections[0]?.client,
+      getProjectFolderPath: () => projectFolderPath,
+      log,
+    }, slug)
+  })
+
   explorerTreeView = vscode.window.createTreeView('kron.intents', { treeDataProvider: treeProvider, showCollapseAll: true })
   sidebarTreeView = vscode.window.createTreeView('kron.intentsSidebar', { treeDataProvider: treeProvider, showCollapseAll: true })
   const assumptionView = vscode.window.createTreeView('kron.assumptions', { treeDataProvider: assumptionProvider })
@@ -338,6 +355,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     assumptionView,
     supersededView,
     treeProvider,
+    vscode.commands.registerCommand('kron.goToIntentCode', (item: unknown) => {
+      const slug = treeItemSlug(item) ?? explorerTreeView?.selection[0]?.node.slug ?? sidebarTreeView?.selection[0]?.node.slug
+      if (slug === undefined) {
+        void vscode.window.showInformationMessage('Select a Kron intent in the tree first.')
+        return
+      }
+      void goToCodeAnchors({
+        getClient: () => mcpConnections[0]?.client,
+        getProjectFolderPath: () => projectFolderPath,
+        log,
+      }, slug)
+    }),
     vscode.commands.registerCommand('kron.openIntentCard', (slug: unknown) => {
       if (typeof slug !== 'string' || slug === '' || treeProvider === undefined || output === undefined) return
       void openIntentAt(context, treeProvider, output, slug, false)
