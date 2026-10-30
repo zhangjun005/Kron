@@ -8,6 +8,16 @@ Kron 把代码设计意图（Design Intent）存为**纯 Markdown 文件，放�
 
 ---
 
+## 快速开始
+
+1. 安装 v0.3.0 [Windows 便携包 / VSIX](https://github.com/zhangjun005/Kron/releases/tag/v0.3.0)
+2. `kron init -CWD <project>`
+3. `kron add auth/login -CWD <project>`
+4. 在代码里加 `// @kron:intent auth/login`
+5. `kron lint -CWD <project>`
+
+完整安装、VS Code 扩展 / AI Agent MCP 配置与常见问题见 **[快速上手教程](docs/getting-started.md)**。
+
 ## 痛点
 
 AI 编程助手在清楚"为什么这么做、权衡了什么、放弃了什么"时表现最好。但现状是：
