@@ -49,8 +49,13 @@ func ScanAnchors(dir string) ([]model.Anchor, error) {
 	// relative to whatever string the caller passed in.
 	rootAbs, _ := filepath.Abs(dir)
 
+	cfg, cfgErr := LoadAnchorScanConfig(dir)
+	if cfgErr != nil {
+		return nil, fmt.Errorf("parser: load anchor scan config: %w", cfgErr)
+	}
+
 	var anchors []model.Anchor
-	err := WalkSourceFiles(dir, func(path string) error {
+	err := WalkSourceFilesFiltered(dir, cfg, func(path string) error {
 		// RFC 2026-10-08-md-anchors.md §1.1: code anchors live
 		// in source files; markdown anchors are produced by
 		// ScanMarkdownAnchors. Skip .md here so the two

@@ -43,14 +43,17 @@ does not spawn background processes for unrelated projects.
 | Setting | Default | Description |
 |---|---|---|
 | `kron.serverPath` | `kron` | Path to the Kron executable used for MCP and LSP. |
-| `kron.lspLanguages` | `go`, `typescript`, `javascript` | File languages where anchors are underlined/jumpable. |
 | `kron.webviewFontSize` | `14` | Base font size for the intent canvas Webview. |
 | `kron.sidebar.independent` | `true` | Show the dedicated Kron view in the Activity Bar. |
 | `kron.sidebar.explorer` | `false` | Also show the intent tree inside the Explorer sidebar. |
 
-Both sidebar options can be enabled or disabled independently. After changing `kron.serverPath` or
-`kron.lspLanguages`, run **Kron: Restart Connections**; the font size applies to open canvases
-immediately.
+Both sidebar options can be enabled or disabled independently.
+
+Anchor scanning is configured per project in `.kron/anchor-scan.json` (created by `kron init`). It maps
+languages to file extensions and optional comment syntax, so React/Vue/Svelte files get LSP jump and
+name-informed anchor insertion without a separate VS Code setting. Saving that file (or
+`.kron/templates/intent-body.md`) restarts the Kron connections automatically. After changing
+`kron.serverPath`, run **Kron: Restart Connections**; the font size applies to open canvases immediately.
 
 ## Commands
 

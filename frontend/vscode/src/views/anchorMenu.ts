@@ -1,5 +1,6 @@
 import vscode = require('vscode')
 import { findAnchors, isValidAnchorSlug, type AnchorHit } from '../anchors'
+import { commentSyntaxFor, isAnchorScanAllowed, type AnchorScanComment, type AnchorScanConfig } from '../anchorConfig'
 import type { ImpactSummary, KronMcpClient } from '../mcp/client'
 
 /** Context-key state consumed by the `editor/context` menu `when` clauses. */
@@ -10,15 +11,31 @@ type AnchorTarget = {
   readonly hit: AnchorHit
 }
 
-type CommentSyntax = { readonly open: string; readonly close?: string }
+function anchorLineFor(
+  syntax: AnchorScanComment | undefined,
+  slug: string,
+  useBlock: boolean,
+): { text: string; known: boolean } {
+  if (syntax === undefined) return { text: `// @kron:intent ${slug}`, known: false }
+  const block = syntax.block
+  if (useBlock && block !== undefined && block.length >= 2) {
+    return { text: `${block[0]} @kron:intent ${slug} ${block[1]}`, known: true }
+  }
+  if (syntax.line !== undefined) return { text: `${syntax.line} @kron:intent ${slug}`, known: true }
+  if (block !== undefined && block.length >= 2) {
+    return { text: `${block[0]} @kron:intent ${slug} ${block[1]}`, known: true }
+  }
+  return { text: `// @kron:intent ${slug}`, known: false }
+}
 
-const COMMENT_SYNTAX: readonly { languages: readonly string[]; syntax: CommentSyntax }[] = [
-  { languages: ['go', 'c', 'cpp', 'csharp', 'java', 'javascript', 'javascriptreact', 'typescript', 'typescriptreact', 'rust', 'kotlin', 'swift', 'dart', 'php', 'scala', 'groovy', 'objective-c'], syntax: { open: '//' } },
-  { languages: ['python', 'ruby', 'shellscript', 'bash', 'powershell', 'perl', 'r', 'yaml', 'toml', 'dockerfile', 'makefile'], syntax: { open: '#' } },
-  { languages: ['sql', 'lua', 'haskell', 'ada'], syntax: { open: '--' } },
-  { languages: ['erlang', 'matlab'], syntax: { open: '%' } },
-  { languages: ['html', 'xml', 'markdown', 'vue', 'svelte', 'astro'], syntax: { open: '<!--', close: '-->' } },
-]
+/** JSX children cannot take a // comment; use the configured block pair there. */
+function shouldUseBlockComment(languageId: string, lineText: string, syntax: AnchorScanComment): boolean {
+  if (syntax.block === undefined) return false
+  if (languageId === 'typescriptreact' || languageId === 'javascriptreact') {
+    return lineText.trimStart().startsWith('<')
+  }
+  return false
+}
 
 const EXISTENCE_CACHE_MS = 5_000
 const CONTEXT_REFRESH_DELAY_MS = 200
@@ -31,17 +48,6 @@ function isKronInternalPath(fsPath: string): boolean {
   return fsPath.split(/[\\/]/).includes('.kron')
 }
 
-function commentSyntaxFor(languageId: string): CommentSyntax | undefined {
-  return COMMENT_SYNTAX.find((entry) => entry.languages.includes(languageId))?.syntax
-}
-
-function anchorLineFor(languageId: string, slug: string): { text: string; known: boolean } {
-  const syntax = commentSyntaxFor(languageId)
-  if (syntax === undefined) return { text: `// @kron:intent ${slug}`, known: false }
-  if (syntax.close === undefined) return { text: `${syntax.open} @kron:intent ${slug}`, known: true }
-  return { text: `${syntax.open} @kron:intent ${slug} ${syntax.close}`, known: true }
-}
-
 export type AnchorMenuDependencies = {
   /** MCP client of the active Kron project, or undefined when not connected. */
   getClient: () => KronMcpClient | undefined
@@ -50,6 +56,10 @@ export type AnchorMenuDependencies = {
   /** Opens (or focuses) the Kron workspace panel, optionally in edit mode. */
   openIntentWorkspace: (slug: string, edit: boolean) => void
   refreshTree: () => Promise<void>
+  /** Project folder used to resolve .kron/anchor-scan.json. */
+  getProjectFolderPath: () => string | undefined
+  /** Parsed project anchor scan config (undefined = no filtering). */
+  getAnchorScanConfig: () => AnchorScanConfig | undefined
   log: (message: string) => void
   showOutput: () => void
 }
@@ -158,6 +168,11 @@ export class AnchorMenuController implements vscode.Disposable {
   private locateTarget(editor: vscode.TextEditor | undefined): AnchorTarget | undefined {
     if (editor === undefined || editor.document.uri.scheme !== 'file') return undefined
     if (isKronInternalPath(editor.document.uri.fsPath)) return undefined
+    const projectFolder = this.deps.getProjectFolderPath()
+    if (projectFolder !== undefined
+      && !isAnchorScanAllowed(projectFolder, editor.document.uri.fsPath, editor.document.languageId, this.deps.getAnchorScanConfig())) {
+      return undefined
+    }
     const anchors = findAnchors(editor.document.getText(), editor.document.languageId === 'markdown')
     if (anchors.length === 0) return undefined
     const candidates = new Set<number>()
@@ -400,7 +415,10 @@ export class AnchorMenuController implements vscode.Disposable {
   /** Inserts `comment @kron:intent <slug>` above `symbolLine`; returns success. */
   private async insertAnchor(slug: string, editor: vscode.TextEditor, symbolLine: number): Promise<boolean> {
     const document = editor.document
-    const candidate = anchorLineFor(document.languageId, slug)
+    const syntax = commentSyntaxFor(document.languageId, this.deps.getAnchorScanConfig())
+    const symbolLineText = document.lineAt(symbolLine).text
+    const useBlock = syntax === undefined ? false : shouldUseBlockComment(document.languageId, symbolLineText, syntax)
+    const candidate = anchorLineFor(syntax, slug, useBlock)
     let anchorText = candidate.text
     if (!candidate.known) {
       // Unknown comment syntax: show an editable preview instead of guessing.

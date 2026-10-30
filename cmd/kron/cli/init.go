@@ -53,16 +53,12 @@ func runInit(args []string, out, errOut io.Writer) error {
 		return err
 	}
 
-	if !already {
-		if err := store.EnsureKronDir(context.Background(), root); err != nil {
-			fmt.Fprintln(errOut, "kron init:", err)
-			return err
-		}
-		cfg := &model.Config{IntentsDir: ".kron/intents"}
-		if err := store.SaveConfig(context.Background(), root, cfg); err != nil {
-			fmt.Fprintln(errOut, "kron init:", err)
-			return err
-		}
+	// Idempotent scaffold: creates missing skeleton files (config,
+	// templates/intent-body.md, anchor-scan.json) but never overwrites an
+	// existing customised file.
+	if err := store.EnsureKronScaffold(context.Background(), root); err != nil {
+		fmt.Fprintln(errOut, "kron init:", err)
+		return err
 	}
 
 	// RFC docs/rfc/2026-10-14-projects-json-schema-extension.md

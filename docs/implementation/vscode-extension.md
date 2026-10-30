@@ -94,6 +94,12 @@ assumption 是可被多个 intent 引用的独立文件。界面上有两处入�
   为了不刷屏，Markdown 锚点只做下划线 + Ctrl+click 跳转，不自动提示创建 intent。
 - `.kron/` 下的文件（intent 自身、`.kron/.trash`）不参与扫描，与 parser 的 skip list 一致。
 
+- **扫描范围由项目 `.kron/anchor-scan.json` 决定**（2026-10-30）：`include`/`exclude` glob +
+  `languages`（语言 → `extensions`）；文件缺失时扫描所有非二进制文件（旧行为）。`comment`
+  只用于 IDE **插入**锚点（检测只看 `@kron:intent` 标记，不看注释前缀）。`kron init` 会写入
+  一份主流语言默认配置。VSIX 直接读取该文件派生 LSP 语言列表/下划线门控/插入注释；删除
+  `kron.lspLanguages` 设置。
+
 编辑器行为：
 
 - 匹配到的 slug 显示下划线；`textDocument/hover` 与 definition 由 `serve-lsp` 提供。
@@ -148,11 +154,11 @@ active 绿、draft 黄、superseded 灰；tooltip 显示 slug、leaf/folder、st
 
 **单项目策略**：一个窗口只服务第一个包含 `.kron/` 目录的 workspace folder；额外的 folder
 不建立连接、也不出现在意图树里（多项目概览属于 GUI 职责，见 architecture §〇·五·1）。
-`kron.serverPath` / `kron.lspLanguages` 在每次重建连接时重新读取，修改后执行
+`kron.serverPath` 在每次重建连接时重新读取，修改后执行
 "Kron: Restart Connections" 即生效，无需重载窗口；`kron.webviewFontSize` 变更会实时推送到
 已打开的 Webview。
 
-刷新入口：显式 Refresh、MCP 写成功、workspace folder 变化、配置变化（serverPath / lspLanguages）、
+刷新入口：显式 Refresh、MCP 写成功、workspace folder 变化、配置变化（serverPath、`.kron/anchor-scan.json`、`.kron/templates/intent-body.md` 保存事件），
 以及 Webview 重新打开。**尚未实现**：编辑器保存（`onDidSaveTextDocument`）与外部文件变更
 （FileSystemWatcher）触发的刷新——磁盘被 git 或其他工具改动后需要手动 Refresh。
 

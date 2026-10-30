@@ -1,17 +1,15 @@
 import fs = require('node:fs')
 import path = require('node:path')
 import vscode = require('vscode')
-import zod = require('zod')
 import { findAnchors, type AnchorHit } from './anchors'
-import { DEFAULT_LSP_LANGUAGES, KronLspClient } from './lsp/client'
+import { INTENT_BODY_TEMPLATE_REL_PATH, ANCHOR_SCAN_REL_PATH, commentSyntaxFor, isAnchorScanAllowed, loadAnchorScanConfig, lspLanguages, type AnchorScanConfig } from './anchorConfig'
+import { KronLspClient } from './lsp/client'
 import { KronMcpClient, type ConnectionState, type TreeNode } from './mcp/client'
 import { AnchorMenuController } from './views/anchorMenu'
 import { IntentItem, IntentTreeProvider, type WorkspaceMcpConnection } from './views/intentTree'
 import { openIntentAt, openIntentWorkspace, postWebviewFontSize } from './views/intentEditor'
 import { AssumptionTreeProvider, SupersededTreeProvider } from './views/sidebarSections'
 import { KronStatusBar } from './views/statusBar'
-
-const languageListSchema = zod.z.array(zod.z.string().trim().min(1)).min(1)
 
 /** Canonical project marker: every workspace folder has one `.kron/` root. */
 const KRON_DIR = '.kron'
@@ -29,6 +27,8 @@ let explorerTreeView: vscode.TreeView<IntentItem> | undefined
 let sidebarTreeView: vscode.TreeView<IntentItem> | undefined
 let assumptionProvider: AssumptionTreeProvider | undefined
 let supersededProvider: SupersededTreeProvider | undefined
+let anchorScan: AnchorScanConfig | undefined
+let projectFolderPath: string | undefined
 let anchorMenu: AnchorMenuController | undefined
 let restartPromise: Promise<void> | undefined
 const anchorCreateTimers = new Map<string, NodeJS.Timeout>()
@@ -40,15 +40,9 @@ function log(message: string): void {
   output?.appendLine(message)
 }
 
-function readSettings(): { serverPath: string; languages: readonly string[] } {
+function readSettings(): { serverPath: string } {
   const configuredPath = vscode.workspace.getConfiguration('kron').get<string>('serverPath', 'kron').trim()
-  const configuredLanguages: unknown = vscode.workspace.getConfiguration('kron').get('lspLanguages', DEFAULT_LSP_LANGUAGES)
-  const parsedLanguages = languageListSchema.safeParse(configuredLanguages)
-  if (!parsedLanguages.success) log('Invalid kron.lspLanguages setting; using the documented default language list.')
-  return {
-    serverPath: configuredPath || 'kron',
-    languages: parsedLanguages.success ? parsedLanguages.data : [...DEFAULT_LSP_LANGUAGES],
-  }
+  return { serverPath: configuredPath || 'kron' }
 }
 
 /**
@@ -131,6 +125,8 @@ function isKronInternalDocument(document: vscode.TextDocument): boolean {
 /** Anchors parsed with the same grammar as `internal/parser` (see src/anchors.ts). */
 function anchorsInDocument(document: vscode.TextDocument): AnchorHit[] {
   if (isKronInternalDocument(document)) return []
+  if (projectFolderPath !== undefined
+    && !isAnchorScanAllowed(projectFolderPath, document.uri.fsPath, document.languageId, anchorScan)) return []
   return findAnchors(document.getText(), document.languageId === 'markdown')
 }
 
@@ -169,6 +165,8 @@ async function maybeOfferQuickIntent(document: vscode.TextDocument, line: number
   // Markdown anchors are documentation links: underline + go-to-definition only,
   // never an auto-create prompt (docs would spam it).
   if (document.languageId === 'markdown') return
+  if (projectFolderPath !== undefined
+    && !isAnchorScanAllowed(projectFolderPath, document.uri.fsPath, document.languageId, anchorScan)) return
   const anchor = anchorsInDocument(document).find((hit) => hit.line === line)
   if (anchor === undefined) return
   const slug = anchor.slug
@@ -227,6 +225,8 @@ async function rebuildConnections(): Promise<void> {
 
   const settings = readSettings()
   const folder = findKronProjectFolder()
+  projectFolderPath = folder?.uri.fsPath
+  anchorScan = folder === undefined ? undefined : loadAnchorScanConfig(folder.uri.fsPath)
   void vscode.commands.executeCommand('setContext', 'kronHasProject', folder !== undefined)
   mcpConnections = folder === undefined
     ? []
@@ -236,7 +236,7 @@ async function rebuildConnections(): Promise<void> {
       }]
   lspConnections = folder === undefined
     ? []
-    : [new KronLspClient(settings.serverPath, folder, settings.languages, log, (_state: ConnectionState) => updateLspStates())]
+    : [new KronLspClient(settings.serverPath, folder, lspLanguages(anchorScan), log, (_state: ConnectionState) => updateLspStates())]
   treeProvider?.setConnections(mcpConnections)
   updateMcpStates()
   updateLspStates()
@@ -321,6 +321,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       void openIntentAt(context, provider, channel, slug, edit)
     },
     refreshTree: () => refreshIntents(true),
+    getProjectFolderPath: () => projectFolderPath,
+    getAnchorScanConfig: () => anchorScan,
     log,
     showOutput: () => output?.show(true),
   })
@@ -379,6 +381,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('kron.restartConnections', restartConnections),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       void rebuildConnections()
+    }),
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      if (projectFolderPath === undefined) return
+      const rel = path.relative(projectFolderPath, document.uri.fsPath).split(path.sep).join('/')
+      if (rel === ANCHOR_SCAN_REL_PATH || rel === INTENT_BODY_TEMPLATE_REL_PATH) {
+        log(`Project Kron config changed (${rel}); restarting connections.`)
+        void rebuildConnections()
+      }
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('kron.serverPath') || event.affectsConfiguration('kron.lspLanguages')) {
