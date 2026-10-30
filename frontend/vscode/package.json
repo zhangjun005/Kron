@@ -64,10 +64,6 @@
         "title": "Kron: Create Intent for Anchor"
       },
       {
-        "command": "kron.removeAnchor",
-        "title": "Kron: Remove Anchor"
-      },
-      {
         "command": "kron.createIntentAndAttachAnchor",
         "title": "Kron: Create Intent and Attach Anchor"
       },
@@ -119,11 +115,6 @@
           "command": "kron.createIntentForAnchor",
           "when": "(resourceScheme == file) && (kronAnchorState == 'dangling')",
           "group": "kron@6"
-        },
-        {
-          "command": "kron.removeAnchor",
-          "when": "(resourceScheme == file) && (kronAnchorState == 'dangling')",
-          "group": "kron@7"
         },
         {
           "command": "kron.createIntentAndAttachAnchor",

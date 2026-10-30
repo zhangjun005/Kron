@@ -113,7 +113,7 @@ assumption 是可被多个 intent 引用的独立文件。界面上有两处入�
 | 当前状态 | 菜单项 | 行为 |
 |---|---|---|
 | 有效锚点 | Open Intent Details / Edit Intent / Open Intent Markdown / Show Intent Impact | 打开工作区面板并选中该 intent（Edit 直接进入编辑态）；打开对应 `.md` 原文；用 `kron_impact` 展示反向引用摘要 |
-| 悬空锚点 | Create Intent for Anchor / Change Anchor Target / Remove Anchor | 预填 slug 创建（若改名，锚点同步改为新 slug）；QuickPick 现有 slug 后用 `WorkspaceEdit` 改写锚点；删除整行锚点 |
+| 悬空锚点 | Create Intent for Anchor / Change Anchor Target | 预填 slug 创建（若改名，锚点同步改为新 slug）；QuickPick 现有 slug 后用 `WorkspaceEdit` 改写锚点。单行"删除锚点"命令已移除——由用户直接编辑 Markdown/代码更干净 |
 | 无锚点 | Create Intent and Attach Anchor / Attach Existing Intent Anchor | 先创建（或选已有），成功后才在符号行上方插入锚点 |
 | `.kron/` 内文档、非文件文档 | 无菜单 | 不参与锚点菜单 |
 
@@ -166,7 +166,7 @@ active 绿、draft 黄、superseded 灰；tooltip 显示 slug、leaf/folder、st
 
 - 锚点按 parser 语义识别：尾随文字、任意注释前缀、Markdown 裸行都能下划线；
   Markdown 代码块里的示例不产生下划线，`.kron/` 内文档不参与扫描。
-- 右键菜单按状态出现：有效锚点有 4 项、悬空锚点有 3 项、无锚点有 2 项；
+- 右键菜单按状态出现：有效锚点有 4 项、悬空锚点有 2 项、无锚点有 2 项；
   创建失败不改文件，插入失败有明确提示；`.kron/` 内文档不出现菜单。
 - 悬空锚点不会被误当成协议错误；Ctrl+click 跳到对应 intent 文件。
 - 表单保存后树、详情和原文一致；共享 assumption 的编辑和删除对用户可见其影响范围。

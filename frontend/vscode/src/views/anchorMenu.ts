@@ -85,7 +85,6 @@ export class AnchorMenuController implements vscode.Disposable {
       vscode.commands.registerCommand('kron.showIntentImpact', () => this.showImpact()),
       vscode.commands.registerCommand('kron.changeAnchorTarget', () => this.changeAnchorTarget()),
       vscode.commands.registerCommand('kron.createIntentForAnchor', () => this.createIntentForAnchor()),
-      vscode.commands.registerCommand('kron.removeAnchor', () => this.removeAnchor()),
       vscode.commands.registerCommand('kron.createIntentAndAttachAnchor', () => this.createIntentAndAttachAnchor()),
       vscode.commands.registerCommand('kron.attachExistingIntentAnchor', () => this.attachExistingIntentAnchor()),
       vscode.window.onDidChangeActiveTextEditor(() => this.scheduleRefresh()),
@@ -285,25 +284,6 @@ export class AnchorMenuController implements vscode.Disposable {
     const applied = await vscode.workspace.applyEdit(edit)
     if (!applied) {
       void vscode.window.showErrorMessage('Kron could not update the anchor. Edit the line manually.')
-      return
-    }
-    this.existence.clear()
-    this.scheduleRefresh()
-  }
-
-  private async removeAnchor(): Promise<void> {
-    const target = this.currentTarget()
-    if (target === undefined) return
-    const document = target.document
-    const line = target.hit.line
-    const range = line + 1 < document.lineCount
-      ? new vscode.Range(line, 0, line + 1, 0)
-      : new vscode.Range(line, 0, line, document.lineAt(line).text.length)
-    const edit = new vscode.WorkspaceEdit()
-    edit.delete(document.uri, range)
-    const applied = await vscode.workspace.applyEdit(edit)
-    if (!applied) {
-      void vscode.window.showErrorMessage('Kron could not remove the anchor. Edit the line manually.')
       return
     }
     this.existence.clear()
