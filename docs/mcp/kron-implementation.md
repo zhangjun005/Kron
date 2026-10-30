@@ -53,7 +53,7 @@
 func Run(args []string, in io.Reader, out, errOut io.Writer) error {
     root, err := resolveMCPRoot(args)        // 解析 -CWD <root>
     log.SetOutput(errOut)                    // 日志走 errOut(避免污染 stdout JSON-RPC)
-    server := mcp.NewServer(&mcp.Implementation{Name: "kron", Version: "v1.2.0"}, nil)
+    server := mcp.NewServer(&mcp.Implementation{Name: "kron", Version: "v0.3.0"}, nil)
     server.AddReceivingMiddleware(callerInjectMiddleware(root))
     registerTools(server)
     transport, _ := stdioOrIOTransport(in, out)

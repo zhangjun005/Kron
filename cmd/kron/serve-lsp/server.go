@@ -13,7 +13,7 @@ import (
 
 const (
 	serverName    = "kron"
-	serverVersion = "v1.3.0"
+	serverVersion = "v0.3.0"
 )
 
 // server implements the LSP Server interface by embedding
