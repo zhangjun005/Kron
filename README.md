@@ -4,6 +4,8 @@
 
 Kron 把代码设计意图（Design Intent）存为**纯 Markdown 文件，放在你的仓库里**——无需 API 服务、无需守护进程、无需私有格式。AI 编程助手可以直接读写它们。一切差异就是 `git diff`。
 
+> **最新发布：v0.3.0** — Windows 便携包 + VS Code 扩展：[GitHub Releases](https://github.com/zhangjun005/Kron/releases/tag/v0.3.0)
+
 ---
 
 ## 痛点
@@ -31,10 +33,12 @@ AI 编程助手在清楚"为什么这么做、权衡了什么、放弃了什么"
 
 ## 意图之间的关系
 
-Kron **不**用字段表达关系(`parent` / `depends_on` 都不存在),只用两种**文件系统 + Markdown 原生**手段:
+Kron 用**文件系统 + Markdown + 轻量 frontmatter** 表达关系，不引入数据库：
 
-- **目录 = 层级归属**。`.kron/intents/auth/refresh-token.md` 自动属于 `auth/` 模块;`.kron/intents/auth/README.md` 是该模块的总览。
-- **相对链接 = 横向依赖**。意图正文里写 `[令牌桶](../rate-limit/token-bucket.md)`,语义是"这条决策依赖 / 复用 / 引用另一条意图"。普通编辑器的 `Ctrl+单击` 就能跳转,Kron 的 `kron_impact` 工具也会扫这种链接来算影响范围。
+- **目录 = 层级归属**。`.kron/intents/auth/refresh-token.md` 自动属于 `auth/` 模块；`.kron/intents/auth/README.md` 是该模块的总览。
+- **相对链接 = 人类阅读跳转**。正文里的 `[令牌桶](../rate-limit/token-bucket.md)` 在普通编辑器里 `Ctrl+单击` 即可跳转。
+- **frontmatter = 机器可消费依赖**。`references` 表示软引用，`depends_on` 表示硬依赖；`kron_impact` / `kron_delete` / `kron lint` 都基于这些字段计算反向影响与依赖完整性。
+- **代码锚点 = 代码到意图的反向引用**。源码里写 `// @kron:intent storage/storage-format`，lint / impact / IDE 都能识别。
 
 完整规范见 [`docs/abstractDesign/intent-structure.md`](./docs/abstractDesign/intent-structure.md) §二、§四。
 
@@ -45,6 +49,10 @@ Kron **不**用字段表达关系(`parent` / `depends_on` 都不存在),只用�
 ```
 .kron/
 ├── config.toml                # Kron 配置（可选）
+├── anchor-scan.json           # 锚点扫描：语言 → 扩展名 / 注释语法（可选）
+├── templates/
+│   └── intent-body.md         # 新 intent 正文模板（注入 AI 提示词）
+├── assumptions/               # 共享假设 registry：每条假设一个 .md
 └── intents/                   # 目录 = 模块分组
     ├── README.md              # 全部意图的总览
     ├── storage/
@@ -107,53 +115,69 @@ func ParseFrontmatter(raw []byte) (map[string]any, string, error) { ... }
 - 无双源持久化、无 mtime+hash 状态机冲突处理。
 - 无私有格式。Markdown 本身就是 API。
 - **不是**任务追踪器。任务只是意图落地时的派生钩子，不是独立实体。
-- 无 Electron 应用。（未来可能基于 Tauri 做 GUI，但非必须。）
+- 无 Electron 应用。桌面 GUI 使用 Wails + WebView2；编辑器侧使用 VS Code 扩展 + LSP，不是浏览器壳。
 
 只要贡献者或 AI 能自信地编辑 Markdown 文件，那文件就是真相。
 
-## 三个入口
+## 访问层与客户端
 
-Kron 暴露**三个互相独立的访问层**，对应三类用户。三层互不依赖：CLI 不知道 MCP 存在、MCP 不知道 IDE 存在、IDE 不知道 CLI 存在（[`docs/abstractDesign/architecture.md`](./docs/abstractDesign/architecture.md) §〇 铁律 #3）。
+Kron 的能力只通过**协议访问层**暴露，客户端不直接依赖内部实现：
+
+```
+AI Agent ── MCP (stdio)
+编辑器   ── LSP (stdio) + VS Code 扩展
+人 / CI  ── CLI
+桌面用户 ── Wails GUI ── MCP
+```
+
+CLI / MCP / LSP 互不调用；VS Code 扩展与 Wails GUI 通过各自协议访问 Kron，客户端之间也不互相 import（[`docs/abstractDesign/architecture.md`](./docs/abstractDesign/architecture.md) §〇）。
 
 ### CLI —— 给人 / CI
 
-**最小集**，四个子命令，刻意不再扩展：
-
 | 命令 | 用途 |
 |---|---|
-| `kron init` | 建立 `.kron/intents/` 骨架 |
+| `kron init` | 初始化 `.kron/`（intents、template、anchor-scan 配置） |
 | `kron add <slug>` | 脚手架一个新意图文件 |
-| `kron lint` | 校验锚点 + frontmatter（**唯一 CI gate**） |
-| `kron serve-mcp` | 启动 MCP server（给 AI） |
+| `kron register` | 把当前项目登记进 `projects.json`（GUI/多项目用） |
+| `kron lint` | 校验锚点 + frontmatter（CI gate） |
+| `kron serve-mcp` | 启动 MCP server |
+| `kron serve-lsp` | 启动 LSP server |
 
-CLI 故意不做 `list` / `get` / `update` / `delete` / `restore`——查询类操作是 MCP 的事。详情见 [`docs/implementation/cli.md`](./docs/implementation/cli.md)。
+查询 / 修改类操作主要走 MCP；CLI 刻意保持小而稳定。详情见 [`docs/implementation/cli.md`](./docs/implementation/cli.md)。
 
 ### MCP —— 给 AI Agent
 
-AI Agent 不走 CLI。它通过 stdio JSON-RPC 调用 MCP 工具。**v1 共 12 个**，分两组：
+AI Agent 通过 stdio JSON-RPC 调用 MCP 工具（当前 **18 个**）：
 
-- **生命周期 8 个**：`kron_init` / `kron_add` / `kron_list` / `kron_get` / `kron_update` / `kron_delete`（软删）/ `kron_restore` / `kron_lint`
-- **查询类 4 个**：`kron_assume_check`（列出某文件依赖的 hard 假设）/ `kron_impact`（修改某意图的影响范围）/ `kron_intent_density`（量化意图覆盖率）/ `kron_stale`（列出过期意图 + 已过期的假设）
+- **意图生命周期**：`kron_init` / `kron_add` / `kron_get` / `kron_update` / `kron_delete`（软删）/ `kron_restore` / `kron_list` / `kron_tree` / `kron_lint`
+- **假设注册表**：`kron_assume_check` / `kron_assume_get` / `kron_assume_list` / `kron_assume_create` / `kron_assume_update` / `kron_assume_delete`
+- **影响与健康度**：`kron_impact` / `kron_intent_density` / `kron_stale`
 
-后四个让 AI Agent 在编码循环里**主动**调用,而非被动 grep Markdown——这是它跟"AI 读 README.md"的差别。详情见 [`docs/implementation/mcp.md`](./docs/implementation/mcp.md) §2。
+此外提供 `kron://intents/{slug}` resource 和 `kron-implement` / `kron-drift-check` / `kron-review` prompts。项目可在 `.kron/templates/intent-body.md` 定义正文模板，它会被注入 initialize instructions、`kron_add` / `kron_update` 描述和 `kron-implement` prompt，用来约束 AI 写 intent 的结构。详情见 [`docs/mcp/kron-implementation.md`](./docs/mcp/kron-implementation.md)。
 
-### IDE —— 给人 / AI 在编辑器内
+### LSP —— 给编辑器
 
-> v1 不交付 IDE 插件 / LSP server 本体，但数据契约（frontmatter + 锚点格式）已按"未来 LSP 友好"设计。
+`kron serve-lsp` 提供代码锚点的 hover 与 go-to-definition（`// @kron:intent <slug>` → 对应 intent Markdown）。扫描范围由项目 `.kron/anchor-scan.json` 按语言 / 扩展名 / include-exclude 配置；默认支持 Go、TS/TSX、JS/JSX、Vue、Svelte、Python、Rust、Java、C/C++、C#、Kotlin、Swift、Ruby、PHP、Shell、YAML、Markdown 等。
 
-预期 IDE 入口提供**三路触发**：
+### VS Code 扩展 —— 编辑器内工作流
 
-| 触发位置 | 元素 | Hover | Ctrl+单击 |
-|---|---|---|---|
-| 源码 | `// @kron:intent <slug>` | 弹出意图摘要 | 跳转打开 `.kron/intents/<slug>.md` |
-| 意图 MD（横向） | `[@token-bucket](../path/to.md)` | 弹出被依赖意图摘要 | 跳转 |
-| 意图 MD（纵向） | `[@auth](README.md)` 或自动推导 | 弹出父模块背景 | 跳转 |
+从 Releases 安装 `kron-vscode-0.3.0.vsix` 后可用：
 
-**调用树 × 意图视图**——基于 `kron_impact` + `kron_intent_density` 的输出,Kron 暴露数据;画图是 IDE 的工作。详情见 [`docs/abstractDesign/view-call-tree-intent.md`](./docs/abstractDesign/view-call-tree-intent.md) 与 [`docs/implementation/ide-interaction.md`](./docs/implementation/ide-interaction.md)。
+- 意图树侧边栏（含 Assumptions / Superseded 视图）、Webview 画布增删改查
+- 代码锚点：hover、Ctrl+click 跳转、右键创建/改写锚点、intent → code anchor 跳转
+- 项目配置驱动的 anchor 扫描（`.kron/anchor-scan.json`）
+- 唯一的完整 IDE 侧能力入口；Cursor 复用同一扩展。
+
+### GUI —— Wails 桌面概览
+
+`Kron-GUI.exe` 是 Wails + WebView2 的**只读**概览：多项目画廊、封面、意图树预览、Settings。写操作留给编辑器与 AI。
 
 ## 状态
 
-仓库 `cmd/kron/` 与 `internal/` 现状即 Kron 当前完成度（看目录比看状态声明更准）。
+- **最新发布**：v0.3.0（2026-10-30）— [GitHub Release](https://github.com/zhangjun005/Kron/releases/tag/v0.3.0)
+- **分支模型**：`develop` 是默认集成分支；`master` 是发布分支，只接收 release PR / hotfix，发布时打 tag。
+- **验证环境**：`kron-mcp-test/` 是可随时重建的 release-shaped 测试环境；产物不入库。
+- 各访问层实现进度以 `cmd/` 与 `internal/` 目录为准；设计真理以 `docs/` 为准。
 
 ## 参与贡献
 
