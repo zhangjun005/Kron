@@ -4,7 +4,7 @@
   "displayName": "Kron",
   "publisher": "zhangjun005",
   "description": "Kron intent ledger for VS Code: browse intent trees, inspect assumptions and jump through code anchors — backed by the kron MCP/LSP servers.",
-  "version": "0.0.1",
+  "version": "0.3.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/zhangjun005/Kron.git"

@@ -102,7 +102,7 @@ MCP 协议层 = JSON-RPC 2.0。**一帧一行 JSON**(stdio 模式下用 `\n` 分
 
 ```go
 // cmd/kron/serve-mcp/serve_mcp.go
-server := mcp.NewServer(&mcp.Implementation{Name: "kron", Version: "v1.2.0"}, nil)
+server := mcp.NewServer(&mcp.Implementation{Name: "kron", Version: "v0.3.0"}, nil)
 server.AddReceivingMiddleware(callerInjectMiddleware(root))  // 1
 registerTools(server)                                         // 2
 server.Run(context.Background(), &mcp.StdioTransport{})      // 3
