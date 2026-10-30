@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kron logo — v3 industrial</title>
+    <style>
+      :root { color-scheme: dark; --ink: #f4f4f0; --paper: #111; --line: #2a2a2a; }
+      * { box-sizing: border-box; }
+      html, body { min-height: 100%; margin: 0; }
+      body { display: grid; min-height: 100svh; place-items: center; padding: 2rem; background: #0b0b0b; color: var(--ink); font-family: Arial, sans-serif; }
+      .stage { display: grid; gap: 1.25rem; justify-items: center; }
+      .logo { display: grid; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); width: min(78vw, 30rem); aspect-ratio: 1; gap: 2px; background: var(--line); }
+      .cell { display: grid; place-items: center; background: var(--paper); color: var(--ink); clip-path: polygon(0 0, 88% 0, 100% 12%, 100% 100%, 12% 100%, 0 88%); }
+      .cell--inverse { background: var(--ink); color: var(--paper); }
+      svg { width: 100%; height: 100%; }
+      path { fill: currentColor; }
+      .caption { margin: 0; color: #999; font-size: .7rem; letter-spacing: .28em; text-transform: uppercase; }
+    </style>
+  </head>
+  <body>
+    <main class="stage" aria-label="Kron logo v3 industrial">
+      <div class="logo" role="img" aria-label="Kron logo v3: industrial cut corner K R O N">
+        <span class="cell"><svg viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M10 5h22v33L67 5h28L58 48l38 47H67L32 61v34H10z" /></svg></span>
+        <span class="cell"><svg viewBox="0 0 100 100" preserveAspectRatio="none"><path fill-rule="evenodd" d="M10 5h48c20 0 32 11 32 28 0 11-6 20-18 25l20 37H67L48 64H32v31H10zM32 22v26h23c9 0 14-5 14-13s-5-13-14-13z" /></svg></span>
+        <span class="cell"><svg viewBox="0 0 100 100" preserveAspectRatio="none"><path fill-rule="evenodd" d="M50 5c29 0 45 17 45 45S79 95 50 95 5 78 5 50 21 5 50 5zm0 18c-14 0-23 9-23 27s9 27 23 27 23-9 23-27-9-27-23-27z" /></svg></span>
+        <span class="cell cell--inverse"><svg viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M10 95V5h23l35 50V5h22v90H67L32 45v50z" /></svg></span>
+      </div>
+      <p class="caption">Kron / v3 industrial</p>
+    </main>
+  </body>
+</html>

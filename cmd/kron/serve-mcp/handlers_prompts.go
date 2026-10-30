@@ -92,6 +92,7 @@ func kronImplementPrompt(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.G
 			Slug:          m.Slug,
 			Status:        string(m.Frontmatter.Status),
 			Prerequisites: prereqs,
+			Assumptions:   m.Frontmatter.Assumptions,
 		})
 	}
 	sort.Slice(ranked, func(i, j int) bool {
@@ -105,11 +106,18 @@ func kronImplementPrompt(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.G
 	} else {
 		body.WriteString("## Matched Intents\n")
 		for _, m := range ranked {
-			fmt.Fprintf(&body, "- slug: %s  status: %s\n  prerequisites: %s\n", m.Slug, m.Status, joinOrNone(m.Prerequisites))
+			fmt.Fprintf(&body, "- slug: %s  status: %s\n  prerequisites: %s\n  assumptions: %s\n",
+				m.Slug, m.Status, joinOrNone(m.Prerequisites), renderAssumptionRefs(m.Assumptions))
 		}
 		body.WriteString("\n")
 	}
-	body.WriteString("## Action\n1. Read each matched intent + its prerequisites via kron_get.\n2. If a prerequisite is missing, kron_add it first.\n3. Apply changes via kron_update (PATCH semantics).\n")
+	body.WriteString("## Action\n1. Read each matched intent + its prerequisites via kron_get.\n")
+	body.WriteString("2. Treat assumptions as hard constraints: expired or unverified hard assumptions are risks — verify them (kron_assume_check / kron_assume_update) before changing behavior.\n")
+	body.WriteString("3. If a prerequisite intent is missing, kron_add it first.\n")
+	body.WriteString("4. Apply changes via kron_update (PATCH semantics), and keep the code anchors (@kron:intent <slug>) in sync.\n")
+	if tmpl := readIntentBodyTemplate(root); tmpl != "" {
+		body.WriteString(intentBodyTemplateSection(tmpl))
+	}
 
 	return &mcp.GetPromptResult{
 		Description: "Pick the right intent to implement a new feature, with prerequisites.",
@@ -162,7 +170,8 @@ func kronDriftCheckPrompt(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.
 	// list of "what's drifted" for the prompt.
 	expired := make([]string, 0, len(report.ExpiredAssumptions))
 	for _, e := range report.ExpiredAssumptions {
-		expired = append(expired, e.AssumptionID)
+		expired = append(expired, fmt.Sprintf("%s: %s (expired %d day(s) ago; expires_at=%s)",
+			e.Slug, e.AssumptionID, e.DaysOverdue, e.ExpiresAt))
 	}
 	sort.Strings(expired)
 
@@ -179,14 +188,16 @@ func kronDriftCheckPrompt(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.
 			body.WriteString("\n")
 		}
 		if len(expired) > 0 {
-			body.WriteString("### Expired hard assumptions\n")
-			for _, id := range expired {
-				fmt.Fprintf(&body, "- %s\n", id)
+			body.WriteString("### Expired hard assumptions (intent: assumption)\n")
+			for _, line := range expired {
+				fmt.Fprintf(&body, "- %s\n", line)
 			}
 			body.WriteString("\n")
 		}
 	}
-	body.WriteString("## Action\n1. For each superseded candidate, decide: kron_update (status=superseded + reason) or kron_update (refresh updated_at).\n2. For each expired hard assumption, verify or relax severity via kron_assume_update.\n")
+	body.WriteString("## Action\n1. For each superseded candidate: kron_update (status=superseded with a reason) or kron_update (refresh updated_at).\n")
+	body.WriteString("2. For each expired hard assumption: re-verify with kron_assume_update (set verified_at; extend or clear expires_at) or deliberately lower the per-intent severity via kron_update with a rationale.\n")
+	body.WriteString("3. Date-only expires_at values cover the whole UTC day; unsupported date values are reported by kron_lint (expired-hard-assumption rule).\n")
 
 	return &mcp.GetPromptResult{
 		Description: "Surface code-vs-intent drift (stale intents + expired hard assumptions).",
@@ -235,7 +246,8 @@ func kronReviewPrompt(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetP
 	// Group findings by rule code.
 	byRule := make(map[string][]string)
 	for _, d := range diags {
-		byRule[string(d.Rule)] = append(byRule[string(d.Rule)], d.Where)
+		byRule[string(d.Rule)] = append(byRule[string(d.Rule)],
+			fmt.Sprintf("%s: %s [%s]", d.Where, d.Detail, string(d.Severity)))
 	}
 	ruleKeys := make([]string, 0, len(byRule))
 	for k := range byRule {
@@ -270,10 +282,15 @@ func kronReviewPrompt(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetP
 		for _, rule := range ruleKeys {
 			locs := byRule[rule]
 			sort.Strings(locs)
-			fmt.Fprintf(&body, "- %s (%d): %s\n", rule, len(locs), joinOrNone(locs))
+			fmt.Fprintf(&body, "- %s (%d):\n", rule, len(locs))
+			for _, loc := range locs {
+				fmt.Fprintf(&body, "  - %s\n", loc)
+			}
 		}
 	}
-	body.WriteString("\n## Action\n1. For each finding, follow the rule-specific fix (kron_update / kron_assume_update / kron_add).\n2. After fixing, re-run kron_lint to confirm zero errors before merging.\n")
+	body.WriteString("\n## Action\n1. For each finding, follow the rule-specific fix (kron_update / kron_assume_update / kron_add).\n")
+	body.WriteString("2. For assumption findings (expiry, severity mismatch, rationale), re-verify via kron_assume_update and adjust per-intent severity/rationale via kron_update.\n")
+	body.WriteString("3. After fixing, re-run kron_lint to confirm zero errors before merging.\n")
 
 	return &mcp.GetPromptResult{
 		Description: "Full active-intent audit for PR review.",
@@ -296,6 +313,7 @@ type promptIntentMatch struct {
 	Slug          string
 	Status        string
 	Prerequisites []string
+	Assumptions   []model.Assumption
 }
 
 // matchIntentsByKeyword returns intents whose slug / frontmatter.symbol
@@ -375,4 +393,30 @@ func joinOrNone(xs []string) string {
 		return "(none)"
 	}
 	return strings.Join(xs, ", ")
+}
+
+// renderAssumptionRefs formats an intent's assumption links for prompt
+// output. Only per-intent metadata is shown here; shared assumption text
+// lives in the registry and is read by the AI via kron_assume_get.
+func renderAssumptionRefs(assumptions []model.Assumption) string {
+	if len(assumptions) == 0 {
+		return "(none)"
+	}
+	parts := make([]string, 0, len(assumptions))
+	for _, a := range assumptions {
+		desc := fmt.Sprintf("%s (%s", a.ID, a.Severity)
+		if a.ExpiresAt != "" {
+			desc += ", expires " + a.ExpiresAt
+		}
+		if a.VerifiedAt != "" {
+			desc += ", verified " + a.VerifiedAt
+		} else {
+			desc += ", unverified"
+		}
+		if a.Rationale != "" {
+			desc += ", rationale: " + a.Rationale
+		}
+		parts = append(parts, desc+")")
+	}
+	return strings.Join(parts, "; ")
 }

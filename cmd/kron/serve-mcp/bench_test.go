@@ -110,7 +110,7 @@ func newTestSessionFromB(b *testing.B, root string) *testSession {
 	b.Helper()
 	server := mcp.NewServer(&mcp.Implementation{Name: "kron-bench", Version: "v1.2.0"}, nil)
 	server.AddReceivingMiddleware(callerInjectMiddleware(root))
-	registerTools(server)
+	registerTools(server, "")
 	st, ct := mcp.NewInMemoryTransports()
 	ss, err := server.Connect(context.Background(), st, nil)
 	if err != nil {

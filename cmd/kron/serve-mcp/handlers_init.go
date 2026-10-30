@@ -67,14 +67,8 @@ func HandleInit(ctx context.Context, _ *mcp.CallToolRequest, _ InitInput) (
 		return nil, InitOutput{}, fmt.Errorf("kron_init: stat %s: %w", kronDir, err)
 	}
 
-	if !already {
-		if err := store.EnsureKronDir(ctx, root); err != nil {
-			return nil, InitOutput{}, fmt.Errorf("kron_init: ensure .kron/: %w", err)
-		}
-		cfg := &model.Config{IntentsDir: ".kron/intents"}
-		if err := store.SaveConfig(ctx, root, cfg); err != nil {
-			return nil, InitOutput{}, fmt.Errorf("kron_init: save config: %w", err)
-		}
+	if err := store.EnsureKronScaffold(ctx, root); err != nil {
+		return nil, InitOutput{}, fmt.Errorf("kron_init: ensure .kron/ scaffold: %w", err)
 	}
 
 	// RFC docs/rfc/2026-10-14-projects-json-schema-extension.md

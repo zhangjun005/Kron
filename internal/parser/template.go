@@ -5,6 +5,11 @@ import (
 	"strings"
 )
 
+// IntentBodyTemplatePath is the project-level body template file. It is
+// only injected into AI-facing MCP prompts/descriptions; it never
+// scaffolds intents by itself.
+const IntentBodyTemplatePath = ".kron/templates/intent-body.md"
+
 // IntentBodyTemplate returns the default Markdown body for a freshly
 // scaffolded intent. The body follows the §三 skeleton from
 // docs/abstractDesign/intent-structure.md (Title + one-line summary +

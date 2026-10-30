@@ -194,6 +194,58 @@ func TestWriter_Create_DefaultStatusActive(t *testing.T) {
 // Update
 // =====================================================================
 
+func TestWriter_Create_DateOnlyExpiryAccepted(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := CreateParams{
+		ID:              "x",
+		Text:            "x",
+		DefaultSeverity: model.SeverityHard,
+		CreatedBy:       "@a",
+		ExpiresAt:       strPtr("2027-01-01"),
+	}
+	if err := w.Create(context.Background(), p); err != nil {
+		t.Fatalf("documented date-only expires_at must be accepted: %v", err)
+	}
+}
+
+func TestWriter_Create_InvalidExpiryRejected(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := CreateParams{
+		ID:              "x",
+		Text:            "x",
+		DefaultSeverity: model.SeverityHard,
+		CreatedBy:       "@a",
+		ExpiresAt:       strPtr("2027/01/01"),
+	}
+	if err := w.Create(context.Background(), p); err == nil {
+		t.Fatal("unsupported expires_at format must be rejected at write time")
+	}
+}
+
+func TestWriter_Update_InvalidExpiryRejected(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Create(context.Background(), CreateParams{
+		ID: "x", Text: "old", DefaultSeverity: model.SeverityHard, CreatedBy: "@a",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Update(context.Background(), "x", UpdatePatch{ExpiresAt: strPtr("next week")}); err == nil {
+		t.Fatal("unsupported expires_at format must be rejected by Update")
+	}
+}
+
 func TestWriter_Update_PatchText(t *testing.T) {
 	dir := t.TempDir()
 	w, err := NewWriter(dir)

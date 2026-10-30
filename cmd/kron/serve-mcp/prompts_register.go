@@ -22,7 +22,7 @@ func registerPrompts(server *mcp.Server) {
 	// kron-implement — pick the right intent for a new feature.
 	server.AddPrompt(&mcp.Prompt{
 		Name:        "kron-implement",
-		Description: "Pick the right intent to implement a new feature, with prerequisites. Pass `feature` (a free-form description of the change); the prompt ranks existing intents by slug/symbol/title match and surfaces their relations.Prerequisites so the AI reads them before editing.",
+		Description: "Pick the right intent to implement a new feature. Pass `feature`; the prompt ranks existing intents by slug/symbol/title, and surfaces each match's prerequisites plus assumption links (severity/rationale/expiry/verification) so the AI reads and verifies them before editing.",
 		Arguments: []*mcp.PromptArgument{{
 			Name:        "feature",
 			Description: "Free-form description of the feature or change the user wants to implement. Required.",
@@ -33,7 +33,7 @@ func registerPrompts(server *mcp.Server) {
 	// kron-drift-check — reconcile code changes against intent state.
 	server.AddPrompt(&mcp.Prompt{
 		Name:        "kron-drift-check",
-		Description: "Surface code-vs-intent drift: superseded candidates (active intents older than days_threshold) and expired hard assumptions. Optional `days_threshold` (default 90).",
+		Description: "Surface code-vs-intent drift: superseded candidates and expired hard assumptions (rendered with intent:assumption, days overdue and expires_at). Optional `days_threshold` (default 90).",
 		Arguments: []*mcp.PromptArgument{{
 			Name:        "days_threshold",
 			Description: "Minimum age in days for an active intent to be a superseded candidate. Optional; default 90.",
@@ -44,7 +44,7 @@ func registerPrompts(server *mcp.Server) {
 	// kron-review — full active-intent audit for PR review.
 	server.AddPrompt(&mcp.Prompt{
 		Name:        "kron-review",
-		Description: "Full active-intent audit for PR review. Groups lint findings by rule and lists every in-scope intent. Optional `status` (default 'active').",
+		Description: "Full active-intent audit for PR review. Lists every in-scope intent and groups lint findings by rule with location, detail and severity. Optional `status` (default 'active').",
 		Arguments: []*mcp.PromptArgument{{
 			Name:        "status",
 			Description: "Filter the in-scope intent list by status. Optional; default 'active'.",

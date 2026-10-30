@@ -24,8 +24,8 @@
 | `handlers_restore.go` | 50 | `kron_restore` |
 | `handlers_assume_check.go` | 135 | `kron_assume_check` |
 | `handlers_assumption.go` | 200 | `kron_assume_create` / `kron_assume_list` / `kron_assume_update` / `kron_assume_delete` / `kron_assume_get` (2026-10-14) |
-| `handlers_prompts.go` | 320 | `kron-implement` / `kron-drift-check` / `kron-review` 3 个 prompt 模板的 handler (2026-10-14) |
-| `prompts_register.go` | 60 | `registerPrompts` — `server.AddPrompt × 3` 注册入口 (2026-10-14) |
+| `handlers_prompts.go` | 420 | `kron-implement` / `kron-drift-check` / `kron-review` 3 个 prompt 模板的 handler (2026-10-14) |
+| `prompts_register.go` | 65 | `registerPrompts` — `server.AddPrompt × 3` 注册入口 (2026-10-14) |
 | `handlers_impact.go` | 155 | `kron_impact` |
 | `handlers_density.go` | 160 | `kron_intent_density` + `scanOrphanFiles` / `countLines` |
 | `handlers_tree.go` | 85 | `kron_tree` + `treeNodeFromView` 投影 |
@@ -53,7 +53,7 @@
 func Run(args []string, in io.Reader, out, errOut io.Writer) error {
     root, err := resolveMCPRoot(args)        // 解析 -CWD <root>
     log.SetOutput(errOut)                    // 日志走 errOut(避免污染 stdout JSON-RPC)
-    server := mcp.NewServer(&mcp.Implementation{Name: "kron", Version: "v1.2.0"}, nil)
+    server := mcp.NewServer(&mcp.Implementation{Name: "kron", Version: "v0.3.0"}, nil)
     server.AddReceivingMiddleware(callerInjectMiddleware(root))
     registerTools(server)
     transport, _ := stdioOrIOTransport(in, out)
@@ -67,9 +67,9 @@ func Run(args []string, in io.Reader, out, errOut io.Writer) error {
 |---|---|
 | `resolveMCPRoot` | 拿仓库根——协议无关;**handler 后续通过 ctx 拿到**,而不是闭包 |
 | `log.SetOutput(errOut)` | **关键**——stdio 模式下 stdout 是 JSON-RPC 帧专用;**任何调试日志必须 stderr**(G-1 相关) |
-| `mcp.NewServer(impl, nil)` | 创建 server;`impl` 在 initialize 响应里出现;`nil` = 用 SDK 默认 capabilities |
+| `mcp.NewServer(impl, opts)` | 创建 server;`impl`（Name/Title/Version）与 `opts.Instructions` 出现在 initialize 响应;capabilities 由后续注册调用推断 |
 | `AddReceivingMiddleware` | 注入 root / caller 到 ctx;**铁律 #4 落地** |
-| `registerTools` | 12 次 `mcp.AddTool`——SDK 据 In/Out struct 推断 schema |
+| `registerTools` | 18 次 `mcp.AddTool`——SDK 据 In/Out struct 推断 schema；每个 tool 带 `Title` + `ToolAnnotations`（readOnly/destructive/idempotent/openWorld） |
 | `stdioOrIOTransport` | 选真实 stdio 还是测试用 IOTransport |
 | `server.Run(ctx, transport)` | 阻塞读循环;**当前 ctx 是 `context.Background()`**——G-1 |
 
@@ -314,22 +314,21 @@ return nil, TreeOutput{Root: treeNodeFromView(internalTree)}, nil
 - `view.BuildIntentTree` 把 `[]*model.Intent` 拍成 `*view.IntentTreeNode` 树(目录结构 = slug 分隔)
 - `treeNodeFromView` 投影到 wire `*TreeNode`;**`Children []any`** 避开 SDK 递归 struct panic
 
-#### 4.3.6 `HandleDelete`(`kron_delete`)——[handlers_delete.go:34-71](handlers_delete.go)
+#### 4.3.6 `HandleDelete`(`kron_delete`)——[`handlers_delete.go`](handlers_delete.go) (2026-10-29 子树化)
 
 ```go
-dependents := []string{}
-if r, rerr := store.NewReader(root); rerr == nil {
-    if all, lerr := r.LoadAll(ctx); lerr == nil {
-        dependents = relations.Dependents(all, in.Slug)  // ① 软读
-    }
-}
-w, err := store.NewWriter(root)
-if err := w.MoveToTrash(ctx, in.Slug); err != nil { return ... }
-return nil, DeleteOutput{OK: true, TrashedPath: ..., Dependents: dependents}, nil
+all, _ := LoadAllCached(ctx, root)              // ① 软读
+// kind / 子树 slugs / dependents 并集都来自这一份快照
+if kind == node && !in.ConfirmSubtree { return nil, ..., 要求 confirm_subtree }
+w.MoveToTrash(ctx, in.Slug)                     // node → 整个 <slug>/ 目录 rename 进 trash
+return DeleteOutput{TrashedPath: <真实路径>, Dependents: <子树并集>, DeletedSlugs: <全部删除 slug>}
 ```
 
 ① **move 前算** dependents——避免 move 后 LoadAll 漏数据(并发安全)
 ② `dependents` **不阻塞** delete——v1 软警告(RFC `2026-10-03-frontmatter-references` §5.3)
+③ node 删除必须显式 `confirm_subtree: true`，否则返回 IsError 并告知子树意图数；trash 布局与恢复语义见
+[`docs/implementation/2026-10-29-trash-subtree.md`](../implementation/2026-10-29-trash-subtree.md)
+④ `kron_restore` 按 trash 形状还原（node 目录 → 整棵子树）；旧 flat trash 条目按 leaf 恢复
 
 #### 4.3.7 `HandleAssumptionGet`(`kron_assume_get`)——[`handlers_assumption.go`](handlers_assumption.go) (2026-10-14 追加)
 
@@ -337,15 +336,27 @@ return nil, DeleteOutput{OK: true, TrashedPath: ..., Dependents: dependents}, ni
 
 #### 4.3.8 `kronImplementPrompt`(`kron-implement`)——[`handlers_prompts.go`](handlers_prompts.go) (2026-10-14 追加)
 
-AI 接到新需求时: 走 `LoadAllCached` 拿全部 intent, `matchIntentsByKeyword` 按 slug / frontmatter.symbol / 第一行标题做朴素大小写不敏感子串匹配排序, 命中的 intent 各算 `relations.Prerequisites` 一起渲染进 user message。**`feature` 必填**, 缺 → 报错。0 匹配**不**报错, message 引导"kron_add a new one"。
+AI 接到新需求时: 走 `LoadAllCached` 拿全部 intent, `matchIntentsByKeyword` 按 slug / frontmatter.symbol / 第一行标题做朴素大小写不敏感子串匹配排序, 命中的 intent 渲染 `relations.Prerequisites` + 假设链接（id/severity/rationale/expires_at/verified_at），Action 要求先验证过期/未验证的 hard 假设。**`feature` 必填**, 缺 → 报错。0 匹配**不**报错, message 引导"kron_add a new one"。
 
 #### 4.3.9 `kronDriftCheckPrompt`(`kron-drift-check`)——[`handlers_prompts.go`](handlers_prompts.go) (2026-10-14 追加)
 
-走 `lint.ComputeStaleReport` 拿结构化视图(`SupersededCandidates` + `ExpiredAssumptions`), 渲染进 message。`days_threshold` 选填, 默认 90; 不可解析 → 默认值 (静默回退)。复用 `LoadAllCached` + `internal/lint`(不调 `kron_stale` tool, 避免 server 内部 RPC 自身)。
+走 `lint.ComputeStaleReport` 拿结构化视图(`SupersededCandidates` + `ExpiredAssumptions`), 过期条目按 `intent_slug: assumption_id (expired N day(s) ago; expires_at=...)` 渲染；Action 要求用 `kron_assume_update` 复核（`verified_at` / `expires_at`）或降级 severity。`days_threshold` 选填, 默认 90; 不可解析 → 默认值 (静默回退)。复用 `LoadAllCached` + `internal/lint`(不调 `kron_stale` tool, 避免 server 内部 RPC 自身)。
 
 #### 4.3.10 `kronReviewPrompt`(`kron-review`)——[`handlers_prompts.go`](handlers_prompts.go) (2026-10-14 追加)
 
-走 `lint.RunWith` 拿 `[]Diag` 全规则集, 按 `Rule` 字段分组 → 渲染"按规则分组 + 每个 in-scope intent 列表"。`status` 选填, 默认 "active"; 不可解析 → 默认值。
+走 `lint.RunWith` 拿 `[]Diag` 全规则集, 按 `Rule` 字段分组 → 渲染"按规则分组（location + detail + severity）+ 每个 in-scope intent 列表"；Action 含假设复核与重跑 lint。`status` 选填, 默认 "active"; 不可解析 → 默认值。
+
+#### 4.3.12 项目 intent 正文模板（AI 提示词注入，2026-10-29 追加）
+
+项目可在 `.kron/templates/intent-body.md` 定义正文 section 形状（例如 `## Why` / `## How`）。
+serve-mcp 只把它注入 **AI 可见文本**，不写入 intent、不做校验：
+
+- initialize `Instructions` 追加 "Project intent body template" 段；
+- `kron_add` / `kron_update` 的 tool description 追加模板；
+- `kron-implement` prompt 末尾追加模板 section。
+
+文件缺失/空 = 不注入（行为与之前一致）；模板在 server 启动时读取一次（tool description/instructions），
+prompt 每次调用实时读取。实现见 `intent_template.go`。
 
 #### 4.3.11 `registerPrompts`——[`prompts_register.go`](prompts_register.go) (2026-10-14 追加)
 
@@ -397,20 +408,19 @@ func assertCallerMCP(ctx context.Context) error {
 
 ## 七、和"协议标准"对照(2026-10-11 现状)
 
-| MCP 协议能力 | Kron 是否用到 | 备注 |
+| MCP 协议能力 | Kron 状态 | 备注 |
 |---|---|---|
-| `initialize` handshake | ✅(SDK 默认) | 没显式接 `InitializeHandler` |
-| `tools/list` | ✅ | 12 个 tool 来自 `mcp.AddTool` |
-| `tools/call` | ✅ | handler 签名见 §四 |
-| `notifications/tools/list_changed` | ❌ | 当前 tool 集合是静态的;未来动态加 tool 才需要 |
-| `notifications/cancelled` | ❌ | 没用;**未来加 ctx 中间件超时**需要处理 |
-| `Resources`(URI 资源) | ❌ | 未来 `kron://...` URI 可能用 |
-| `Prompts`(prompt 模板) | ❌ | 当前不适用 |
-| `Logging` | ❌ | 当前走 `log.SetOutput(errOut)` 写 stderr,没用 `logging/setLevel` |
-| `Subscriptions/Listen` | ❌ | MCP 2.0 SEP-2575 新能力;**协议层面很新,Kron 不追** |
-| `completion/complete`(参数自动补全) | ❌ | LLM 客户端能力,Kron 不参与 |
-| `roots`(客户端声明 root) | ❌ | Kron 用 `-CWD <root>` 直接收 |
-| `sampling`(让 server 反向让 LLM 生成) | ❌ | 不适用 |
+| `initialize` handshake | ✅ | `Implementation{Name: kron, Title: Kron, Version}` + `ServerOptions.Instructions`（AI 工作流指引） |
+| `tools/list` / `tools/call` | ✅ | 18 个 tool；typed In/Out → inputSchema/outputSchema/structuredContent；每个 tool 带 Title + Annotations |
+| tool annotations | ✅ | `readOnlyHint`（只读工具）、`destructiveHint`（delete/assume_delete）、`idempotentHint`、`openWorldHint=false` |
+| `resources/list` / `templates/list` / `read` | ✅ | `kron://intents/{+slug}` 模板；无静态 resource 条目（模板-only，客户端需支持 templates） |
+| `prompts/list` / `prompts/get` | ✅ | 3 个模板 + arguments；描述与渲染内容同步（假设/过期上下文/severity） |
+| `logging` / `logging/setLevel` | ✅ | SDK 处理 setLevel；`shimHandler` 把 slog 转 session.Log |
+| `notifications/tools/list_changed` | ⚠️ | SDK 广告 listChanged=true，但 tool 集合静态、不主动发通知 |
+| `notifications/cancelled` | ✅（SDK） | SDK 处理 cancel；handler 使用 ctx |
+| `completion/complete` | ❌ | 未注册 `CompletionHandler`（可选） |
+| `resources/subscribe` | ❌ | 未注册订阅 handler（可选） |
+| `roots` / `sampling` | ❌ | 不适用；Kron 用 `-CWD` |
 
 **评估**:Kron 当前用的是 MCP 协议的**核心子集**(`initialize` + `tools/list` + `tools/call`)。够用,符合"YAGNI"——加其他能力**等真有需求**。
 

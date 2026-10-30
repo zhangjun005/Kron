@@ -47,7 +47,12 @@ func ScanMarkdownAnchors(dir string) ([]model.Anchor, error) {
 	rootAbs, _ := filepath.Abs(dir)
 
 	var out []model.Anchor
-	err := WalkSourceFiles(dir, func(path string) error {
+	cfg, cfgErr := LoadAnchorScanConfig(dir)
+	if cfgErr != nil {
+		return nil, fmt.Errorf("parser: load anchor scan config: %w", cfgErr)
+	}
+
+	err := WalkSourceFilesFiltered(dir, cfg, func(path string) error {
 		if !isMarkdownFile(path) {
 			return nil
 		}

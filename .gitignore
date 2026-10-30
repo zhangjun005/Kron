@@ -77,3 +77,5 @@ dev/null
 # The driver itself (cmd/kron-d-test/) IS committed; only this
 # throwaway repo fixture is ignored.
 .d-test/
+frontend/vscode/dist/
+frontend/vscode/webview/node_modules/

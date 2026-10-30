@@ -667,5 +667,10 @@ func ValidateAssumptionFrontmatter(fm *model.AssumptionFrontmatter) error {
 	default:
 		return fmt.Errorf("status %q is invalid (allowed: draft, active, superseded)", fm.Status)
 	}
+	// Date fields are optional but must be parseable; the documented form is
+	// YYYY-MM-DD, full RFC3339 stays accepted for existing data.
+	if err := ValidateAssumptionDateFields(fm.ExpiresAt, fm.VerifiedAt); err != nil {
+		return err
+	}
 	return nil
 }

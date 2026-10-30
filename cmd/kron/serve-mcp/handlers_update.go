@@ -126,7 +126,11 @@ func HandleUpdate(ctx context.Context, _ *mcp.CallToolRequest, in UpdateInput) (
 		return nil, UpdateOutput{}, fmt.Errorf("kron_update: write: %w", err)
 	}
 	InvalidateCache(root)
-	return nil, UpdateOutput{OK: true, Path: model.IntentPath(in.Slug)}, nil
+	path, pathErr := w.RelativeIntentPath(in.Slug)
+	if pathErr != nil {
+		path = model.IntentPath(in.Slug)
+	}
+	return nil, UpdateOutput{OK: true, Path: path}, nil
 }
 
 // validateFrontmatterShape re-runs parser.ValidateFrontmatter on the

@@ -165,24 +165,19 @@ func (w *Writer) writeLocked(intent *model.Intent) error {
 	return nil
 }
 
-// MoveToTrash soft-deletes an intent: <root>/.kron/intents/<slug>.md
-// is moved to <root>/.kron/.trash/<slug>.md. The source can be
-// either physical form (leaf <slug>.md or node <slug>/README.md)
-// — the trashed copy is always the canonical form (<slug>.md in
-// .trash/), so a subsequent RestoreFromTrash finds it under the
-// canonical name. See RFC 2026-10-08-writer-readme-symmetry §3.3.
+// MoveToTrash soft-deletes an intent. The on-disk shape is preserved:
 //
-// Returns model.ErrIntentNotFound (wrapped) if the intent does
-// not exist in either form. Returns model.ErrIntentExists
-// (wrapped) if the trashed file already exists (so the move
-// cannot clobber a prior deletion); the caller is expected to
-// decide whether to surface this to the user or restore and
-// retry.
+//	leaf <intents>/<slug>.md        → <trash>/<slug>.md
+//	node <intents>/<slug>/          → <trash>/<slug>/   (whole subtree)
 //
-// The original intents directory entry is removed BEFORE the
-// rename so that a crash between the two steps leaves either
-// zero or one file with the slug — never two, never zero with
-// a phantom path.
+// Deleting a node therefore removes its whole subtree from the live tree;
+// the trash entry mirrors the directory so RestoreFromTrash can bring the
+// subtree back with its shape intact. See
+// docs/implementation/2026-10-29-trash-subtree.md.
+//
+// Returns model.ErrIntentNotFound (wrapped) if the intent does not exist in
+// either form. Returns model.ErrIntentExists (wrapped) if either trash shape
+// for the slug already exists (so the move cannot clobber a prior deletion).
 func (w *Writer) MoveToTrash(ctx context.Context, slug string) error {
 	_ = ctx
 	return w.withIntentLock(slug, func() error {
@@ -196,42 +191,45 @@ func (w *Writer) moveToTrashLocked(slug string) error {
 		return err
 	}
 
-	dst := w.TrashPath(slug)
-	if _, err := os.Stat(dst); err == nil {
-		return fmt.Errorf("%w: %s already in trash", model.ErrIntentExists, slug)
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("store: stat %s: %w", dst, err)
+	leafTrash := w.TrashPath(slug)
+	dirTrash := filepath.Join(w.Root, model.TrashDirPath(slug))
+	for _, existing := range []string{leafTrash, dirTrash} {
+		if _, statErr := os.Stat(existing); statErr == nil {
+			return fmt.Errorf("%w: %s already in trash", model.ErrIntentExists, slug)
+		} else if !errors.Is(statErr, fs.ErrNotExist) {
+			return fmt.Errorf("store: stat %s: %w", existing, statErr)
+		}
 	}
 
+	dst := leafTrash
+	if KindFromPath(src) == model.IntentKindNode {
+		// A node's README lives inside its directory; move the directory
+		// itself so descendants travel with it.
+		src = filepath.Dir(src)
+		dst = dirTrash
+	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("store: mkdir %s: %w", filepath.Dir(dst), err)
 	}
-
 	if err := os.Rename(src, dst); err != nil {
 		return fmt.Errorf("store: move %s → trash: %w", slug, err)
 	}
 	return nil
 }
 
-// RestoreFromTrash is the inverse of MoveToTrash: a trashed
-// intent is moved back to .kron/intents/. The trashed file
-// always lives at <root>/.kron/.trash/<slug>.md (MoveToTrash
-// collapses both physical forms to the canonical leaf name
-// in .trash/), so this function restores to the canonical
-// <slug>.md location.
+// RestoreFromTrash is the inverse of MoveToTrash. It detects the trash shape
+// (node directory first, then leaf file) and restores the matching live shape:
 //
-// IMPORTANT: if the trashed intent was ORIGINALLY a node-form
-// README at <slug>/README.md, RestoreFromTrash does NOT
-// automatically recreate that shape — it writes <slug>.md.
-// To restore as a node intent, the caller should restore and
-// then call Write with Kind=Node (overwriting the leaf file
-// with the README form). This trade-off is documented in
-// RFC 2026-10-08-writer-readme-symmetry §3.3.
+//	<trash>/<slug>/    → <intents>/<slug>/
+//	<trash>/<slug>.md  → <intents>/<slug>.md
 //
-// Returns model.ErrIntentNotFound (wrapped) if no trashed file
-// exists. Returns model.ErrIntentExists (wrapped) if an active
-// intent with the same slug already exists (so restore cannot
-// clobber the live version).
+// Legacy entries written by the old node-delete path are leaf files; they are
+// restored as leaf intents (no automatic node promotion) and the caller can
+// convert them via Write with Kind=Node.
+//
+// Returns model.ErrIntentNotFound (wrapped) if no trashed entry exists.
+// Returns model.ErrIntentExists (wrapped) if either live shape for the slug
+// already exists (so restore cannot merge or clobber).
 func (w *Writer) RestoreFromTrash(ctx context.Context, slug string) error {
 	_ = ctx
 	return w.withIntentLock(slug, func() error {
@@ -240,37 +238,73 @@ func (w *Writer) RestoreFromTrash(ctx context.Context, slug string) error {
 }
 
 func (w *Writer) restoreFromTrashLocked(slug string) error {
-	src := w.TrashPath(slug)
-	if _, err := os.Stat(src); err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
+	leafTrash := w.TrashPath(slug)
+	dirTrash := filepath.Join(w.Root, model.TrashDirPath(slug))
+	nodeShape := false
+	if info, err := os.Stat(dirTrash); err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("store: restore %s: %s is not a directory", slug, dirTrash)
+		}
+		nodeShape = true
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("store: stat %s: %w", dirTrash, err)
+	} else if _, leafErr := os.Stat(leafTrash); leafErr != nil {
+		if errors.Is(leafErr, fs.ErrNotExist) {
 			return fmt.Errorf("%w: %s not in trash", model.ErrIntentNotFound, slug)
 		}
-		return fmt.Errorf("store: stat %s: %w", src, err)
+		return fmt.Errorf("store: stat %s: %w", leafTrash, leafErr)
 	}
 
-	// Determine the restore target shape. If the canonical
-	// <slug>.md exists in the live intents dir, we must NOT
-	// clobber it (returns ErrIntentExists below). If the
-	// <slug>/README.md exists, we restore the leaf form
-	// alongside it — collisions on the OTHER form are not
-	// possible here because MoveToTrash would have moved
-	// either form; we only see the file that was actually
-	// moved. So writing to the canonical leaf path is safe.
-	dst := filepath.Join(w.Root, model.KronDir, model.IntentDir, slug+model.IntentExtension)
-	if _, err := os.Stat(dst); err == nil {
-		return fmt.Errorf("%w: %s already exists in intents", model.ErrIntentExists, slug)
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("store: stat %s: %w", dst, err)
+	// Refuse to restore onto either live shape; leaf+dir coexistence at the
+	// same slug is ambiguous and writers already reject it.
+	dirTarget := filepath.Join(w.Root, model.KronDir, model.IntentDir, slug)
+	leafTarget := filepath.Join(w.Root, model.KronDir, model.IntentDir, slug+model.IntentExtension)
+	for _, dst := range []string{leafTarget, dirTarget} {
+		if _, err := os.Stat(dst); err == nil {
+			return fmt.Errorf("%w: %s already exists in intents", model.ErrIntentExists, slug)
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("store: stat %s: %w", dst, err)
+		}
 	}
 
+	src, dst := leafTrash, leafTarget
+	if nodeShape {
+		src, dst = dirTrash, dirTarget
+	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("store: mkdir %s: %w", filepath.Dir(dst), err)
 	}
-
 	if err := os.Rename(src, dst); err != nil {
 		return fmt.Errorf("store: restore %s: %w", slug, err)
 	}
 	return nil
+}
+
+// RelativeIntentPath resolves the live on-disk path for slug (applying the
+// node README fallback) and returns it repo-relative in slash form.
+func (w *Writer) RelativeIntentPath(slug string) (string, error) {
+	abs, err := resolveReadPath(w.Root, slug)
+	if err != nil {
+		return "", err
+	}
+	rel, relErr := filepath.Rel(w.Root, abs)
+	if relErr != nil {
+		return filepath.ToSlash(abs), nil
+	}
+	return filepath.ToSlash(rel), nil
+}
+
+// RelativeTrashPath resolves the soft-deleted on-disk path for slug (node
+// directory first, then legacy leaf file) and returns it repo-relative.
+func (w *Writer) RelativeTrashPath(slug string) (string, error) {
+	for _, rel := range []string{model.TrashDirPath(slug), model.TrashPath(slug)} {
+		if _, err := os.Stat(filepath.Join(w.Root, rel)); err == nil {
+			return rel, nil
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("store: stat %s: %w", rel, err)
+		}
+	}
+	return "", fmt.Errorf("%w: %s not in trash", model.ErrIntentNotFound, slug)
 }
 
 // =====================================================================

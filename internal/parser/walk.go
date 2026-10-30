@@ -115,6 +115,20 @@ func WalkSourceFiles(root string, visit func(path string) error) error {
 	return nil
 }
 
+// WalkSourceFilesFiltered is WalkSourceFiles plus the project-level
+// .kron/anchor-scan.json filter (include/exclude globs + language
+// extensions). A nil config means "no filtering", which keeps the
+// pre-config behaviour for projects without the file.
+func WalkSourceFilesFiltered(root string, cfg *AnchorScanConfig, visit func(path string) error) error {
+	rootAbs, _ := filepath.Abs(root)
+	return WalkSourceFiles(root, func(path string) error {
+		if !cfg.allowsFile(toRepoRelative(path, rootAbs)) {
+			return nil
+		}
+		return visit(path)
+	})
+}
+
 // sortStrings is a tiny wrapper around the stdlib sort so callers in
 // anchors.go (e.g. SlugsForFile) don't need to import the sort
 // package directly. The wrapper is trivial; the indirection is for

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kron logo concepts</title>
+    <style>
+      :root { color-scheme: dark; --paper: #101010; --ink: #f4f4f0; }
+      * { box-sizing: border-box; }
+      html, body { min-height: 100%; margin: 0; }
+      body { min-height: 100svh; padding: 3rem 2rem; background: var(--paper); color: var(--ink); font-family: Arial, sans-serif; }
+      main { width: min(72rem, 100%); margin: 0 auto; }
+      h1 { margin: 0 0 .5rem; font-size: clamp(1.6rem, 4vw, 2.8rem); letter-spacing: -.04em; }
+      p { margin: 0; color: #999; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 2rem; margin-top: 2.5rem; }
+      article { display: grid; gap: 1rem; }
+      .preview { width: 100%; aspect-ratio: 1; border: 1px solid #292929; background: #151515; }
+      iframe { display: block; width: 100%; height: 100%; border: 0; }
+      a { color: inherit; text-decoration: none; }
+      h2 { margin: 0; font-size: 1rem; }
+      .meta { font-size: .8rem; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Kron logo concepts</h1>
+      <p>三种 2×2 正方形 logo 方向，点击标题打开单独预览。</p>
+      <section class="grid">
+        <article><div class="preview"><iframe src="v1.html" title="v1 block preview"></iframe></div><a href="v1.html"><h2>v1 / 几何块面</h2></a><p class="meta">当前方案：实心字形、N 象限反色，识别度最高。</p></article>
+        <article><div class="preview"><iframe src="v2-linear.html" title="v2 linear preview"></iframe></div><a href="v2-linear.html"><h2>v2 / 统一线框</h2></a><p class="meta">更轻、更现代，适合 IDE、网页导航和小尺寸图标。</p></article>
+        <article><div class="preview"><iframe src="v3-industrial.html" title="v3 industrial preview"></iframe></div><a href="v3-industrial.html"><h2>v3 / 切角工业</h2></a><p class="meta">保留方格结构，加入切角和分隔线，工具感更强。</p></article>
+      </section>
+    </main>
+  </body>
+</html>

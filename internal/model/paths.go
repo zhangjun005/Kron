@@ -16,7 +16,9 @@ const (
 	// repo-relative and survive running kron from subdirectories.
 	IntentDir = "intents"
 
-	// TrashDir holds soft-deleted intent files: <KronDir>/<TrashDir>/<slug>.md.
+	// TrashDir holds soft-deleted intents: leaf intents as
+	// <KronDir>/<TrashDir>/<slug>.md, node intents as the whole
+	// <KronDir>/<TrashDir>/<slug>/ directory so a restore keeps the tree.
 	// Hard-delete and GC are explicitly out of v1 (see architecture.md §5.2.1).
 	TrashDir = ".trash"
 
@@ -34,7 +36,15 @@ func IntentPath(slug string) string {
 	return KronDir + "/" + IntentDir + "/" + slug + IntentExtension
 }
 
-// TrashPath returns the on-disk relative path of a soft-deleted intent.
+// TrashPath returns the on-disk relative path of a soft-deleted LEAF intent.
+// Node-shaped intents are trashed as a directory instead — see TrashDirPath.
 func TrashPath(slug string) string {
 	return KronDir + "/" + TrashDir + "/" + slug + IntentExtension
+}
+
+// TrashDirPath returns the on-disk relative path of a soft-deleted NODE
+// intent. The whole <slug>/ subtree (README.md + descendants) moves to
+// <KronDir>/<TrashDir>/<slug>/ so a restore keeps the tree shape.
+func TrashDirPath(slug string) string {
+	return KronDir + "/" + TrashDir + "/" + slug
 }

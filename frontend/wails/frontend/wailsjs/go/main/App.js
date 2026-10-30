@@ -6,8 +6,32 @@ export function CallMCPTool(arg1, arg2) {
   return window['go']['main']['App']['CallMCPTool'](arg1, arg2);
 }
 
+export function AddProject() {
+  return window['go']['main']['App']['AddProject']();
+}
+
 export function GetKronInfo() {
   return window['go']['main']['App']['GetKronInfo']();
+}
+
+export function GetGUISettings() {
+  return window['go']['main']['App']['GetGUISettings']();
+}
+
+export function ChooseProjectCover(arg1) {
+  return window['go']['main']['App']['ChooseProjectCover'](arg1);
+}
+
+export function GetProjectCoverData(arg1) {
+  return window['go']['main']['App']['GetProjectCoverData'](arg1);
+}
+
+export function SetGUIProject(arg1, arg2) {
+  return window['go']['main']['App']['SetGUIProject'](arg1, arg2);
+}
+
+export function SetGUITheme(arg1) {
+  return window['go']['main']['App']['SetGUITheme'](arg1);
 }
 
 export function ListMCPToolsLive() {
@@ -20,6 +44,10 @@ export function ListProjectsLive() {
 
 export function OpenInIDE(arg1) {
   return window['go']['main']['App']['OpenInIDE'](arg1);
+}
+
+export function OpenProjectFolder(arg1) {
+  return window['go']['main']['App']['OpenProjectFolder'](arg1);
 }
 
 export function SwitchProject(arg1) {

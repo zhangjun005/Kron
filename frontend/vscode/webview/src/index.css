@@ -1,0 +1,117 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 3.9%;
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84.3% 57.8%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 0 0% 7%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 0 0% 14.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 14.9%;
+    --muted-foreground: 0 0% 63.9%;
+    --accent: 0 0% 14.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 50.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 20%;
+    --input: 0 0% 20%;
+    --ring: 212.7 26.8% 83.9%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+body {
+  color: var(--vscode-foreground, hsl(var(--foreground)));
+  background: var(--vscode-editor-background, hsl(var(--background)));
+}
+
+/* `kron.webviewFontSize` is applied by scaling the document root in main.tsx;
+   <body> must not pin a font-size or every rem-based utility ignores it. */
+
+.markdown-body {
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3 {
+  margin: 1rem 0 0.5rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.markdown-body h1 { font-size: 1.35em; }
+.markdown-body h2 { font-size: 1.2em; }
+.markdown-body h3 { font-size: 1.08em; }
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body blockquote,
+.markdown-body pre { margin: 0.65rem 0; }
+.markdown-body ul,
+.markdown-body ol { padding-left: 1.35rem; }
+.markdown-body blockquote {
+  border-left: 3px solid var(--vscode-textBlockQuote-border, hsl(var(--border)));
+  padding-left: 0.8rem;
+  color: var(--vscode-descriptionForeground, hsl(var(--muted-foreground)));
+}
+.markdown-body code {
+  border-radius: 0.25rem;
+  background: var(--vscode-textCodeBlock-background, hsl(var(--muted)));
+  padding: 0.1rem 0.25rem;
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+}
+.markdown-body pre {
+  overflow: auto;
+  border: 1px solid var(--vscode-textCodeBlock-background, hsl(var(--border)));
+  background: var(--vscode-textCodeBlock-background, hsl(var(--muted)));
+  padding: 0.75rem;
+}
+.markdown-body pre code { background: transparent; padding: 0; }
+.markdown-body a { color: var(--vscode-textLink-foreground, hsl(var(--primary))); }

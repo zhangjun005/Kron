@@ -359,12 +359,12 @@ func ComputeStaleReport(intents []*model.Intent, opts RunOptions) StaleReport {
 			if a.Severity != model.SeverityHard || a.ExpiresAt == "" {
 				continue
 			}
-			exp, perr := time.Parse(time.RFC3339, a.ExpiresAt)
+			exp, perr := parser.ParseExpiryDate(a.ExpiresAt)
 			if perr != nil || !exp.Before(now) {
 				continue
 			}
 			if a.VerifiedAt != "" {
-				if v, verr := time.Parse(time.RFC3339, a.VerifiedAt); verr == nil && v.After(exp) {
+				if v, verr := parser.ParseVerificationDate(a.VerifiedAt); verr == nil && v.After(exp) {
 					continue
 				}
 			}
@@ -424,12 +424,21 @@ func runStalenessRules(intents []*model.Intent, opts RunOptions) []Diag {
 			if a.Severity != model.SeverityHard || a.ExpiresAt == "" {
 				continue
 			}
-			exp, perr := time.Parse(time.RFC3339, a.ExpiresAt)
-			if perr != nil || !exp.Before(now) {
+			exp, perr := parser.ParseExpiryDate(a.ExpiresAt)
+			if perr != nil {
+				out = append(out, Diag{
+					Rule:     RuleExpiredHardAssumption,
+					Where:    in.Slug,
+					Detail:   fmt.Sprintf("hard assumption %q has an unsupported expires_at %q (want YYYY-MM-DD or RFC3339)", a.ID, a.ExpiresAt),
+					Severity: SeverityWarning,
+				})
+				continue
+			}
+			if !exp.Before(now) {
 				continue
 			}
 			if a.VerifiedAt != "" {
-				if v, verr := time.Parse(time.RFC3339, a.VerifiedAt); verr == nil && v.After(exp) {
+				if v, verr := parser.ParseVerificationDate(a.VerifiedAt); verr == nil && v.After(exp) {
 					continue
 				}
 			}

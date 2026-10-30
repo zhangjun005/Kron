@@ -102,7 +102,7 @@ MCP 协议层 = JSON-RPC 2.0。**一帧一行 JSON**(stdio 模式下用 `\n` 分
 
 ```go
 // cmd/kron/serve-mcp/serve_mcp.go
-server := mcp.NewServer(&mcp.Implementation{Name: "kron", Version: "v1.2.0"}, nil)
+server := mcp.NewServer(&mcp.Implementation{Name: "kron", Version: "v0.3.0"}, nil)
 server.AddReceivingMiddleware(callerInjectMiddleware(root))  // 1
 registerTools(server)                                         // 2
 server.Run(context.Background(), &mcp.StdioTransport{})      // 3
@@ -112,7 +112,7 @@ server.Run(context.Background(), &mcp.StdioTransport{})      // 3
 |---|---|
 | `mcp.NewServer` | 创建 server 实例;`Implementation` 出现在 initialize 响应里 |
 | `AddReceivingMiddleware` | 注入 ctx 装饰(铁律 #4 caller 透传)——`ctx context.Context` 进 handler 之前 SDK 跑这层 |
-| `registerTools` | 12 个 `mcp.AddTool` 调用;SDK 据此推断 `tools/list` 返回的 schema(从 `In/Out` struct + `jsonschema:"..."` tag) |
+| `registerTools` | 18 个 `mcp.AddTool` 调用;SDK 据此推断 `tools/list` 返回的 schema(从 `In/Out` struct + `jsonschema:"..."` tag)；每个 tool 带 `Title` + `ToolAnnotations` |
 | `server.Run(..., &mcp.StdioTransport{})` | 启动 stdio 读循环;读一行 JSON → 解析 method → dispatch → 写一行响应 |
 
 ---
@@ -185,14 +185,14 @@ server := mcp.NewServer(impl, &mcp.ServerOptions{
 })
 ```
 
-| 字段 | 含义 |
-|---|---|
-| `Tools` | server 注册了 tool;`ListChanged` 表示"运行中会动态增删" |
-| `Prompts` | server 提供 prompt 模板 |
-| `Resources` | server 提供可订阅的 URI 资源(Kron **没有**用到) |
-| `Logging` | server 支持接收 `logging/setLevel` 调整日志级别 |
+| 字段 | 含义 | Kron 现状 |
+|---|---|---|
+| `Tools` | server 注册了 tool;`ListChanged` 表示"运行中会动态增删" | ✅ 18 个工具；SDK 广告 `listChanged=true`，但工具集静态、不主动发通知 |
+| `Prompts` | server 提供 prompt 模板 | ✅ 3 个模板（implement / drift-check / review） |
+| `Resources` | server 提供 URI 资源 / 模板 | ✅ `kron://intents/{+slug}` 模板（模板-only，无静态 list） |
+| `Logging` | server 支持接收 `logging/setLevel` | ✅ SDK 处理 setLevel；`shimHandler` 转发 slog |
 
-**Kron 现状**:`serve_mcp.go:84-86` 注释说"capabilities are auto-inferred from the registered tools"——SDK 默认行为。**Resources / Prompts / Logging 完全没声明**——对应 MCP 协议层 Kron 只暴露 `tools`。
+**Kron 现状**:go-sdk v1.1.0 的 `ServerOptions` 没有 `Capabilities` 字段；capabilities 由 `registerTools` / `AddResourceTemplate` / `AddPrompt` 自动推断，`Logging` 由 SDK 始终广告。initialize 还带 `Implementation{Name:kron, Title:Kron, Version}` 与 `ServerOptions.Instructions`（AI 工作流指引）。
 
 ### 5.2 Protocol version 协商
 
@@ -214,7 +214,7 @@ client                          server
   │       feature) ...            │
 ```
 
-**Kron 的简化**:因为 v1.2+ Kron 不实现 `Resources` / `Prompts` / `Logging`,协商是"告知 server 我**只**要 tools"→ server 直接用 `tools` 能力响应。
+**Kron 的协商**:tools / resources(templates) / prompts / logging 全部由 SDK 按注册结果声明；客户端可以选择只用其中一部分（例如 GUI 只调 tools，IDE 额外消费 resources/LSP）。
 
 ---
 

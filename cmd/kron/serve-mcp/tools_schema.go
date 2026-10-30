@@ -174,7 +174,7 @@ type AssumeEntry struct {
 	Severity        string `json:"severity"                    jsonschema:"hard or soft (per-intent; overrides registry default)"`
 	DefaultSeverity string `json:"default_severity,omitempty"  jsonschema:"registry default severity (B-3); empty if registry absent"`
 	Rationale       string `json:"rationale,omitempty"         jsonschema:"per-intent explanation of why this severity (B-3)"`
-	ExpiresAt       string `json:"expires_at,omitempty"        jsonschema:"optional RFC3339 expiry"`
+	ExpiresAt       string `json:"expires_at,omitempty"        jsonschema:"optional expiry (YYYY-MM-DD or RFC3339)"`
 	VerifiedAt      string `json:"verified_at,omitempty"       jsonschema:"last verification time (empty if never verified)"`
 	VerifiedBy      string `json:"verified_by,omitempty"       jsonschema:"handle that last verified"`
 }
@@ -188,8 +188,8 @@ type AssumptionRef struct {
 	ID         string `json:"id"         jsonschema:"assumption id (must pass parser.ValidateSlug)"`
 	Severity   string `json:"severity"   jsonschema:"hard or soft (per-intent severity; required)"`
 	Rationale  string `json:"rationale,omitempty"  jsonschema:"required, ≥10 chars (B-3 rationale-required rule)"`
-	ExpiresAt  string `json:"expires_at,omitempty" jsonschema:"optional RFC3339 expiry"`
-	VerifiedAt string `json:"verified_at,omitempty" jsonschema:"optional RFC3339 verification time"`
+	ExpiresAt  string `json:"expires_at,omitempty" jsonschema:"optional expiry (YYYY-MM-DD or RFC3339)"`
+	VerifiedAt string `json:"verified_at,omitempty" jsonschema:"optional verification date (YYYY-MM-DD or RFC3339)"`
 	VerifiedBy string `json:"verified_by,omitempty" jsonschema:"optional @handle of verifier"`
 }
 
@@ -267,8 +267,8 @@ type AssumptionUpdateInput struct {
 	DefaultSeverity *string  `json:"default_severity,omitempty" jsonschema:"replace default_severity (null/absent = no change; hard or soft)"`
 	Body            *string  `json:"body,omitempty"            jsonschema:"replace body (null/absent = no change)"`
 	Status          *string  `json:"status,omitempty"          jsonschema:"replace status (null/absent = no change; draft, active, or superseded)"`
-	ExpiresAt       *string  `json:"expires_at,omitempty"       jsonschema:"replace expires_at (null/absent = no change; RFC3339)"`
-	VerifiedAt      *string  `json:"verified_at,omitempty"      jsonschema:"replace verified_at (null/absent = no change; RFC3339)"`
+	ExpiresAt       *string  `json:"expires_at,omitempty"       jsonschema:"replace expires_at (null/absent = no change; YYYY-MM-DD or RFC3339)"`
+	VerifiedAt      *string  `json:"verified_at,omitempty"      jsonschema:"replace verified_at (null/absent = no change; YYYY-MM-DD or RFC3339)"`
 	VerifiedBy      *string  `json:"verified_by,omitempty"      jsonschema:"replace verified_by (null/absent = no change)"`
 	Reviewers       []string `json:"reviewers,omitempty"        jsonschema:"replace reviewers (null/absent = no change; [] = clear)"`
 }
@@ -324,8 +324,8 @@ type AssumptionDetail struct {
 	Status          string   `json:"status"                      jsonschema:"draft / active / superseded"`
 	CreatedBy       string   `json:"created_by"                  jsonschema:"@handle or agent:<model>"`
 	UpdatedAt       string   `json:"updated_at"                  jsonschema:"RFC3339 timestamp"`
-	ExpiresAt       string   `json:"expires_at,omitempty"        jsonschema:"optional RFC3339 expiry"`
-	VerifiedAt      string   `json:"verified_at,omitempty"       jsonschema:"optional last verification time (RFC3339)"`
+	ExpiresAt       string   `json:"expires_at,omitempty"        jsonschema:"optional expiry (YYYY-MM-DD or RFC3339)"`
+	VerifiedAt      string   `json:"verified_at,omitempty"       jsonschema:"optional last verification (YYYY-MM-DD or RFC3339)"`
 	VerifiedBy      string   `json:"verified_by,omitempty"       jsonschema:"optional last verifier @handle"`
 	Reviewers       []string `json:"reviewers,omitempty"         jsonschema:"reviewer handles (sorted)"`
 	Body            string   `json:"body,omitempty"              jsonschema:"raw markdown body below the frontmatter (empty if none)"`
@@ -343,8 +343,8 @@ type AssumptionSummary struct {
 	Status          string   `json:"status"           jsonschema:"draft or active or superseded"`
 	CreatedBy       string   `json:"created_by"       jsonschema:"@handle or agent:<model>"`
 	UpdatedAt       string   `json:"updated_at"       jsonschema:"RFC3339 timestamp"`
-	ExpiresAt       string   `json:"expires_at,omitempty" jsonschema:"optional RFC3339 expiry"`
-	VerifiedAt      string   `json:"verified_at,omitempty" jsonschema:"optional last verification time (RFC3339)"`
+	ExpiresAt       string   `json:"expires_at,omitempty" jsonschema:"optional expiry (YYYY-MM-DD or RFC3339)"`
+	VerifiedAt      string   `json:"verified_at,omitempty" jsonschema:"optional last verification (YYYY-MM-DD or RFC3339)"`
 	VerifiedBy      string   `json:"verified_by,omitempty" jsonschema:"optional last verifier @handle"`
 	Reviewers       []string `json:"reviewers,omitempty"   jsonschema:"reviewer handles (sorted)"`
 }
@@ -352,13 +352,15 @@ type AssumptionSummary struct {
 // --- kron_delete ------------------------------------------------------
 
 type DeleteInput struct {
-	Slug string `json:"slug" jsonschema:"slug of the intent to soft-delete"`
+	Slug           string `json:"slug"                      jsonschema:"slug of the intent to soft-delete"`
+	ConfirmSubtree bool   `json:"confirm_subtree,omitempty" jsonschema:"required for node intents: acknowledge that the whole subtree moves to trash"`
 }
 
 type DeleteOutput struct {
-	OK          bool     `json:"ok"           jsonschema:"true on success"`
-	TrashedPath string   `json:"trashed_path" jsonschema:"relative path the file was moved to"`
-	Dependents  []string `json:"dependents"   jsonschema:"intents that listed slug in depends_on (sorted, for caller awareness)"`
+	OK           bool     `json:"ok"            jsonschema:"true on success"`
+	TrashedPath  string   `json:"trashed_path"  jsonschema:"relative path the entry was moved to (file for leaf, directory for node)"`
+	Dependents   []string `json:"dependents"    jsonschema:"intents that depend on the deleted entry or its subtree (sorted)"`
+	DeletedSlugs []string `json:"deleted_slugs,omitempty" jsonschema:"every intent slug removed by this call (node subtree included)"`
 }
 
 // --- kron_restore -----------------------------------------------------
@@ -368,8 +370,9 @@ type RestoreInput struct {
 }
 
 type RestoreOutput struct {
-	OK   bool   `json:"ok"   jsonschema:"true on success"`
-	Path string `json:"path" jsonschema:"relative path the file was moved to (.kron/intents/<slug>.md)"`
+	OK            bool     `json:"ok"             jsonschema:"true on success"`
+	Path          string   `json:"path"           jsonschema:"relative path the entry was restored to (.kron/intents/<slug>.md or <slug>/)"`
+	RestoredSlugs []string `json:"restored_slugs,omitempty" jsonschema:"every intent slug brought back by this call (node subtree included)"`
 }
 
 // --- kron_assume_check -----------------------------------------------
@@ -385,7 +388,7 @@ type AssumeWarning struct {
 	DefaultSeverity string `json:"default_severity,omitempty" jsonschema:"registry default severity (B-3); empty if registry absent"`
 	Text            string `json:"text"                     jsonschema:"human-readable claim (preferred from registry)"`
 	Rationale       string `json:"rationale,omitempty"     jsonschema:"per-intent explanation of why this severity (B-3)"`
-	ExpiresAt       string `json:"expires_at,omitempty"     jsonschema:"optional RFC3339 expiry"`
+	ExpiresAt       string `json:"expires_at,omitempty"     jsonschema:"optional expiry (YYYY-MM-DD or RFC3339)"`
 	DaysRemaining   *int   `json:"days_remaining,omitempty" jsonschema:"optional days until expiry (negative if expired)"`
 	Verified        bool   `json:"verified"                jsonschema:"true if VerifiedAt is set"`
 }
@@ -509,23 +512,114 @@ type StaleOutput struct {
 //
 // If you add a tool, append it to this slice AND its handler to
 // handlers_*.go with consistent naming.
-func registerTools(server *mcp.Server) {
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_add", Description: "Create a new intent file at .kron/intents/<slug>.md."}, HandleAdd)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_check", Description: "Inspect every intent's assumptions[] and surface expired / unverified hard assumptions."}, HandleAssumeCheck)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_create", Description: "Create a new assumption registry file at .kron/assumptions/<id>.md."}, HandleAssumptionCreate)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_delete", Description: "Soft-delete an assumption (move to .kron/.trash/assumptions/)."}, HandleAssumptionDelete)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_get", Description: "Load a single assumption by id (full frontmatter + body + source path)."}, HandleAssumptionGet)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_list", Description: "List every assumption in the registry, optionally filtered by status."}, HandleAssumptionList)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_assume_update", Description: "Patch an existing assumption registry file (PATCH semantics)."}, HandleAssumptionUpdate)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_delete", Description: "Soft-delete an intent (move to .kron/.trash/)."}, HandleDelete)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_get", Description: "Load a single intent by slug (full frontmatter + body)."}, HandleGet)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_impact", Description: "Reverse-link view: who depends on, references, and anchors an intent."}, HandleImpact)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_init", Description: "Create the .kron/ skeleton (idempotent)."}, HandleInit)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_intent_density", Description: "Cross-an intent-coverage: how many intents have anchors, which source files lack anchors."}, HandleIntentDensity)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_lint", Description: "Run lint over .kron/intents/ (frontmatter, dangling refs, depends_on cycles)."}, HandleLint)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_list", Description: "List every intent (with optional prefix filter)."}, HandleList)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_restore", Description: "Restore a soft-deleted intent from .kron/.trash/."}, HandleRestore)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_stale", Description: "Find active intents older than days_threshold and expired hard assumptions."}, HandleStale)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_tree", Description: "Return the full intent directory tree (root + nested children) for GUI/IDE tree views."}, HandleTree)
-	mcp.AddTool(server, &mcp.Tool{Name: "kron_update", Description: "Patch an existing intent (PATCH semantics; only supplied fields are touched)."}, HandleUpdate)
+// toolAnnotations returns MCP safety hints for one tool. Kron tools only
+// touch the local .kron/ tree, so openWorldHint is always false. The
+// destructive flag matters for client confirmation UX: `kron_delete` /
+// `kron_assume_delete` remove files, while add/update/restore are additive.
+func toolAnnotations(readOnly, destructive, idempotent bool) *mcp.ToolAnnotations {
+	openWorld := false
+	return &mcp.ToolAnnotations{
+		ReadOnlyHint:    readOnly,
+		DestructiveHint: &destructive,
+		IdempotentHint:  idempotent,
+		OpenWorldHint:   &openWorld,
+	}
+}
+
+// registerTools installs the 18 kron_* tools with their wire metadata.
+//
+// Every tool carries a human-readable Title plus MCP ToolAnnotations so
+// clients can render safe confirmations (read-only vs destructive) and
+// agents can reason about repeatability.
+func registerTools(server *mcp.Server, intentTemplate string) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_add", Title: "Create intent",
+		Description: intentToolDescription("Create a new intent file at .kron/intents/<slug>.md.", intentTemplate),
+		Annotations: toolAnnotations(false, false, false),
+	}, HandleAdd)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_assume_check", Title: "Check assumptions",
+		Description: "Inspect every intent's assumptions[] and surface expired / unverified hard assumptions.",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleAssumeCheck)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_assume_create", Title: "Create assumption",
+		Description: "Create a new assumption registry file at .kron/assumptions/<id>.md.",
+		Annotations: toolAnnotations(false, false, false),
+	}, HandleAssumptionCreate)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_assume_delete", Title: "Delete assumption",
+		Description: "Soft-delete an assumption (move to .kron/.trash/assumptions/).",
+		Annotations: toolAnnotations(false, true, true),
+	}, HandleAssumptionDelete)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_assume_get", Title: "Get assumption",
+		Description: "Load a single assumption by id (full frontmatter + body + source path).",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleAssumptionGet)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_assume_list", Title: "List assumptions",
+		Description: "List every assumption in the registry, optionally filtered by status.",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleAssumptionList)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_assume_update", Title: "Update assumption",
+		Description: "Patch an existing assumption registry file (PATCH semantics).",
+		Annotations: toolAnnotations(false, false, true),
+	}, HandleAssumptionUpdate)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_delete", Title: "Delete intent",
+		Description: "Soft-delete an intent (move to .kron/.trash/). Node intents require confirm_subtree.",
+		Annotations: toolAnnotations(false, true, true),
+	}, HandleDelete)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_get", Title: "Get intent",
+		Description: "Load a single intent by slug (full frontmatter + body).",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleGet)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_impact", Title: "Intent impact",
+		Description: "Reverse-link view: who depends on, references, and anchors an intent.",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleImpact)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_init", Title: "Initialize Kron project",
+		Description: "Create the .kron/ skeleton (idempotent) and register the project as current.",
+		Annotations: toolAnnotations(false, false, true),
+	}, HandleInit)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_intent_density", Title: "Intent coverage density",
+		Description: "Cross-an intent-coverage: how many intents have anchors, which source files lack anchors.",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleIntentDensity)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_lint", Title: "Lint intents",
+		Description: "Run lint over .kron/intents/ (frontmatter, dangling refs, depends_on cycles, assumption rules).",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleLint)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_list", Title: "List intents",
+		Description: "List every intent (with optional prefix filter), including assumptions and link fields.",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleList)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_restore", Title: "Restore intent",
+		Description: "Restore a soft-deleted intent from .kron/.trash/ (node subtrees restore as a whole).",
+		Annotations: toolAnnotations(false, false, true),
+	}, HandleRestore)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_stale", Title: "Find stale intents",
+		Description: "Find active intents older than days_threshold and expired hard assumptions.",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleStale)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_tree", Title: "Intent tree",
+		Description: "Return the full intent directory tree (root + nested children) for GUI/IDE tree views.",
+		Annotations: toolAnnotations(true, false, true),
+	}, HandleTree)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "kron_update", Title: "Update intent",
+		Description: intentToolDescription("Patch an existing intent (PATCH semantics; only supplied fields are touched).", intentTemplate),
+		Annotations: toolAnnotations(false, false, true),
+	}, HandleUpdate)
 }

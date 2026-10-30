@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kron logo — v1 final</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #f4f4f0;
+        --paper: #101010;
+        --accent: #f4f4f0;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        min-height: 100%;
+        margin: 0;
+      }
+
+      body {
+        display: grid;
+        min-height: 100svh;
+        place-items: center;
+        padding: 2rem;
+        background:
+          radial-gradient(circle at 50% 35%, #242424 0, #151515 34%, var(--paper) 72%),
+          var(--paper);
+        color: var(--ink);
+        font-family: Arial, Helvetica, sans-serif;
+      }
+
+      .stage {
+        display: grid;
+        gap: 1.25rem;
+        justify-items: center;
+      }
+
+      .logo {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        grid-template-rows: repeat(2, 1fr);
+        width: min(78vw, 30rem);
+        aspect-ratio: 1;
+        overflow: hidden;
+        background: var(--paper);
+        box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 35%);
+      }
+
+      .cell {
+        display: grid;
+        min-width: 0;
+        min-height: 0;
+        place-items: center;
+        background: var(--paper);
+        color: var(--ink);
+      }
+
+      .letter {
+        display: block;
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+      }
+
+      .letter path,
+      .letter polygon,
+      .letter rect,
+      .letter circle {
+        fill: currentColor;
+      }
+
+      .letter .cutout {
+        fill: var(--paper);
+      }
+
+      /* The final N tile reverses the mark's colors. */
+      .cell--inverse {
+        background: var(--accent);
+        color: var(--paper);
+        clip-path: polygon(0 0, 88% 0, 100% 12%, 100% 100%, 12% 100%, 0 88%);
+      }
+
+      .caption {
+        margin: 0;
+        color: rgb(244 244 240 / 60%);
+        font-size: 0.7rem;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="stage" aria-label="Kron logo preview">
+      <div class="logo" role="img" aria-label="Kron logo: K R on the first row, O N on the second row">
+        <span class="cell">
+          <svg class="letter" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M8 5h20v35l34-35h28L51 48l40 47H63L28 59v36H8z" />
+          </svg>
+        </span>
+        <span class="cell">
+          <svg class="letter" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <path fill-rule="evenodd" d="M8 5h48c21 0 34 11 34 28 0 12-7 22-20 26l23 36H69L49 64H28v31H8zM28 21v27h24c11 0 18-5 18-14s-7-13-18-13z" />
+          </svg>
+        </span>
+        <span class="cell">
+          <svg class="letter" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <circle cx="50" cy="50" r="46" />
+            <circle class="cutout" cx="50" cy="50" r="27" />
+          </svg>
+        </span>
+        <span class="cell cell--inverse">
+          <svg class="letter" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M8 95V5h22l40 53V5h22v90H70L30 42v53z" />
+          </svg>
+        </span>
+      </div>
+      <p class="caption">Kron / v1 final</p>
+    </main>
+  </body>
+</html>

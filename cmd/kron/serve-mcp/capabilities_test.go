@@ -41,12 +41,13 @@ import (
 // returns its `capabilities` field. We decode that and assert the
 // expected shape.
 func TestCapabilities_ExplicitContract(t *testing.T) {
-	server := mcp.NewServer(&mcp.Implementation{Name: "kron-cap-test", Version: "v1.2.0"}, nil)
+	server := newKronServer("")
 	server.AddReceivingMiddleware(callerInjectMiddleware(t.TempDir()))
-	registerTools(server)
+	registerTools(server, "")
 	// 2026-10-14: register the 3 prompts so the capability check
 	// below covers the new auto-inferred prompts capability too.
 	registerPrompts(server)
+	registerResources(server)
 
 	st, ct := mcp.NewInMemoryTransports()
 	ss, err := server.Connect(context.Background(), st, nil)
@@ -78,12 +79,16 @@ func TestCapabilities_ExplicitContract(t *testing.T) {
 	}
 	var wire struct {
 		Capabilities json.RawMessage `json:"capabilities"`
+		Instructions string          `json:"instructions"`
 	}
 	if err := json.Unmarshal(raw, &wire); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if len(wire.Capabilities) == 0 {
 		t.Fatal("capabilities is empty in initialize response")
+	}
+	if wire.Instructions == "" {
+		t.Error("initialize response must carry ServerOptions.Instructions")
 	}
 
 	// Decode the capabilities as a map so we can do field-by-field
@@ -93,15 +98,16 @@ func TestCapabilities_ExplicitContract(t *testing.T) {
 		t.Fatalf("unmarshal caps: %v", err)
 	}
 
-	// Resources MUST be absent (we never register any).
-	if _, ok := caps["resources"]; ok {
-		t.Errorf("expected resources to be absent, got %s", string(caps["resources"]))
+	// Resources MUST be present: the server registers the
+	// kron://intents/{+slug} template via registerResources.
+	if _, ok := caps["resources"]; !ok {
+		t.Fatal("expected resources capability (kron://intents/{+slug} template registered)")
 	}
 
-	// Tools must be present (we register 17 tools in registerTools).
+	// Tools must be present (we register 18 tools in registerTools).
 	tools, ok := caps["tools"]
 	if !ok {
-		t.Fatal("expected tools capability to be present (we register 17 tools)")
+		t.Fatal("expected tools capability to be present (we register 18 tools)")
 	}
 	var toolsCap struct {
 		ListChanged bool `json:"listChanged"`
@@ -133,12 +139,24 @@ func TestCapabilities_ExplicitContract(t *testing.T) {
 		t.Error("expected prompts.listChanged = true (SDK auto-infer from registered prompts)")
 	}
 
-	// Logging: SDK unconditionally advertises Logging: {} (we
-	// cannot disable this in v1.1.0). Document the behaviour:
-	// clients may call logging/setLevel, and will receive a
-	// method-not-found error because we never register a
-	// logging handler. This is acceptable per MCP spec.
+	// Logging: the SDK always advertises Logging: {} and handles
+	// logging/setLevel itself; shimHandler forwards slog records via
+	// session.Log once the client sets a level.
 	if _, ok := caps["logging"]; !ok {
-		t.Error("expected logging capability to be present (SDK default: empty struct; clients calling logging/setLevel will get method-not-found)")
+		t.Error("expected logging capability (SDK default + setLevel handled by the SDK)")
+	}
+
+	// Every tool must carry a human Title and MCP safety annotations.
+	toolsRes, err := cs.ListTools(context.Background(), &mcp.ListToolsParams{})
+	if err != nil {
+		t.Fatalf("tools/list: %v", err)
+	}
+	for _, tool := range toolsRes.Tools {
+		if tool.Title == "" {
+			t.Errorf("%s: missing Title", tool.Name)
+		}
+		if tool.Annotations == nil {
+			t.Errorf("%s: missing ToolAnnotations", tool.Name)
+		}
 	}
 }
