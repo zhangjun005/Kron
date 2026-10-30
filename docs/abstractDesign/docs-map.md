@@ -16,7 +16,7 @@
 | **F 实施建议** | F | 具体 API 签名、工具契约；B 的展开，不可与之矛盾 | 6 active（客户端与 LSP/VSCode 专题交接 + Wails 桥契约；旧 8 份见下） |
 | **G 实施流程** | G | 决策树与检查清单；触发时强制遵循 | 8 |
 | **H 哲学愿景** | H | 学术论文摘要与设计原则；D 的来源之一 | 2 |
-| **K 实景** | K | 真实代码 + 真实场景下的 Kron 行为示例；人类友好的入口 | 1 |
+| **K 实景** | K | 真实代码 + 真实场景下的 Kron 行为示例；人类友好的入口 | 2 |
 
 另有协作共识文件：
 
@@ -192,6 +192,7 @@ A (requirements.md)  ──►  D (business.md)  ──►  B (architecture.md)
 | **H** | `docs/article.md` | — |
 | **H** | `docs/persuasion.md` | — |
 | **K** | `docs/how-it-works.md` | `internal/model/intent.go` (代码示例的真实类型) |
+| **K** | `docs/getting-started.md` | README.md (安装 / 编辑 / AI 接入的渐进式教程) |
 | **I** | `AGENTS.md` | B, C, F, G |
 | **J** | `.cursor/rules/project-conventions.mdc` | B, F |
 | **Z** | [`.deprecated/`](../../.deprecated/) | — (软删归档, 2026-10-08 起; `.gitignore` 显式排除新文件, 已 index 文件保留) |
