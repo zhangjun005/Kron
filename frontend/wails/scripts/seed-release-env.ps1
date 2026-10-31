@@ -135,14 +135,8 @@ $guiSettings = @"
 Set-Content -Path (Join-Path $App 'guiSettings.json') -Value $guiSettings.Trim() -Encoding UTF8
 
 # ---- 5. release-like README.txt -------------------------------------------
-$readme = @"
-Kron test bundle (release-shaped)
-
-1) Double-click Kron-GUI.exe (it finds kron.exe next to it).
-2) kron.exe is the CLI + MCP/LSP server (kron serve-mcp / kron serve-lsp).
-3) projects.json (next to both executables) selects the active project.
-"@
-Set-Content -Path (Join-Path $App 'README.txt') -Value $readme -Encoding ASCII
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'release-bundle-README.txt') `
+    -Destination (Join-Path $App 'README.txt') -Force
 
 Write-Output "seeded release-like env: $App"
 Write-Output "  Kron-GUI.exe  = Wails GUI"
