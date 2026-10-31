@@ -25,11 +25,18 @@ v0.3.0 是从 `develop` 合入 `master` 的首个正式发布版本，对应 rel
 
 | 产物 | 大小 | SHA-256 |
 |---|---:|---|
-| `Kron-v0.3.0-windows-amd64.zip` | 16,385,103 B | `311A1CDD4668EE4E67395138DB91B62E981824D2AA08589F32F8DAA21F17DF41` |
+| `Kron-v0.3.0-windows-amd64.zip` | 16,385,429 B | `C22A731E2A54C34FCDA3CA05AB08CC4B38811399CE78254EF2EE450D9A238B5A` |
 | `kron-vscode-0.3.0.vsix` | 4,701,001 B | `1015B45F1E1FEF1016F8202ED01C51962DE8DFBDD61A43AB0DA7DC375817EE3B` |
 
 zip 内含：`kron.exe`（CLI + serve-mcp + serve-lsp）、`Kron-GUI.exe`（Wails）、
 `kron-vscode-0.3.0.vsix`、`README.txt`、`LICENSE`。
+
+`README.txt` 现在包含 **Quick start + MCP Setup**（Claude Desktop / Cursor 的
+`mcpServers` 示例、`serve-mcp -CWD` 与无 `-CWD` 时 `projects.json::current_project`
+的默认项目行为）。模板位于 `frontend/wails/scripts/release-bundle-README.txt`。
+
+> 2026-10-30 发布后更新：bundle README 补充了 MCP 配置说明，release zip 已替换，
+> 上表为新 zip 的大小 / SHA-256（旧的 `311A1CDD…` 作废）。VSIX 未变化。
 
 ## 构建方式
 
@@ -55,7 +62,7 @@ cd ..; npm run compile; npm run package
 
 发布前后**没有删除**任何 PR 或分支：
 
-- PR #1–#8 全部保留（closed / merged）
+- PR #1–#11 全部保留（closed / merged；含发布 PR #8 与后续文档 PR #9–#11）
 - 远端分支保留（含 `chore/release-v0.3.0`）
 - 该记录用于课程项目汇报的提交 / PR / Release 链路追溯：
 
