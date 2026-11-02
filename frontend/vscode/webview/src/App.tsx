@@ -643,7 +643,7 @@ function App(): JSX.Element {
             }
           }
           setTreeRelations(next)
-          setLiveDetails((current) => ({ ...current, ...loaded }))
+          setLiveDetails(loaded)
         })
         setSelectedSlug((current) => entries.some(({ node }) => node.slug === current)
           ? current
