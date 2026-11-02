@@ -19,11 +19,19 @@ import {
     FileText,
     Folder,
     LocateFixed,
+    Lock,
     PencilLine,
+    Unlock,
     X,
 } from 'lucide-react';
 import {cn} from '@/lib/utils';
 import type {IntentNode, IntentStatus} from '@/lib/intent-types';
+
+type OpenPanel = {
+    id: string;
+    offset: {x: number; y: number};
+    locked: boolean;
+};
 
 interface IntentCanvasProps {
     data: IntentNode[];
@@ -184,19 +192,46 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
     const [panning, setPanning] = useState<boolean>(false);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const dragRef = useRef<{startX: number; startY: number; originX: number; originY: number; moved: boolean} | null>(null);
-    const panelRef = useRef<HTMLDivElement | null>(null);
-    // The info card is draggable by grabbing anywhere inside it that is not an
-    // interactive control. Offset is relative to the node anchor, so canvas
-    // panning keeps the card attached to its node.
-    const [panelOffset, setPanelOffset] = useState<{x: number; y: number}>({x: 0, y: 0});
-    const [draggingPanel, setDraggingPanel] = useState<boolean>(false);
-    const panelDragRef = useRef<{startX: number; startY: number; originX: number; originY: number} | null>(null);
+    // Multiple intent cards may be open at once. Each card owns its own drag
+    // offset and lock state; selectedId stays the active/focused card.
+    const [openPanels, setOpenPanels] = useState<OpenPanel[]>([]);
+    const [draggingPanelId, setDraggingPanelId] = useState<string | null>(null);
+    const panelDragRef = useRef<{id: string; startX: number; startY: number; originX: number; originY: number} | null>(null);
 
-    // A new selection starts the card at its default anchor position.
+    const closeUnlockedPanels = useCallback((): void => {
+        const kept = openPanels.filter((panel) => panel.locked);
+        if (kept.length === openPanels.length) return;
+        setOpenPanels(kept);
+        if (selectedId !== null && !kept.some((panel) => panel.id === selectedId)) {
+            onSelectedIdChange(kept[0]?.id ?? null);
+        }
+    }, [openPanels, selectedId, onSelectedIdChange]);
+
+    const activateNode = useCallback((id: string, isSelected: boolean): void => {
+        const existing = openPanels.find((panel) => panel.id === id);
+        if (existing === undefined) {
+            setOpenPanels((current) => [...current, {id, offset: {x: 0, y: 0}, locked: false}]);
+            onSelectedIdChange(id);
+            return;
+        }
+        if (!isSelected) {
+            onSelectedIdChange(id);
+            return;
+        }
+        if (existing.locked) {
+            setOpenPanels((current) => current.map((panel) => panel.id === id ? {...panel, locked: false} : panel));
+            return;
+        }
+        setOpenPanels((current) => current.filter((panel) => panel.id !== id));
+        onSelectedIdChange(null);
+    }, [openPanels, onSelectedIdChange]);
+
+    // Left-rail selection / host-driven selection ensures a card exists.
     useEffect(() => {
-        setPanelOffset({x: 0, y: 0});
-        setDraggingPanel(false);
-        panelDragRef.current = null;
+        if (selectedId === null) return;
+        setOpenPanels((current) => current.some((panel) => panel.id === selectedId)
+            ? current
+            : [...current, {id: selectedId, offset: {x: 0, y: 0}, locked: false}]);
     }, [selectedId]);
 
     const query = filter.trim().toLowerCase();
@@ -284,17 +319,16 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
         onSelectedIdChange(null);
     }, [onSelectedIdChange]);
 
-    // Close the info card on outside click / Escape.
+    // Outside click / Escape close every UNLOCKED card. Locked cards stay.
     useEffect(() => {
-        if (selectedId === null) return;
         const onPointerDown = (event: PointerEvent): void => {
             const target = event.target as HTMLElement | null;
-            if (panelRef.current !== null && target !== null && panelRef.current.contains(target)) return;
+            if (target !== null && target.closest('[data-intent-panel="true"]') !== null) return;
             if (target !== null && target.closest('[data-intent-node="true"]') !== null) return;
-            onSelectedIdChange(null);
+            closeUnlockedPanels();
         };
         const onKeyDown = (event: KeyboardEvent): void => {
-            if (event.key === 'Escape') onSelectedIdChange(null);
+            if (event.key === 'Escape') closeUnlockedPanels();
         };
         document.addEventListener('pointerdown', onPointerDown);
         document.addEventListener('keydown', onKeyDown);
@@ -302,7 +336,7 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
             document.removeEventListener('pointerdown', onPointerDown);
             document.removeEventListener('keydown', onKeyDown);
         };
-    }, [selectedId]);
+    }, [closeUnlockedPanels]);
 
     // Pan with plain mouse events: Wails' WebView2 does not deliver
     // PointerEvents for injected/assisted input in every host, and mouse
@@ -318,11 +352,8 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
             setPan({x: drag.originX + dx, y: drag.originY + dy});
         };
         const onUp = (): void => {
-            const drag = dragRef.current;
             dragRef.current = null;
             setPanning(false);
-            // A plain click on empty canvas dismisses the info card.
-            if (drag !== null && !drag.moved) onSelectedIdChange(null);
         };
         window.addEventListener('mousemove', onMove);
         window.addEventListener('mouseup', onUp);
@@ -336,6 +367,8 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
         const target = event.target as HTMLElement;
         if (target.closest('[data-intent-node="true"]') !== null) return;
         if (target.closest('[data-intent-panel="true"]') !== null) return;
+        // Clicking or starting a drag on empty canvas closes unlocked cards.
+        closeUnlockedPanels();
         dragRef.current = {
             startX: event.clientX,
             startY: event.clientY,
@@ -519,12 +552,12 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
                                 }}
                                 onClick={(event): void => {
                                     event.stopPropagation();
-                                    onSelectedIdChange(isSelected ? null : laid.node.id);
+                                    activateNode(laid.node.id, isSelected);
                                 }}
                                 onKeyDown={(event): void => {
                                     if (event.key === 'Enter' || event.key === ' ') {
                                         event.preventDefault();
-                                        onSelectedIdChange(isSelected ? null : laid.node.id);
+                                        activateNode(laid.node.id, isSelected);
                                     }
                                 }}
                             >
@@ -556,22 +589,26 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
                         );
                     })}
 
-                    {/* Info card: expands below the selected node. Draggable by
-                        grabbing anywhere inside it except interactive controls;
-                        a click outside (or ×) still closes it. */}
-                    {selected !== null && (
+                    {/* Intent cards: one per open node. Each card is independently
+                        draggable and lockable; only the × (or clicking its own
+                        node while unlocked) closes it. */}
+                    {openPanels.map((panel) => {
+                        const selected = layout.nodes.find((laid) => laid.node.id === panel.id) ?? null;
+                        if (selected === null) return null;
+                        return (
                         <div
-                            ref={panelRef}
+                            key={panel.id}
                             data-intent-panel="true"
                             role="dialog"
                             aria-label={`${selected.node.title} details`}
                             className={cn(
-                                'absolute z-20 w-[360px] max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-popover p-3.5 text-popover-foreground shadow-xl',
-                                draggingPanel ? 'cursor-grabbing select-none' : 'cursor-grab',
+                                'absolute w-[360px] max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-popover p-3.5 text-popover-foreground shadow-xl',
+                                selectedId === panel.id ? 'z-30' : 'z-20',
+                                draggingPanelId === panel.id ? 'cursor-grabbing select-none' : 'cursor-grab',
                             )}
                             style={{
-                                left: selected.x + panelOffset.x,
-                                top: selected.y + NODE_H + 12 + panelOffset.y,
+                                left: selected.x + panel.offset.x,
+                                top: selected.y + NODE_H + 12 + panel.offset.y,
                             }}
                             onPointerDown={(event): void => {
                                 const target = event.target as HTMLElement;
@@ -583,31 +620,37 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
                                 event.preventDefault();
                                 event.currentTarget.setPointerCapture(event.pointerId);
                                 panelDragRef.current = {
+                                    id: panel.id,
                                     startX: event.clientX,
                                     startY: event.clientY,
-                                    originX: panelOffset.x,
-                                    originY: panelOffset.y,
+                                    originX: panel.offset.x,
+                                    originY: panel.offset.y,
                                 };
-                                setDraggingPanel(true);
+                                setDraggingPanelId(panel.id);
                             }}
                             onPointerMove={(event): void => {
                                 const drag = panelDragRef.current;
                                 if (drag === null) return;
                                 event.stopPropagation();
-                                setPanelOffset({
-                                    x: drag.originX + (event.clientX - drag.startX),
-                                    y: drag.originY + (event.clientY - drag.startY),
-                                });
+                                setOpenPanels((current) => current.map((item) => item.id === panel.id
+                                    ? {
+                                        ...item,
+                                        offset: {
+                                            x: drag.originX + (event.clientX - drag.startX),
+                                            y: drag.originY + (event.clientY - drag.startY),
+                                        },
+                                    }
+                                    : item));
                             }}
                             onPointerUp={(event): void => {
                                 if (panelDragRef.current === null) return;
                                 event.stopPropagation();
                                 panelDragRef.current = null;
-                                setDraggingPanel(false);
+                                setDraggingPanelId(null);
                             }}
                             onPointerCancel={(): void => {
                                 panelDragRef.current = null;
-                                setDraggingPanel(false);
+                                setDraggingPanelId(null);
                             }}
                         >
                             <div className="flex items-start gap-2">
@@ -621,9 +664,29 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
                                 </div>
                                 <button
                                     type="button"
+                                    aria-label={panel.locked ? 'Unlock details' : 'Lock details'}
+                                    title={panel.locked ? 'Unlock details' : 'Lock details'}
+                                    className={cn(
+                                        'rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground',
+                                        panel.locked ? 'text-foreground' : '',
+                                    )}
+                                    onClick={(): void => {
+                                        setOpenPanels((current) => current.map((item) => item.id === panel.id
+                                            ? {...item, locked: !item.locked}
+                                            : item));
+                                    }}
+                                >
+                                    {panel.locked ? <Lock className="h-3.5 w-3.5"/> : <Unlock className="h-3.5 w-3.5"/>}
+                                </button>
+                                <button
+                                    type="button"
                                     aria-label="Close details"
+                                    title="Close details"
                                     className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                                    onClick={(): void => onSelectedIdChange(null)}
+                                    onClick={(): void => {
+                                        setOpenPanels((current) => current.filter((item) => item.id !== panel.id));
+                                        if (selectedId === panel.id) onSelectedIdChange(null);
+                                    }}
                                 >
                                     <X className="h-3.5 w-3.5"/>
                                 </button>
@@ -743,7 +806,8 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
                                 Read-only preview. Edit the Markdown file in your IDE.
                             </p>
                         </div>
-                    )}
+                        );
+                    })}
                 </div>
             </div>
 
