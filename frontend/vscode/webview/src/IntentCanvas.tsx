@@ -267,6 +267,12 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
     }
   }
 
+  // Host/sidebar selection should open a window too; canvas clicks call
+  // openWindow directly, but external selection only changes selectedSlug.
+  useEffect(() => {
+    if (selectedSlug !== '') openWindow(selectedSlug)
+  }, [selectedSlug])
+
   // External jumps (host "Open Intent", assumption "Used by") reveal the card
   // for the already-selected node; ordinary clicking is handled by the node.
   useEffect(() => {
