@@ -318,7 +318,13 @@ func (a *App) AddProject() (ListProjectsLiveResult, error) {
 	}
 	cmd := exec.Command(command, action, "-CWD", root)
 	cmd.SysProcAttr = hiddenProcAttr()
-	cmd.Env = append(os.Environ(), "KRON_PROJECTS_JSON_PATH="+registryPath)
+	env := make([]string, 0, len(os.Environ())+1)
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "KRON_PROJECTS_JSON_PATH=") {
+			env = append(env, entry)
+		}
+	}
+	cmd.Env = append(env, "KRON_PROJECTS_JSON_PATH="+registryPath)
 	if output, runErr := cmd.CombinedOutput(); runErr != nil {
 		return ListProjectsLiveResult{}, fmt.Errorf("wails: kron %s %q failed: %w (%s)", action, root, runErr, strings.TrimSpace(string(output)))
 	}

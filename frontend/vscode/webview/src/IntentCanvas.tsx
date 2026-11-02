@@ -297,6 +297,7 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
+        if (document.querySelector('[aria-modal="true"]') !== null) return
         setContextMenu(null)
         setLinking(null)
         setLinkError(null)
