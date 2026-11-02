@@ -81,6 +81,8 @@ type AssumptionCheck = {
   warnings: Array<{ intentSlug: string; assumptionId: string; text: string; severity: string; verified: boolean }>
 }
 
+type UnsavedChoice = 'save' | 'discard' | 'cancel'
+
 type IntentDraft = Pick<Intent, 'slug' | 'kind' | 'title' | 'symbol' | 'status' | 'body'> & {
   summary: string
   reviewersText: string
@@ -467,6 +469,7 @@ function App(): JSX.Element {
   const [draft, setDraft] = useState<IntentDraft>(newDraft())
   const [draftParentSlug, setDraftParentSlug] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
+  const [unsavedPrompt, setUnsavedPrompt] = useState<{ resolve: (choice: UnsavedChoice) => void } | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [pendingDeleteSlug, setPendingDeleteSlug] = useState<string | null>(null)
   const [pendingEditSlug, setPendingEditSlug] = useState<string | null>(null)
@@ -821,31 +824,31 @@ function App(): JSX.Element {
     }
   }
 
-  const saveIntent = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+  const saveIntent = async (event: FormEvent<HTMLFormElement>): Promise<boolean> => {
     event.preventDefault()
-    if (formMode === null) return
+    if (formMode === null) return false
     const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/
     if (!slugPattern.test(draft.slug)) {
       setFormError('Use lowercase kebab-case segments, with optional / grouping.')
-      return
+      return false
     }
     if (draftParentSlug !== null) {
       const childSlug = draft.slug.slice(`${draftParentSlug}/`.length)
       if (!draft.slug.startsWith(`${draftParentSlug}/`) || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(childSlug)) {
         setFormError(`This child must have exactly one new slug segment under “${draftParentSlug}/”.`)
-        return
+        return false
       }
     }
     const summary = draft.summary.trim() || summaryFromBody(draft.body) || draft.title.trim()
     if (draft.title.trim() === '') {
       setFormError('Title is required.')
-      return
+      return false
     }
     if (formMode === 'create' && (canEdit
       ? intents.some((intent) => intent.slug === draft.slug)
       : rows.some(({ node }) => node.slug === draft.slug && (!node.is_dir || node.title !== undefined || node.status !== undefined)))) {
       setFormError('An intent with this slug already exists.')
-      return
+      return false
     }
 
     const previous = selectedIntent ?? liveIntent ?? undefined
@@ -874,12 +877,12 @@ function App(): JSX.Element {
       setDraftParentSlug(null)
       setFormError(null)
       setNotice(`Preview ${formMode === 'create' ? 'created' : 'updated'} “${next.title}”. No workspace files were written.`)
-      return
+      return false
     }
 
     if (activeWorkspaceId === undefined) {
       setFormError('Select a workspace in the intent tree before creating an intent.')
-      return
+      return false
     }
     const symbolList = splitLines(draft.symbol)
     const body = formMode === 'create'
@@ -914,6 +917,7 @@ function App(): JSX.Element {
       setDraftParentSlug(null)
       setDetailReload((value) => value + 1)
       requestTree(true)
+      return true
     } catch (requestError: unknown) {
       const message = requestError instanceof Error ? requestError.message : 'Kron could not save this intent.'
       setFormError(created
@@ -924,10 +928,54 @@ function App(): JSX.Element {
         setSelectedSlug(draft.slug)
         requestTree(true)
       }
+      return created
     } finally {
       setSaving(false)
     }
   }
+
+  const askUnsaved = useCallback((): Promise<UnsavedChoice> => new Promise((resolve) => {
+    setUnsavedPrompt({ resolve })
+  }), [])
+
+  const confirmEditing = useCallback(async (): Promise<boolean> => {
+    if (formMode === null) return true
+    const choice = await askUnsaved()
+    if (choice === 'cancel') return false
+    if (choice === 'save') {
+      return await saveIntent({ preventDefault: () => undefined } as FormEvent<HTMLFormElement>)
+    }
+    setFormMode(null)
+    setDraftParentSlug(null)
+    setFormError(null)
+    setAssumptionFormError(null)
+    return true
+  }, [askUnsaved, formMode, saveIntent])
+
+  const requestCloseWindow = useCallback(async (_slug: string): Promise<boolean> => {
+    const proceed = await confirmEditing()
+    if (!proceed) return false
+    setFormMode(null)
+    setDraftParentSlug(null)
+    setFormError(null)
+    setAssumptionFormError(null)
+    return true
+  }, [confirmEditing])
+
+  const requestCloseUnlocked = useCallback(async (): Promise<boolean> => confirmEditing(), [confirmEditing])
+
+  const requestSelectNode = useCallback(async (node: TreeNode): Promise<boolean> => {
+    const proceed = await confirmEditing()
+    if (!proceed) return false
+    setSelectedSlug(node.slug)
+    setFormMode(null)
+    setShowAssumptionForm(false)
+    setPendingDeleteSlug(null)
+    setAssumptionCheck(null)
+    setAssumptionCheckError(null)
+    setAssumptionFormError(null)
+    return true
+  }, [confirmEditing])
 
   const attachAssumption = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
@@ -1714,6 +1762,9 @@ function App(): JSX.Element {
           }}
           editorContent={editorContent}
           assumptionContent={assumptionContent}
+          onRequestCloseWindow={requestCloseWindow}
+          onRequestSelectNode={requestSelectNode}
+          onRequestCloseUnlocked={requestCloseUnlocked}
           onCloseDetails={() => { setFormMode(null); setDraftParentSlug(null); setFormError(null); setAssumptionFormError(null) }}
           onClearSelection={() => { setSelectedSlug(''); setFormMode(null); setDraftParentSlug(null); setFormError(null); setAssumptionCheck(null); setAssumptionCheckError(null); setAssumptionFormError(null) }}
           onSelect={(node) => { setSelectedSlug(node.slug); setFormMode(null); setShowAssumptionForm(false); setPendingDeleteSlug(null); setAssumptionCheck(null); setAssumptionCheckError(null); setAssumptionFormError(null) }}

@@ -194,13 +194,16 @@ type IntentCanvasProps = {
   onOpenCode: () => void
   editorContent: ReactNode | null
   assumptionContent: ReactNode | null
+  onRequestCloseWindow: (slug: string) => Promise<boolean>
+  onRequestSelectNode: (node: TreeNode) => Promise<boolean>
+  onRequestCloseUnlocked: () => Promise<boolean>
   onCloseDetails: () => void
   onClearSelection: () => void
   onSelect: (node: TreeNode) => void
 }
 
 /** Left-to-right, pannable hierarchy canvas, adapted for the VS Code Webview tree contract. */
-export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken, relations, detail, details, detailLoading, onCreateRelation, onCreateChild, onEditIntent, onDeleteIntent, onOpenCode, editorContent, assumptionContent, onCloseDetails, onClearSelection, onSelect }: IntentCanvasProps): JSX.Element {
+export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken, relations, detail, details, detailLoading, onCreateRelation, onCreateChild, onEditIntent, onDeleteIntent, onOpenCode, editorContent, assumptionContent, onRequestCloseWindow, onRequestSelectNode, onRequestCloseUnlocked, onCloseDetails, onClearSelection, onSelect }: IntentCanvasProps): JSX.Element {
   const geometry = useMemo(() => geometryForScale(uiScale), [uiScale])
   const layout = useMemo(() => buildLayout({
     ...root,
@@ -233,14 +236,20 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
     y: geometry.topInset + Math.max(12, (viewportSize.height - geometry.topInset - layout.height * fitScale) / 2),
   }
 
-  const closeUnlockedWindows = (): void => {
+  const closeUnlockedWindows = async (): Promise<boolean> => {
     const kept = openWindows.filter((window) => window.locked)
-    if (kept.length === openWindows.length) return
+    if (kept.length === openWindows.length) return true
+    const activeClosed = selectedSlug !== '' && !kept.some((window) => window.slug === selectedSlug)
+    if (activeClosed && editorContent !== null) {
+      const proceed = await onRequestCloseUnlocked()
+      if (!proceed) return false
+    }
     setOpenWindows(kept)
-    if (selectedSlug !== '' && !kept.some((window) => window.slug === selectedSlug)) {
+    if (activeClosed) {
       onCloseDetails()
       onClearSelection()
     }
+    return true
   }
 
   const openWindow = (slug: string): void => {
@@ -283,7 +292,7 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
         setLinking(null)
         setLinkError(null)
         setExpandedParam(null)
-        closeUnlockedWindows()
+        void closeUnlockedWindows()
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -356,7 +365,7 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
       dragRef.current = null
       setPanning(false)
       setExpandedParam(null)
-      closeUnlockedWindows()
+      void closeUnlockedWindows()
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
@@ -523,9 +532,13 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
                 style={styles}
                 aria-label={`Select workspace ${title}`}
                 onClick={() => {
-                  closeUnlockedWindows()
-                  onSelect(node)
-                  setExpandedParam(null)
+                  void (async () => {
+                    const proceed = await closeUnlockedWindows()
+                    if (!proceed) return
+                    const selected = await onRequestSelectNode(node)
+                    if (!selected) return
+                    setExpandedParam(null)
+                  })()
                 }}
               >{card}</button>
             ) : (
@@ -537,29 +550,45 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
                 style={styles}
                 aria-pressed={selected}
                 onClick={() => {
-                  if (linking !== null) {
-                    chooseLinkTarget(node)
-                    return
-                  }
-                  const existing = openWindows.find((window) => window.slug === node.slug)
-                  if (existing !== undefined) {
-                    if (selectedSlug === node.slug) {
-                      if (existing.locked) {
-                        setOpenWindows((current) => current.map((window) => window.slug === node.slug ? { ...window, locked: false } : window))
+                  void (async () => {
+                    if (linking !== null) {
+                      chooseLinkTarget(node)
+                      return
+                    }
+                    const existing = openWindows.find((window) => window.slug === node.slug)
+                    if (existing !== undefined) {
+                      if (selectedSlug === node.slug) {
+                        if (existing.locked) {
+                          setOpenWindows((current) => current.map((window) => window.slug === node.slug ? { ...window, locked: false } : window))
+                        } else {
+                          if (editorContent !== null) {
+                            const proceed = await onRequestCloseWindow(node.slug)
+                            if (!proceed) return
+                          }
+                          setOpenWindows((current) => current.filter((window) => window.slug !== node.slug))
+                          setExpandedParam(null)
+                          onCloseDetails()
+                          onClearSelection()
+                        }
+                        return
+                      }
+                      if (editorContent !== null) {
+                        const proceed = await onRequestSelectNode(node)
+                        if (!proceed) return
                       } else {
-                        setOpenWindows((current) => current.filter((window) => window.slug !== node.slug))
-                        setExpandedParam(null)
-                        onCloseDetails()
-                        onClearSelection()
+                        onSelect(node)
                       }
                       return
                     }
-                    onSelect(node)
-                    return
-                  }
-                  onSelect(node)
-                  openWindow(node.slug)
-                  setExpandedParam(null)
+                    if (editorContent !== null) {
+                      const proceed = await onRequestSelectNode(node)
+                      if (!proceed) return
+                    } else {
+                      onSelect(node)
+                    }
+                    openWindow(node.slug)
+                    setExpandedParam(null)
+                  })()
                 }}
                 onContextMenu={(event) => {
                   event.preventDefault()
@@ -667,11 +696,17 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
               aria-label="Close intent details"
               title="Close intent details"
               onClick={() => {
-                setOpenWindows((current) => current.filter((item) => item.slug !== window.slug))
-                if (isActive) {
-                  onCloseDetails()
-                  onClearSelection()
-                }
+                void (async () => {
+                  if (isActive && editorContent !== null) {
+                    const proceed = await onRequestCloseWindow(window.slug)
+                    if (!proceed) return
+                  }
+                  setOpenWindows((current) => current.filter((item) => item.slug !== window.slug))
+                  if (isActive) {
+                    onCloseDetails()
+                    onClearSelection()
+                  }
+                })()
               }}
             >×</button>
           </div>
