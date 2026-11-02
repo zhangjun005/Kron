@@ -450,6 +450,7 @@ function EditChip({ label, value, active, onToggle }: { label: string; value: st
 
 function App(): JSX.Element {
   const [intents, setIntents] = useState<Intent[]>(initialIntents)
+  const [liveDetails, setLiveDetails] = useState<Record<string, Intent>>({})
   const [archivedIntents, setArchivedIntents] = useState<Intent[]>([])
   const [assumptions, setAssumptions] = useState<Assumption[]>(initialAssumptions)
   const [tree, setTree] = useState<TreeResult | null>(null)
@@ -626,14 +627,23 @@ function App(): JSX.Element {
         void Promise.allSettled(intentNodes.map(async (node) => {
           const result = await sendMcpRequest('kron_get', { slug: node.slug, include_relations: true }, node.workspaceId)
           const intent = intentFromMcp(result, node)
-          return [node.slug, { references: intent.references, dependsOn: intent.dependsOn, kind: intent.kind, exists: true }] as const
+          return {
+            slug: node.slug,
+            intent,
+            relations: { references: intent.references, dependsOn: intent.dependsOn, kind: intent.kind, exists: true },
+          }
         })).then((settled) => {
           if (relationSequence !== treeRelationSequence.current) return
           const next: Record<string, IntentRelations> = {}
+          const loaded: Record<string, Intent> = {}
           for (const item of settled) {
-            if (item.status === 'fulfilled') next[item.value[0]] = item.value[1]
+            if (item.status === 'fulfilled') {
+              next[item.value.slug] = item.value.relations
+              loaded[item.value.slug] = item.value.intent
+            }
           }
           setTreeRelations(next)
+          setLiveDetails((current) => ({ ...current, ...loaded }))
         })
         setSelectedSlug((current) => entries.some(({ node }) => node.slug === current)
           ? current
@@ -681,6 +691,7 @@ function App(): JSX.Element {
         if (sequence !== detailRequestSequence.current) return
         const intent = intentFromMcp(result, selectedNode)
         setLiveIntent(intent)
+        setLiveDetails((current) => ({ ...current, [intent.slug]: intent }))
         setAssumptions((current) => {
           const next = [...current]
           for (const linked of intent.assumptions) {
@@ -1727,8 +1738,30 @@ function App(): JSX.Element {
     </form>
   )
 
+  const canvasDetails = useMemo(() => {
+    const bySlug = new Map<string, Intent>()
+    for (const intent of intents) bySlug.set(intent.slug, intent)
+    for (const intent of Object.values(liveDetails)) bySlug.set(intent.slug, intent)
+    return [...bySlug.values()]
+  }, [intents, liveDetails])
+
+  const unsavedDialog = unsavedPrompt === null ? null : (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4">
+      <div role="dialog" aria-modal="true" aria-label="Unsaved changes" className="w-full max-w-sm rounded-lg border bg-background p-4 shadow-xl">
+        <p className="text-sm font-semibold">Unsaved changes</p>
+        <p className="mt-1 text-xs text-muted-foreground">Save the current edit before continuing?</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button size="sm" variant="outline" onClick={() => { const resolve = unsavedPrompt.resolve; setUnsavedPrompt(null); resolve('cancel') }}>Cancel</Button>
+          <Button size="sm" variant="outline" onClick={() => { const resolve = unsavedPrompt.resolve; setUnsavedPrompt(null); resolve('discard') }}>Discard</Button>
+          <Button size="sm" onClick={() => { const resolve = unsavedPrompt.resolve; setUnsavedPrompt(null); resolve('save') }}>Save</Button>
+        </div>
+      </div>
+    </div>
+  )
+
   return (
     <main className="h-full w-full overflow-hidden bg-background text-foreground">
+      {unsavedDialog}
       <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden">
         <IntentCanvas
           root={activeTree}
@@ -1738,7 +1771,7 @@ function App(): JSX.Element {
           revealToken={revealToken}
           relations={treeRelations}
           detail={canEdit ? selectedIntent ?? null : liveIntent}
-          details={canEdit ? intents : (liveIntent !== null ? [liveIntent] : [])}
+          details={canvasDetails}
           detailLoading={detailLoading}
           onCreateRelation={createGraphRelation}
           onCreateChild={startCreateChild}
