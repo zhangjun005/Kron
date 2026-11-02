@@ -1690,6 +1690,7 @@ function App(): JSX.Element {
           revealToken={revealToken}
           relations={treeRelations}
           detail={canEdit ? selectedIntent ?? null : liveIntent}
+          details={canEdit ? intents : (liveIntent !== null ? [liveIntent] : [])}
           detailLoading={detailLoading}
           onCreateRelation={createGraphRelation}
           onCreateChild={startCreateChild}

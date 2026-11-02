@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
-import { CircleCheck, CircleDashed, CircleX, FileText, Folder } from 'lucide-react'
+import { CircleCheck, CircleDashed, CircleX, FileText, Folder, Lock, Unlock } from 'lucide-react'
 import type { TreeNode } from '@/lib/mcp-types'
 import { MarkdownPreview } from '@/components/MarkdownPreview'
 
@@ -185,6 +185,7 @@ type IntentCanvasProps = {
   revealToken: number
   relations: Record<string, { references: string[]; dependsOn: string[]; kind?: 'leaf' | 'node'; exists?: boolean }>
   detail: CanvasIntentDetail | null
+  details: CanvasIntentDetail[]
   detailLoading: boolean
   onCreateRelation: (source: TreeNode, target: TreeNode, kind: LinkKind) => Promise<void>
   onCreateChild: (parent: TreeNode, kind: 'leaf' | 'node') => void
@@ -199,7 +200,7 @@ type IntentCanvasProps = {
 }
 
 /** Left-to-right, pannable hierarchy canvas, adapted for the VS Code Webview tree contract. */
-export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken, relations, detail, detailLoading, onCreateRelation, onCreateChild, onEditIntent, onDeleteIntent, onOpenCode, editorContent, assumptionContent, onCloseDetails, onClearSelection, onSelect }: IntentCanvasProps): JSX.Element {
+export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken, relations, detail, details, detailLoading, onCreateRelation, onCreateChild, onEditIntent, onDeleteIntent, onOpenCode, editorContent, assumptionContent, onCloseDetails, onClearSelection, onSelect }: IntentCanvasProps): JSX.Element {
   const geometry = useMemo(() => geometryForScale(uiScale), [uiScale])
   const layout = useMemo(() => buildLayout({
     ...root,
@@ -209,24 +210,21 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
   const [panning, setPanning] = useState(false)
-  const [inspectedSlug, setInspectedSlug] = useState<string | null>(null)
+  const [openWindows, setOpenWindows] = useState<{ slug: string; offset: { x: number; y: number }; locked: boolean }[]>([])
+  const [draggingSlug, setDraggingSlug] = useState<string | null>(null)
   const [expandedParam, setExpandedParam] = useState<ParamKey | null>(null)
   const [contextMenu, setContextMenu] = useState<{ node: TreeNode; x: number; y: number } | null>(null)
   const [linking, setLinking] = useState<{ source: TreeNode; kind: LinkKind; cursor: { x: number; y: number } } | null>(null)
   const [linkSaving, setLinkSaving] = useState(false)
   const [linkError, setLinkError] = useState<string | null>(null)
   const [linkMessage, setLinkMessage] = useState<string | null>(null)
-  const [detailOffset, setDetailOffset] = useState({ x: 0, y: 0 })
-  const [draggingDetail, setDraggingDetail] = useState(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<{ x: number; y: number; originX: number; originY: number; moved: boolean } | null>(null)
-  const detailDragRef = useRef<{ x: number; y: number; originX: number; originY: number } | null>(null)
+  const detailDragRef = useRef<{ slug: string; x: number; y: number; originX: number; originY: number } | null>(null)
   const query = filter.trim().toLowerCase()
   const intents = countLeafIntents(root)
   const hasChildren = (root.children?.length ?? 0) > 0
-  const inspectedNode = inspectedSlug === null ? null : layout.nodes.find(({ node }) => node.slug === inspectedSlug)?.node ?? null
-  const inspectedPosition = inspectedSlug === null ? null : layout.nodes.find(({ node }) => node.slug === inspectedSlug) ?? null
   const fitScale = viewportSize.width > 0 && viewportSize.height > 0
     ? Math.max(0.1, Math.min(1, (viewportSize.width - 32) / layout.width, (viewportSize.height - geometry.topInset - 24) / layout.height))
     : 1
@@ -234,31 +232,38 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
     x: Math.max(16, (viewportSize.width - layout.width * fitScale) / 2),
     y: geometry.topInset + Math.max(12, (viewportSize.height - geometry.topInset - layout.height * fitScale) / 2),
   }
-  // Cards are anchored to a node; clamp them into the canvas so a wide card
-  // (big font size, edit form) never runs off the right or bottom edge.
-  const cardWidth = Math.round((editorContent !== null ? 760 : 380) * uiScale)
-  const cardLeft = fitOffset.x + pan.x + (inspectedPosition?.x ?? 0) * fitScale + detailOffset.x
-  const cardTop = fitOffset.y + pan.y + ((inspectedPosition?.y ?? 0) + geometry.nodeHeight + 12) * fitScale + detailOffset.y
-  const clampedCardLeft = viewportSize.width > 0
-    ? Math.max(8, Math.min(cardLeft, viewportSize.width - cardWidth - 8))
-    : cardLeft
-  const clampedCardTop = viewportSize.height > 0
-    ? Math.max(8, Math.min(cardTop, viewportSize.height - 96))
-    : cardTop
 
-  useEffect(() => {
-    setDetailOffset({ x: 0, y: 0 })
-    setDraggingDetail(false)
-    setExpandedParam(null)
-    detailDragRef.current = null
-  }, [inspectedSlug])
+  const closeUnlockedWindows = (): void => {
+    const kept = openWindows.filter((window) => window.locked)
+    if (kept.length === openWindows.length) return
+    setOpenWindows(kept)
+    if (selectedSlug !== '' && !kept.some((window) => window.slug === selectedSlug)) {
+      onCloseDetails()
+      onClearSelection()
+    }
+  }
+
+  const openWindow = (slug: string): void => {
+    setOpenWindows((current) => current.some((window) => window.slug === slug)
+      ? current
+      : [...current, { slug, offset: { x: 0, y: 0 }, locked: false }])
+  }
+
+  const cardRect = (position: { x: number; y: number }, offset: { x: number; y: number }, width: number): { left: number; top: number } => {
+    const left = fitOffset.x + pan.x + position.x * fitScale + offset.x
+    const top = fitOffset.y + pan.y + (position.y + geometry.nodeHeight + 12) * fitScale + offset.y
+    return {
+      left: viewportSize.width > 0 ? Math.max(8, Math.min(left, viewportSize.width - width - 8)) : left,
+      top: viewportSize.height > 0 ? Math.max(8, Math.min(top, viewportSize.height - 96)) : top,
+    }
+  }
 
   // External jumps (host "Open Intent", assumption "Used by") reveal the card
   // for the already-selected node; ordinary clicking is handled by the node.
   useEffect(() => {
     if (revealToken === 0 || selectedSlug === '') return
     if (!layout.nodes.some(({ node }) => node.slug === selectedSlug)) return
-    setInspectedSlug(selectedSlug)
+    openWindow(selectedSlug)
   }, [revealToken])
 
   useEffect(() => {
@@ -277,9 +282,8 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
         setContextMenu(null)
         setLinking(null)
         setLinkError(null)
-        setInspectedSlug(null)
         setExpandedParam(null)
-        onClearSelection()
+        closeUnlockedWindows()
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -351,11 +355,8 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
       const drag = dragRef.current
       dragRef.current = null
       setPanning(false)
-      if (drag !== null && !drag.moved) {
-        setInspectedSlug(null)
-        setExpandedParam(null)
-        onClearSelection()
-      }
+      setExpandedParam(null)
+      closeUnlockedWindows()
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
@@ -522,8 +523,8 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
                 style={styles}
                 aria-label={`Select workspace ${title}`}
                 onClick={() => {
+                  closeUnlockedWindows()
                   onSelect(node)
-                  setInspectedSlug(null)
                   setExpandedParam(null)
                 }}
               >{card}</button>
@@ -540,14 +541,24 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
                     chooseLinkTarget(node)
                     return
                   }
-                  if (selectedSlug === node.slug && inspectedSlug === node.slug) {
-                    setInspectedSlug(null)
-                    setExpandedParam(null)
-                    onClearSelection()
+                  const existing = openWindows.find((window) => window.slug === node.slug)
+                  if (existing !== undefined) {
+                    if (selectedSlug === node.slug) {
+                      if (existing.locked) {
+                        setOpenWindows((current) => current.map((window) => window.slug === node.slug ? { ...window, locked: false } : window))
+                      } else {
+                        setOpenWindows((current) => current.filter((window) => window.slug !== node.slug))
+                        setExpandedParam(null)
+                        onCloseDetails()
+                        onClearSelection()
+                      }
+                      return
+                    }
+                    onSelect(node)
                     return
                   }
                   onSelect(node)
-                  setInspectedSlug(node.slug)
+                  openWindow(node.slug)
                   setExpandedParam(null)
                 }}
                 onContextMenu={(event) => {
@@ -597,92 +608,129 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
         Drag empty space to pan · click a node for details · right-click a node to link
       </div>
       </div>
-      {inspectedNode !== null && inspectedPosition !== null ? (
+      {openWindows.map((window) => {
+        const position = layout.nodes.find(({ node }) => node.slug === window.slug)
+        if (position === undefined) return null
+        const isActive = window.slug === selectedSlug
+        const windowDetail = details.find((item) => item.slug === window.slug)
+          ?? (detail?.slug === window.slug ? detail : null)
+        const windowEditor = isActive ? editorContent : null
+        const windowAssumption = isActive ? assumptionContent : null
+        const windowWidth = Math.round((windowEditor !== null ? 760 : 380) * uiScale)
+        const rect = cardRect(position, window.offset, windowWidth)
+        return (
         <aside
+          key={window.slug}
           data-canvas-overlay="true"
-          className={`absolute z-40 flex max-h-[78vh] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden rounded-xl border bg-card shadow-2xl ${draggingDetail ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
-          style={{ left: clampedCardLeft, top: clampedCardTop, width: cardWidth }}
+          className={`absolute z-40 flex max-h-[78vh] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden rounded-xl border bg-card shadow-2xl ${draggingSlug === window.slug ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
+          style={{ left: rect.left, top: rect.top, width: windowWidth }}
           onMouseDown={(event) => {
             const target = event.target as HTMLElement
             if (target.closest('button, a, input, textarea, select, code') !== null) return
             event.stopPropagation()
-            detailDragRef.current = { x: event.clientX, y: event.clientY, originX: detailOffset.x, originY: detailOffset.y }
-            setDraggingDetail(true)
+            detailDragRef.current = { slug: window.slug, x: event.clientX, y: event.clientY, originX: window.offset.x, originY: window.offset.y }
+            setDraggingSlug(window.slug)
           }}
           onMouseMove={(event) => {
             const drag = detailDragRef.current
             if (drag === null) return
             event.stopPropagation()
-            setDetailOffset({ x: drag.originX + event.clientX - drag.x, y: drag.originY + event.clientY - drag.y })
+            setOpenWindows((current) => current.map((item) => item.slug === window.slug
+              ? { ...item, offset: { x: drag.originX + event.clientX - drag.x, y: drag.originY + event.clientY - drag.y } }
+              : item))
           }}
           onMouseUp={(event) => {
             if (detailDragRef.current === null) return
             event.stopPropagation()
             detailDragRef.current = null
-            setDraggingDetail(false)
+            setDraggingSlug(null)
           }}
           onMouseLeave={() => {
             if (detailDragRef.current !== null) {
               detailDragRef.current = null
-              setDraggingDetail(false)
+              setDraggingSlug(null)
             }
           }}
-          aria-label={`Intent details: ${inspectedNode.title ?? inspectedNode.name}`}
+          aria-label={`Intent details: ${position.node.title ?? position.node.name}`}
         >
-          <button type="button" className="absolute right-1.5 top-1.5 z-10 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent" aria-label="Close intent details" title="Close intent details" onClick={() => { onCloseDetails(); setInspectedSlug(null); onClearSelection() }}>×</button>
+          <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-0.5">
+            <button
+              type="button"
+              className="rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent"
+              aria-label={window.locked ? 'Unlock intent details' : 'Lock intent details'}
+              title={window.locked ? 'Unlock intent details' : 'Lock intent details'}
+              onClick={() => setOpenWindows((current) => current.map((item) => item.slug === window.slug ? { ...item, locked: !item.locked } : item))}
+            >{window.locked ? <Lock className="h-3 w-3"/> : <Unlock className="h-3 w-3"/>}</button>
+            <button
+              type="button"
+              className="rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent"
+              aria-label="Close intent details"
+              title="Close intent details"
+              onClick={() => {
+                setOpenWindows((current) => current.filter((item) => item.slug !== window.slug))
+                if (isActive) {
+                  onCloseDetails()
+                  onClearSelection()
+                }
+              }}
+            >×</button>
+          </div>
           <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2.5">
-            {editorContent !== null ? editorContent : null}
-            {detailLoading ? <p role="status" className="text-muted-foreground">Loading intent details…</p> : null}
-            {editorContent === null && detail?.slug === inspectedSlug ? (
+            {windowEditor !== null ? windowEditor : null}
+            {isActive && detailLoading ? <p role="status" className="text-muted-foreground">Loading intent details…</p> : null}
+            {windowEditor === null && windowDetail !== null ? (
               <>
-                <p className="pr-5 text-lg font-semibold leading-7">{detail.title}</p>
-                <p className="whitespace-pre-wrap text-[0.9375rem] leading-6 text-muted-foreground">{detail.summary || 'No summary is available.'}</p>
+                <p className="pr-5 text-lg font-semibold leading-7">{windowDetail.title}</p>
+                <p className="whitespace-pre-wrap text-[0.9375rem] leading-6 text-muted-foreground">{windowDetail.summary || 'No summary is available.'}</p>
                 <div className="flex max-w-full flex-wrap items-center gap-1">
-                  <StatusChip status={detail.status} />
-                  <ParamChip label={PARAM_LABELS.created} value={detail.createdBy} expanded={expandedParam === 'created'} onToggle={() => setExpandedParam(toggleParam(expandedParam, 'created'))} />
-                  <ParamChip label={PARAM_LABELS.review} value={detail.reviewers.join(', ')} expanded={expandedParam === 'review'} onToggle={() => setExpandedParam(toggleParam(expandedParam, 'review'))} />
+                  <StatusChip status={windowDetail.status} />
+                  <ParamChip label={PARAM_LABELS.created} value={windowDetail.createdBy} expanded={expandedParam === 'created'} onToggle={() => setExpandedParam(toggleParam(expandedParam, 'created'))} />
+                  <ParamChip label={PARAM_LABELS.review} value={windowDetail.reviewers.join(', ')} expanded={expandedParam === 'review'} onToggle={() => setExpandedParam(toggleParam(expandedParam, 'review'))} />
                 </div>
                 <div className="grid grid-cols-3 gap-1">
-                  <ParamChip label={PARAM_LABELS.symbol} value={detail.symbol} expanded={expandedParam === 'symbol'} onToggle={() => setExpandedParam(toggleParam(expandedParam, 'symbol'))} />
-                  <ParamChip label={PARAM_LABELS.depends} value={detail.dependsOn.join(', ')} expanded={expandedParam === 'depends'} onToggle={() => setExpandedParam(toggleParam(expandedParam, 'depends'))} />
-                  <ParamChip label={PARAM_LABELS.references} value={detail.references.join(', ')} expanded={expandedParam === 'references'} onToggle={() => setExpandedParam(toggleParam(expandedParam, 'references'))} />
+                  <ParamChip label={PARAM_LABELS.symbol} value={windowDetail.symbol} expanded={expandedParam === 'symbol'} onToggle={() => setExpandedParam(toggleParam(expandedParam, 'symbol'))} />
+                  <ParamChip label={PARAM_LABELS.depends} value={windowDetail.dependsOn.join(', ')} expanded={expandedParam === 'depends'} onToggle={() => setExpandedParam(toggleParam(expandedParam, 'depends'))} />
+                  <ParamChip label={PARAM_LABELS.references} value={windowDetail.references.join(', ')} expanded={expandedParam === 'references'} onToggle={() => setExpandedParam(toggleParam(expandedParam, 'references'))} />
                 </div>
                 {expandedParam !== null ? (
                   <div className="rounded-md bg-muted/50 px-2 py-1.5 text-xs">
                     <div className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">{PARAM_LABELS[expandedParam]}</div>
-                    <div className="mt-0.5 whitespace-pre-wrap break-words">{paramValue(detail, expandedParam) || 'Not specified'}</div>
+                    <div className="mt-0.5 whitespace-pre-wrap break-words">{paramValue(windowDetail, expandedParam) || 'Not specified'}</div>
                   </div>
                 ) : null}
-                {assumptionContent}
+                {windowAssumption}
                 <div className="max-h-40 max-w-full overflow-auto rounded-md bg-muted/40 p-2.5 text-sm leading-6">
-                  <MarkdownPreview body={detail.body || 'No body.'} />
+                  <MarkdownPreview body={windowDetail.body || 'No body.'} />
                 </div>
-                <div className="flex gap-2 border-t pt-2.5">
-                  <button
-                    type="button"
-                    className="rounded border px-2.5 py-1.5 hover:bg-accent"
-                    onClick={onOpenCode}
-                    disabled={detail.slug === ''}
-                    title="Open one of this intent's @kron:intent code anchors"
-                  >
-                    Code
-                  </button>
-                  <button type="button" className="rounded border px-2.5 py-1.5 hover:bg-accent" onClick={onEditIntent}>Edit</button>
-                  <button
-                    type="button"
-                    className="rounded border border-destructive/50 px-2.5 py-1.5 text-destructive hover:bg-destructive/10"
-                    onClick={onDeleteIntent}
-                    disabled={detail.slug === ''}
-                    title={detail.kind === 'node' ? 'Moves this node and its whole subtree to trash' : 'Moves this intent to trash'}
-                  >
-                    Delete
-                  </button>
-                </div>
+                {isActive ? (
+                  <div className="flex gap-2 border-t pt-2.5">
+                    <button
+                      type="button"
+                      className="rounded border px-2.5 py-1.5 hover:bg-accent"
+                      onClick={onOpenCode}
+                      disabled={windowDetail.slug === ''}
+                      title="Open one of this intent's @kron:intent code anchors"
+                    >
+                      Code
+                    </button>
+                    <button type="button" className="rounded border px-2.5 py-1.5 hover:bg-accent" onClick={onEditIntent}>Edit</button>
+                    <button
+                      type="button"
+                      className="rounded border border-destructive/50 px-2.5 py-1.5 text-destructive hover:bg-destructive/10"
+                      onClick={onDeleteIntent}
+                      disabled={windowDetail.slug === ''}
+                      title={windowDetail.kind === 'node' ? 'Moves this node and its whole subtree to trash' : 'Moves this intent to trash'}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                ) : null}
               </>
-            ) : editorContent === null && !detailLoading ? <p className="text-muted-foreground">Details are not available for this node.</p> : null}
+            ) : windowEditor === null && !(isActive && detailLoading) ? <p className="text-muted-foreground">Details are not available for this node.</p> : null}
           </div>
         </aside>
-      ) : null}
+        )
+      })}
     </div>
   )
 }
