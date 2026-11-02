@@ -285,11 +285,44 @@ func (a *App) GetProjectCoverData(projectPath string) (string, error) {
 	return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
-// AddProject is retained as a bridge method for older Webview bundles, but the
-// GUI no longer writes the shared projects.json registry. Project registration
-// is CLI-owned: run `kron init` or `kron register` in a terminal.
+// AddProject opens the native folder picker and registers the selected folder
+// in the GUI-local guiProjects.json only. The CLI is spawned with
+// KRON_PROJECTS_JSON_PATH pointing at that local copy, so the shared
+// projects.json beside kron.exe is never written by the GUI.
 func (a *App) AddProject() (ListProjectsLiveResult, error) {
-	return ListProjectsLiveResult{}, fmt.Errorf("wails: the GUI is read-only; run `kron init` or `kron register` in a terminal to add a project")
+	if a.ctx == nil {
+		return ListProjectsLiveResult{}, fmt.Errorf("wails: GUI runtime is not ready")
+	}
+	selected, err := wailsruntime.OpenDirectoryDialog(a.ctx, wailsruntime.OpenDialogOptions{Title: "Add Kron project"})
+	if err != nil {
+		return ListProjectsLiveResult{}, fmt.Errorf("wails: choose project folder: %w", err)
+	}
+	if selected == "" {
+		return a.ListProjectsLive()
+	}
+	root, err := filepath.Abs(selected)
+	if err != nil {
+		return ListProjectsLiveResult{}, fmt.Errorf("wails: resolve selected project folder: %w", err)
+	}
+	command, err := a.resolveCLI()
+	if err != nil {
+		return ListProjectsLiveResult{}, err
+	}
+	registryPath, err := ensureGUIRegistry()
+	if err != nil {
+		return ListProjectsLiveResult{}, err
+	}
+	action := "register"
+	if !isKronProject(root) {
+		action = "init"
+	}
+	cmd := exec.Command(command, action, "-CWD", root)
+	cmd.SysProcAttr = hiddenProcAttr()
+	cmd.Env = append(os.Environ(), "KRON_PROJECTS_JSON_PATH="+registryPath)
+	if output, runErr := cmd.CombinedOutput(); runErr != nil {
+		return ListProjectsLiveResult{}, fmt.Errorf("wails: kron %s %q failed: %w (%s)", action, root, runErr, strings.TrimSpace(string(output)))
+	}
+	return a.ListProjectsLive()
 }
 
 // OpenProjectFolder opens the current project in the platform file manager.

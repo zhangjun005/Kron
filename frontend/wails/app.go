@@ -931,6 +931,48 @@ func sameProjectPath(left, right string) bool {
 	return left == right
 }
 
+func writeProjectRegistry(path string, doc *projectRegistryDocument) error {
+	rows := make([]json.RawMessage, 0, len(doc.projects))
+	for i, fields := range doc.projects {
+		row, err := json.Marshal(fields)
+		if err != nil {
+			return fmt.Errorf("wails: encode projects.json projects[%d]: %w", i, err)
+		}
+		rows = append(rows, row)
+	}
+	projectsJSON, err := json.Marshal(rows)
+	if err != nil {
+		return fmt.Errorf("wails: encode projects.json projects: %w", err)
+	}
+	doc.fields["projects"] = projectsJSON
+	data, err := json.MarshalIndent(doc.fields, "", "  ")
+	if err != nil {
+		return fmt.Errorf("wails: encode projects.json: %w", err)
+	}
+	data = append(data, '\n')
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".projects-*.tmp")
+	if err != nil {
+		return fmt.Errorf("wails: create projects.json temporary file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("wails: write projects.json temporary file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("wails: sync projects.json temporary file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("wails: close projects.json temporary file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("wails: replace projects.json: %w", err)
+	}
+	return nil
+}
+
 // ProjectEntry is one row of the projects.json registry. The field
 // names match the JSON tags on store.ProjectEntry + the wire shape
 // in tools_list_projects.go (with TS-friendly camelCase).
@@ -956,6 +998,92 @@ type ListProjectsLiveResult struct {
 // ListProjectsLive reads the portable projects.json registry and pins any
 // future MCP subprocess to the selected project root. The registry is the
 // explicitly permitted GUI file-I/O boundary in the registration RFC.
+// guiProjectsJSONPath is the GUI-local writable copy of projects.json. The
+// shared registry beside CLI stays read-only for the GUI; this copy is seeded
+// from it on first launch and can be freely mutated by the GUI afterwards.
+func guiProjectsJSONPath() (string, error) {
+	if override := os.Getenv("KRON_GUI_PROJECTS_JSON_PATH"); override != "" {
+		return filepath.Abs(override)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("wails: locate GUI executable for guiProjects.json: %w", err)
+	}
+	return filepath.Join(filepath.Dir(executable), "guiProjects.json"), nil
+}
+
+func registryContainsPath(doc *projectRegistryDocument, path string) bool {
+	for _, fields := range doc.projects {
+		encoded, err := json.Marshal(fields)
+		if err != nil {
+			continue
+		}
+		var entry projectRegistryWireEntry
+		if json.Unmarshal(encoded, &entry) != nil {
+			continue
+		}
+		if sameProjectPath(entry.Path, path) {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureGUIRegistry seeds guiProjects.json from the CLI-owned projects.json
+// once, then merges in any projects the CLI registered afterwards. Only the
+// GUI-local copy is ever written.
+func ensureGUIRegistry() (string, error) {
+	localPath, err := guiProjectsJSONPath()
+	if err != nil {
+		return "", err
+	}
+	if _, statErr := os.Stat(localPath); statErr != nil {
+		if !errors.Is(statErr, os.ErrNotExist) {
+			return "", fmt.Errorf("wails: stat guiProjects.json: %w", statErr)
+		}
+		data := []byte("{\n  \"projects\": []\n}\n")
+		sharedPath, pathErr := projectsJSONPath()
+		if pathErr == nil {
+			if sharedData, readErr := os.ReadFile(sharedPath); readErr == nil {
+				data = sharedData
+			}
+		}
+		if writeErr := os.WriteFile(localPath, data, 0o644); writeErr != nil {
+			return "", fmt.Errorf("wails: seed guiProjects.json: %w", writeErr)
+		}
+	}
+	localDoc, err := readProjectRegistry(localPath)
+	if err != nil {
+		return "", err
+	}
+	sharedPath, err := projectsJSONPath()
+	if err == nil {
+		if sharedDoc, readErr := readProjectRegistry(sharedPath); readErr == nil {
+			changed := false
+			for _, fields := range sharedDoc.projects {
+				encoded, marshalErr := json.Marshal(fields)
+				if marshalErr != nil {
+					continue
+				}
+				var entry projectRegistryWireEntry
+				if json.Unmarshal(encoded, &entry) != nil {
+					continue
+				}
+				if !registryContainsPath(localDoc, entry.Path) {
+					localDoc.projects = append(localDoc.projects, fields)
+					changed = true
+				}
+			}
+			if changed {
+				if writeErr := writeProjectRegistry(localPath, localDoc); writeErr != nil {
+					return "", writeErr
+				}
+			}
+		}
+	}
+	return localPath, nil
+}
+
 // selectGUIProject picks the GUI-local selection first, then the registry's
 // current_project, then the first registered project that still has .kron/.
 // The GUI never writes projects.json; only this local choice is persisted.
@@ -985,7 +1113,7 @@ func selectGUIProject(projects []ProjectEntry, local, registryCurrent string) st
 // registry writes never select a project in the GUI; they only change the
 // project list.
 func (a *App) ListProjectsLive() (ListProjectsLiveResult, error) {
-	path, err := projectsJSONPath()
+	path, err := ensureGUIRegistry()
 	if err != nil {
 		return ListProjectsLiveResult{}, err
 	}
@@ -997,18 +1125,18 @@ func (a *App) ListProjectsLive() (ListProjectsLiveResult, error) {
 	if err != nil {
 		return ListProjectsLiveResult{}, err
 	}
-	settings, err := a.GetGUISettings()
-	if err != nil {
-		return ListProjectsLiveResult{}, err
-	}
-	selected := selectGUIProject(out.Projects, settings.CurrentProject, out.Current)
-	if selected != settings.CurrentProject {
-		if err := a.setGUICurrentProject(selected); err != nil {
-			return ListProjectsLiveResult{}, err
+	selected := selectGUIProject(out.Projects, out.Current, "")
+	if selected != out.Current {
+		currentJSON, marshalErr := json.Marshal(selected)
+		if marshalErr != nil {
+			return ListProjectsLiveResult{}, fmt.Errorf("wails: encode current project: %w", marshalErr)
 		}
+		doc.fields["current_project"] = currentJSON
+		if writeErr := writeProjectRegistry(path, doc); writeErr != nil {
+			return ListProjectsLiveResult{}, writeErr
+		}
+		out.Current = selected
 	}
-	out.Current = selected
-
 	a.mcpMu.Lock()
 	defer a.mcpMu.Unlock()
 	if selected != "" {
@@ -1027,9 +1155,6 @@ func (a *App) ListProjectsLive() (ListProjectsLiveResult, error) {
 	return out, nil
 }
 
-// SwitchProject changes the GUI-local selected project only. It does not
-// write projects.json (CLI owns registration/current_project) and does not
-// update last_opened in the shared registry.
 func (a *App) SwitchProject(projectPath string) (ListProjectsLiveResult, error) {
 	if strings.TrimSpace(projectPath) == "" {
 		return ListProjectsLiveResult{}, errors.New("wails: project path is required")
@@ -1041,7 +1166,7 @@ func (a *App) SwitchProject(projectPath string) (ListProjectsLiveResult, error) 
 	if !isKronProject(abs) {
 		return ListProjectsLiveResult{}, fmt.Errorf("wails: %q is not a Kron project (.kron directory not found)", abs)
 	}
-	path, err := projectsJSONPath()
+	path, err := ensureGUIRegistry()
 	if err != nil {
 		return ListProjectsLiveResult{}, err
 	}
@@ -1067,7 +1192,17 @@ func (a *App) SwitchProject(projectPath string) (ListProjectsLiveResult, error) 
 	if index < 0 {
 		return ListProjectsLiveResult{}, fmt.Errorf("wails: project %q is not registered; run `kron init` or `kron register` first", abs)
 	}
-	if err := a.setGUICurrentProject(abs); err != nil {
+	currentJSON, err := json.Marshal(abs)
+	if err != nil {
+		return ListProjectsLiveResult{}, fmt.Errorf("wails: encode current project: %w", err)
+	}
+	lastOpenedJSON, err := json.Marshal(time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return ListProjectsLiveResult{}, fmt.Errorf("wails: encode last_opened: %w", err)
+	}
+	doc.fields["current_project"] = currentJSON
+	doc.projects[index]["last_opened"] = lastOpenedJSON
+	if err := writeProjectRegistry(path, doc); err != nil {
 		return ListProjectsLiveResult{}, err
 	}
 	a.mcpMu.Lock()

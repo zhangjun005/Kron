@@ -41,6 +41,8 @@ func TestAppBridgeE2E(t *testing.T) {
 	t.Setenv("KRON_PROJECTS_JSON_PATH", registry)
 	guiSettings := filepath.Join(t.TempDir(), "guiSettings.json")
 	t.Setenv("KRON_GUI_SETTINGS_PATH", guiSettings)
+	guiProjects := filepath.Join(t.TempDir(), "guiProjects.json")
+	t.Setenv("KRON_GUI_PROJECTS_JSON_PATH", guiProjects)
 
 	app := NewApp()
 	t.Cleanup(func() {
@@ -232,13 +234,13 @@ func TestAppBridgeE2E(t *testing.T) {
 		t.Logf("assumptions: %v", byID)
 	})
 
-	t.Run("SwitchProjectKeepsRegistryReadOnly", func(t *testing.T) {
+	t.Run("SwitchProjectUsesGUILocalRegistry", func(t *testing.T) {
 		if current == "" {
 			t.Skip("no current project from ListProjectsLive")
 		}
 		before, readErr := os.ReadFile(registry)
 		if readErr != nil {
-			t.Fatalf("read registry before switch: %v", readErr)
+			t.Fatalf("read shared registry before switch: %v", readErr)
 		}
 		res, err := app.SwitchProject(current)
 		if err != nil {
@@ -249,19 +251,31 @@ func TestAppBridgeE2E(t *testing.T) {
 		}
 		after, readErr := os.ReadFile(registry)
 		if readErr != nil {
-			t.Fatalf("read registry after switch: %v", readErr)
+			t.Fatalf("read shared registry after switch: %v", readErr)
 		}
 		if string(before) != string(after) {
-			t.Errorf("SwitchProject mutated projects.json (before=%q after=%q)", before, after)
+			t.Errorf("SwitchProject mutated shared projects.json (before=%q after=%q)", before, after)
 		}
-		settings, settingsErr := app.GetGUISettings()
-		if settingsErr != nil {
-			t.Fatalf("GetGUISettings: %v", settingsErr)
+		localData, readErr := os.ReadFile(guiProjects)
+		if readErr != nil {
+			t.Fatalf("read gui local registry: %v", readErr)
 		}
-		if settings.CurrentProject != current {
-			t.Errorf("guiSettings.current_project = %q, want %q", settings.CurrentProject, current)
+		var local struct {
+			Current  string `json:"current_project"`
+			Projects []struct {
+				Path string `json:"path"`
+			} `json:"projects"`
 		}
-		t.Logf("switched locally to %s; registry unchanged", res.Current)
+		if err := json.Unmarshal(localData, &local); err != nil {
+			t.Fatalf("parse gui local registry: %v", err)
+		}
+		if !sameProjectPath(local.Current, current) {
+			t.Errorf("gui local current = %q, want %q", local.Current, current)
+		}
+		if len(local.Projects) == 0 || !sameProjectPath(local.Projects[0].Path, current) {
+			t.Errorf("gui local projects = %#v, want %q", local.Projects, current)
+		}
+		t.Logf("switched to %s via GUI-local registry; shared registry unchanged", res.Current)
 	})
 
 	t.Run("OpenInIDENonExistentPath", func(t *testing.T) {

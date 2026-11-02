@@ -36,7 +36,7 @@ import {
 import {ScrollArea} from '@/components/ui/scroll-area';
 import {Separator} from '@/components/ui/separator';
 import {Progress} from '@/components/ui/progress';
-import {ChooseProjectCover, GetGUISettings, GetKronInfo, GetProjectCoverData, ListMCPToolsLive, CallMCPTool, ListProjectsLive, OpenProjectFolder, SetGUIProject, SetGUITheme, SwitchProject} from '../wailsjs/go/main/App';
+import {AddProject, ChooseProjectCover, GetGUISettings, GetKronInfo, GetProjectCoverData, ListMCPToolsLive, CallMCPTool, ListProjectsLive, OpenProjectFolder, SetGUIProject, SetGUITheme, SwitchProject} from '../wailsjs/go/main/App';
 import {main} from '../wailsjs/go/models';
 import {type KronInfo, type IntentNode, type TreeStats} from '@/lib/intent-types';
 import {BootAnimation} from '@/components/boot-animation';
@@ -102,6 +102,7 @@ function App() {
     const [settingsSaving, setSettingsSaving] = useState<boolean>(false);
     const [guiSettings, setGuiSettings] = useState<main.GUISettings | null>(null);
     const [workspaceEntered, setWorkspaceEntered] = useState<boolean>(false);
+    const [addingProject, setAddingProject] = useState<boolean>(false);
     // Selection is owned here so the left-rail rows can drive the canvas.
     const [selectedIntentId, setSelectedIntentId] = useState<string | null>(null);
     const [focusRequest, setFocusRequest] = useState<number>(0);
@@ -323,6 +324,18 @@ function App() {
         void switchLiveProject(path).then(() => setWorkspaceEntered(true));
     }, [switchLiveProject]);
 
+    const addProject = useCallback((): void => {
+        setAddingProject(true);
+        setSettingsError(null);
+        void AddProject().then(async (projects) => {
+            setLiveProjects(projects);
+            const settings = await GetGUISettings();
+            setGuiSettings(settings);
+        }).catch((err: unknown) => {
+            setSettingsError(err instanceof Error ? err.message : String(err));
+        }).finally(() => setAddingProject(false));
+    }, []);
+
     useEffect(() => {
         let cancelled = false;
         (async (): Promise<void> => {
@@ -396,6 +409,8 @@ function App() {
                         projects={liveProjects}
                         settings={guiSettings}
                         onOpenProject={openProject}
+                        addingProject={addingProject}
+                        addProject={addProject}
                     />
                 )}
             </>
@@ -541,6 +556,8 @@ function ProjectHome(props: {
     projects: ListProjectsLiveResult | null;
     settings: main.GUISettings | null;
     onOpenProject: (path: string) => void;
+    addingProject: boolean;
+    addProject: () => void;
 }): JSX.Element {
     const [covers, setCovers] = useState<Record<string, string>>({});
 
@@ -593,15 +610,13 @@ function ProjectHome(props: {
                                 </button>
                             );
                         })}
-                    <div className="w-56 shrink-0 opacity-70">
-                        <div className="flex aspect-square items-center justify-center border border-dashed border-border bg-card px-5">
-                            <span className="text-center text-[11px] leading-snug text-muted-foreground">
-                                Projects are registered with <code className="font-mono">kron init</code> / <code className="font-mono">kron register</code>
-                            </span>
+                    <button type="button" onClick={props.addProject} disabled={props.addingProject} className="group w-56 shrink-0 text-left disabled:cursor-wait">
+                        <div className="flex aspect-square items-center justify-center border border-dashed border-border bg-card transition-all duration-200 group-hover:-translate-y-1 group-hover:border-primary group-hover:bg-accent">
+                            <span className="text-7xl font-extralight text-muted-foreground transition-colors group-hover:text-foreground">{props.addingProject ? '…' : '+'}</span>
                         </div>
-                        <div className="mt-3 text-sm font-semibold">Read-only registry</div>
-                        <div className="mt-1 text-[11px] text-muted-foreground">CLI owns projects.json</div>
-                    </div>
+                        <div className="mt-3 text-sm font-semibold">Add project</div>
+                        <div className="mt-1 text-[11px] text-muted-foreground">Uses GUI-local registry</div>
+                    </button>
                 </div>
             </div>
         </main>
