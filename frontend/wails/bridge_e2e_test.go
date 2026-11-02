@@ -39,6 +39,8 @@ func TestAppBridgeE2E(t *testing.T) {
 		t.Fatalf("write temp registry: %v", err)
 	}
 	t.Setenv("KRON_PROJECTS_JSON_PATH", registry)
+	guiSettings := filepath.Join(t.TempDir(), "guiSettings.json")
+	t.Setenv("KRON_GUI_SETTINGS_PATH", guiSettings)
 
 	app := NewApp()
 	t.Cleanup(func() {
@@ -230,21 +232,36 @@ func TestAppBridgeE2E(t *testing.T) {
 		t.Logf("assumptions: %v", byID)
 	})
 
-	t.Run("SwitchProject", func(t *testing.T) {
+	t.Run("SwitchProjectKeepsRegistryReadOnly", func(t *testing.T) {
 		if current == "" {
 			t.Skip("no current project from ListProjectsLive")
+		}
+		before, readErr := os.ReadFile(registry)
+		if readErr != nil {
+			t.Fatalf("read registry before switch: %v", readErr)
 		}
 		res, err := app.SwitchProject(current)
 		if err != nil {
 			t.Fatalf("SwitchProject: %v", err)
 		}
 		if res.Current == "" {
-			t.Error("SwitchProject did not set current_project")
+			t.Error("SwitchProject did not return a selected project")
 		}
-		if len(res.Projects) == 0 || res.Projects[0].LastOpened == "" {
-			t.Error("SwitchProject did not update last_opened")
+		after, readErr := os.ReadFile(registry)
+		if readErr != nil {
+			t.Fatalf("read registry after switch: %v", readErr)
 		}
-		t.Logf("switched to %s last_opened=%s", res.Current, res.Projects[0].LastOpened)
+		if string(before) != string(after) {
+			t.Errorf("SwitchProject mutated projects.json (before=%q after=%q)", before, after)
+		}
+		settings, settingsErr := app.GetGUISettings()
+		if settingsErr != nil {
+			t.Fatalf("GetGUISettings: %v", settingsErr)
+		}
+		if settings.CurrentProject != current {
+			t.Errorf("guiSettings.current_project = %q, want %q", settings.CurrentProject, current)
+		}
+		t.Logf("switched locally to %s; registry unchanged", res.Current)
 	})
 
 	t.Run("OpenInIDENonExistentPath", func(t *testing.T) {

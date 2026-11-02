@@ -26,12 +26,16 @@ const (
 )
 
 // GUISettings contains persistent preferences for the Wails client.
-// Project registration remains in projects.json; this file is only for GUI
-// presentation preferences that are safe to carry with a portable install.
+// Project registration remains in projects.json (CLI-owned); this file only
+// carries GUI-local presentation and selection state.
 type GUISettings struct {
-	SchemaVersion int                           `json:"schema_version"`
-	Theme         string                        `json:"theme"`
-	Projects      map[string]GUIProjectSettings `json:"projects,omitempty"`
+	SchemaVersion int    `json:"schema_version"`
+	Theme         string `json:"theme"`
+	// CurrentProject is the GUI-local selected project. It is intentionally
+	// not projects.json::current_project: the GUI must not write the shared
+	// registry (that pointer is owned by CLI/AI clients).
+	CurrentProject string                        `json:"current_project,omitempty"`
+	Projects       map[string]GUIProjectSettings `json:"projects,omitempty"`
 }
 
 // GUIProjectSettings contains presentation metadata for one registered project.
@@ -176,6 +180,29 @@ func (a *App) SetGUIProject(projectPath string, displayName string) (GUISettings
 	return a.writeGUISettings(settings)
 }
 
+// setGUICurrentProject persists the GUI-local selected project. It never
+// touches projects.json: the shared current_project pointer is CLI-owned.
+func (a *App) setGUICurrentProject(projectPath string) error {
+	settings, err := a.GetGUISettings()
+	if err != nil {
+		return err
+	}
+	current := ""
+	if projectPath != "" {
+		abs, absErr := filepath.Abs(projectPath)
+		if absErr != nil {
+			return fmt.Errorf("wails: resolve selected project path: %w", absErr)
+		}
+		current = abs
+	}
+	if settings.CurrentProject == current {
+		return nil
+	}
+	settings.CurrentProject = current
+	_, err = a.writeGUISettings(settings)
+	return err
+}
+
 // ChooseProjectCover opens a native file picker and stores a portable copy of
 // the selected image beside the GUI executable.
 func (a *App) ChooseProjectCover(projectPath string) (GUISettings, error) {
@@ -258,38 +285,11 @@ func (a *App) GetProjectCoverData(projectPath string) (string, error) {
 	return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
-// AddProject opens the native folder picker and adds the selected directory to
-// the registry. Uninitialised folders receive the existing idempotent `kron
-// init` skeleton; existing Kron projects are registered directly.
+// AddProject is retained as a bridge method for older Webview bundles, but the
+// GUI no longer writes the shared projects.json registry. Project registration
+// is CLI-owned: run `kron init` or `kron register` in a terminal.
 func (a *App) AddProject() (ListProjectsLiveResult, error) {
-	if a.ctx == nil {
-		return ListProjectsLiveResult{}, fmt.Errorf("wails: GUI runtime is not ready")
-	}
-	selected, err := wailsruntime.OpenDirectoryDialog(a.ctx, wailsruntime.OpenDialogOptions{Title: "Add Kron project"})
-	if err != nil {
-		return ListProjectsLiveResult{}, fmt.Errorf("wails: choose project folder: %w", err)
-	}
-	if selected == "" {
-		return a.ListProjectsLive()
-	}
-	root, err := filepath.Abs(selected)
-	if err != nil {
-		return ListProjectsLiveResult{}, fmt.Errorf("wails: resolve selected project folder: %w", err)
-	}
-	command, err := a.resolveCLI()
-	if err != nil {
-		return ListProjectsLiveResult{}, err
-	}
-	action := "register"
-	if !isKronProject(root) {
-		action = "init"
-	}
-	cmd := exec.Command(command, action, "-CWD", root)
-	cmd.SysProcAttr = hiddenProcAttr()
-	if output, runErr := cmd.CombinedOutput(); runErr != nil {
-		return ListProjectsLiveResult{}, fmt.Errorf("wails: kron %s %q failed: %w (%s)", action, root, runErr, strings.TrimSpace(string(output)))
-	}
-	return a.ListProjectsLive()
+	return ListProjectsLiveResult{}, fmt.Errorf("wails: the GUI is read-only; run `kron init` or `kron register` in a terminal to add a project")
 }
 
 // OpenProjectFolder opens the current project in the platform file manager.
