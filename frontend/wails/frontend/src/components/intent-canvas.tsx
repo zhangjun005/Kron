@@ -210,7 +210,7 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
     const activateNode = useCallback((id: string, isSelected: boolean): void => {
         const existing = openPanels.find((panel) => panel.id === id);
         if (existing === undefined) {
-            setOpenPanels((current) => [...current, {id, offset: {x: 0, y: 0}, locked: false}]);
+            setOpenPanels((current) => [...current, {id, offset: {x: current.length * 28, y: current.length * 18}, locked: false}]);
             onSelectedIdChange(id);
             return;
         }
@@ -231,7 +231,7 @@ export function IntentCanvas({data, projectName, filter, selectedId, onSelectedI
         if (selectedId === null) return;
         setOpenPanels((current) => current.some((panel) => panel.id === selectedId)
             ? current
-            : [...current, {id: selectedId, offset: {x: 0, y: 0}, locked: false}]);
+            : [...current, {id: selectedId, offset: {x: current.length * 28, y: current.length * 18}, locked: false}]);
     }, [selectedId]);
 
     const query = filter.trim().toLowerCase();

@@ -255,7 +255,7 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
   const openWindow = (slug: string): void => {
     setOpenWindows((current) => current.some((window) => window.slug === slug)
       ? current
-      : [...current, { slug, offset: { x: 0, y: 0 }, locked: false }])
+      : [...current, { slug, offset: { x: current.length * 28, y: current.length * 18 }, locked: false }])
   }
 
   const cardRect = (position: { x: number; y: number }, offset: { x: number; y: number }, width: number): { left: number; top: number } => {
