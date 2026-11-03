@@ -211,6 +211,8 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
     children: root.children ?? [],
   }, geometry), [root, geometry])
   const [pan, setPan] = useState({ x: 0, y: 0 })
+  // Tree-only view zoom. Intent cards deliberately keep their screen size.
+  const [zoom, setZoom] = useState(1)
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
   const [panning, setPanning] = useState(false)
   const [openWindows, setOpenWindows] = useState<{ slug: string; offset: { x: number; y: number }; locked: boolean }[]>([])
@@ -234,6 +236,28 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
   const fitOffset = {
     x: Math.max(16, (viewportSize.width - layout.width * fitScale) / 2),
     y: geometry.topInset + Math.max(12, (viewportSize.height - geometry.topInset - layout.height * fitScale) / 2),
+  }
+  const treeScale = Math.min(3, Math.max(0.15, fitScale * zoom))
+
+  const applyTreeZoom = (nextZoom: number, focus?: { x: number; y: number }): void => {
+    const viewport = viewportRef.current
+    if (viewport === null) {
+      setZoom(nextZoom)
+      return
+    }
+    const bounds = viewport.getBoundingClientRect()
+    const currentScale = treeScale
+    const nextScale = Math.min(3, Math.max(0.15, fitScale * nextZoom))
+    if (currentScale === nextScale) return
+    const focusX = focus?.x ?? bounds.left + bounds.width / 2
+    const focusY = focus?.y ?? bounds.top + bounds.height / 2
+    const worldX = (focusX - bounds.left - fitOffset.x - pan.x) / currentScale
+    const worldY = (focusY - bounds.top - fitOffset.y - pan.y) / currentScale
+    setPan({
+      x: focusX - bounds.left - fitOffset.x - worldX * nextScale,
+      y: focusY - bounds.top - fitOffset.y - worldY * nextScale,
+    })
+    setZoom(nextScale / fitScale)
   }
 
   const closeUnlockedWindows = async (): Promise<boolean> => {
@@ -259,8 +283,8 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
   }
 
   const cardRect = (position: { x: number; y: number }, offset: { x: number; y: number }, width: number): { left: number; top: number } => {
-    const left = fitOffset.x + pan.x + position.x * fitScale + offset.x
-    const top = fitOffset.y + pan.y + (position.y + geometry.nodeHeight + 12) * fitScale + offset.y
+    const left = fitOffset.x + pan.x + position.x * treeScale + offset.x
+    const top = fitOffset.y + pan.y + (position.y + geometry.nodeHeight + 12) * treeScale + offset.y
     return {
       left: viewportSize.width > 0 ? Math.max(8, Math.min(left, viewportSize.width - width - 8)) : left,
       top: viewportSize.height > 0 ? Math.max(8, Math.min(top, viewportSize.height - 96)) : top,
@@ -361,6 +385,19 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
   }, [relations, selectedSlug])
 
   useEffect(() => {
+    const viewport = viewportRef.current
+    if (viewport === null) return
+    const onWheel = (event: WheelEvent): void => {
+      if (!event.ctrlKey && !event.metaKey) return
+      event.preventDefault()
+      const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15
+      applyTreeZoom(zoom * factor, { x: event.clientX, y: event.clientY })
+    }
+    viewport.addEventListener('wheel', onWheel, { passive: false })
+    return () => viewport.removeEventListener('wheel', onWheel)
+  }, [applyTreeZoom, zoom])
+
+  useEffect(() => {
     if (!panning) return
     const onMove = (event: globalThis.MouseEvent): void => {
       const drag = dragRef.current
@@ -397,8 +434,8 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
     setLinking((current) => current === null ? null : {
       ...current,
       cursor: {
-        x: (event.clientX - bounds.left - fitOffset.x - pan.x) / fitScale,
-        y: (event.clientY - bounds.top - fitOffset.y - pan.y) / fitScale,
+        x: (event.clientX - bounds.left - fitOffset.x - pan.x) / treeScale,
+        y: (event.clientY - bounds.top - fitOffset.y - pan.y) / treeScale,
       },
     })
   }
@@ -455,7 +492,7 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
           backgroundPosition: `${pan.x}px ${pan.y}px`,
         }}
       >
-        <div className="absolute left-0 top-0 origin-top-left" style={{ transform: `translate(${fitOffset.x + pan.x}px, ${fitOffset.y + pan.y}px) scale(${fitScale})`, width: layout.width, height: layout.height }}>
+        <div className="absolute left-0 top-0 origin-top-left" style={{ transform: `translate(${fitOffset.x + pan.x}px, ${fitOffset.y + pan.y}px) scale(${treeScale})`, width: layout.width, height: layout.height }}>
           <svg className="pointer-events-none absolute left-0 top-0" width={layout.width} height={layout.height} aria-hidden="true">
             <defs>
               <marker id="kron-vscode-depends-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -639,10 +676,17 @@ export function IntentCanvas({ root, filter, selectedSlug, uiScale, revealToken,
           <span className="flex items-center gap-1"><svg width="24" height="8" aria-hidden="true"><line x1="1" y1="4" x2="21" y2="4" stroke="hsl(var(--muted-foreground))" strokeWidth="1.5" strokeDasharray="6 4" /></svg>references (soft)</span>
       </div>
       {hasChildren && relationEdges.length === 0 ? (
-        <div className="pointer-events-none absolute bottom-2 right-2 rounded bg-background/90 px-2 py-1 text-[0.625rem] text-muted-foreground">
+        <div className="pointer-events-none absolute bottom-10 right-2 rounded bg-background/90 px-2 py-1 text-[0.625rem] text-muted-foreground">
           No cross-intent links yet. Add them with Edit intent → depends_on or references.
         </div>
       ) : null}
+      <div data-canvas-overlay="true" className="pointer-events-auto absolute bottom-2 right-2 flex items-center gap-1 rounded-md border bg-background/90 px-1.5 py-1 text-[0.625rem] text-muted-foreground shadow-sm">
+        <button type="button" className="rounded px-1.5 py-0.5 hover:bg-accent" aria-label="Zoom out tree" onClick={() => applyTreeZoom(zoom / 1.15)}>−</button>
+        <span className="min-w-9 text-center tabular-nums">{Math.round(treeScale * 100)}%</span>
+        <button type="button" className="rounded px-1.5 py-0.5 hover:bg-accent" aria-label="Zoom in tree" onClick={() => applyTreeZoom(zoom * 1.15)}>+</button>
+        <button type="button" className="rounded px-1.5 py-0.5 hover:bg-accent" aria-label="Fit tree" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}>Fit</button>
+        <button type="button" className="rounded px-1.5 py-0.5 hover:bg-accent" aria-label="Zoom tree to 100 percent" onClick={() => applyTreeZoom(1 / fitScale)}>100%</button>
+      </div>
       <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-background/85 px-2 py-1 text-[0.625rem] text-muted-foreground">
         Drag empty space to pan · click a node for details · right-click a node to link
       </div>
