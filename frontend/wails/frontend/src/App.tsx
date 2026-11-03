@@ -615,7 +615,7 @@ function ProjectHome(props: {
                             <span className="text-7xl font-extralight text-muted-foreground transition-colors group-hover:text-foreground">{props.addingProject ? '…' : '+'}</span>
                         </div>
                         <div className="mt-3 text-sm font-semibold">Add project</div>
-                        <div className="mt-1 text-[11px] text-muted-foreground">Choose a folder</div>
+                        <div className="mt-1 text-[11px] text-muted-foreground">Uses GUI-local registry</div>
                     </button>
                 </div>
             </div>

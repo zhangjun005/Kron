@@ -26,12 +26,16 @@ const (
 )
 
 // GUISettings contains persistent preferences for the Wails client.
-// Project registration remains in projects.json; this file is only for GUI
-// presentation preferences that are safe to carry with a portable install.
+// Project registration remains in projects.json (CLI-owned); this file only
+// carries GUI-local presentation and selection state.
 type GUISettings struct {
-	SchemaVersion int                           `json:"schema_version"`
-	Theme         string                        `json:"theme"`
-	Projects      map[string]GUIProjectSettings `json:"projects,omitempty"`
+	SchemaVersion int    `json:"schema_version"`
+	Theme         string `json:"theme"`
+	// CurrentProject is the GUI-local selected project. It is intentionally
+	// not projects.json::current_project: the GUI must not write the shared
+	// registry (that pointer is owned by CLI/AI clients).
+	CurrentProject string                        `json:"current_project,omitempty"`
+	Projects       map[string]GUIProjectSettings `json:"projects,omitempty"`
 }
 
 // GUIProjectSettings contains presentation metadata for one registered project.
@@ -176,6 +180,29 @@ func (a *App) SetGUIProject(projectPath string, displayName string) (GUISettings
 	return a.writeGUISettings(settings)
 }
 
+// setGUICurrentProject persists the GUI-local selected project. It never
+// touches projects.json: the shared current_project pointer is CLI-owned.
+func (a *App) setGUICurrentProject(projectPath string) error {
+	settings, err := a.GetGUISettings()
+	if err != nil {
+		return err
+	}
+	current := ""
+	if projectPath != "" {
+		abs, absErr := filepath.Abs(projectPath)
+		if absErr != nil {
+			return fmt.Errorf("wails: resolve selected project path: %w", absErr)
+		}
+		current = abs
+	}
+	if settings.CurrentProject == current {
+		return nil
+	}
+	settings.CurrentProject = current
+	_, err = a.writeGUISettings(settings)
+	return err
+}
+
 // ChooseProjectCover opens a native file picker and stores a portable copy of
 // the selected image beside the GUI executable.
 func (a *App) ChooseProjectCover(projectPath string) (GUISettings, error) {
@@ -258,9 +285,10 @@ func (a *App) GetProjectCoverData(projectPath string) (string, error) {
 	return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
-// AddProject opens the native folder picker and adds the selected directory to
-// the registry. Uninitialised folders receive the existing idempotent `kron
-// init` skeleton; existing Kron projects are registered directly.
+// AddProject opens the native folder picker and registers the selected folder
+// in the GUI-local guiProjects.json only. The CLI is spawned with
+// KRON_PROJECTS_JSON_PATH pointing at that local copy, so the shared
+// projects.json beside kron.exe is never written by the GUI.
 func (a *App) AddProject() (ListProjectsLiveResult, error) {
 	if a.ctx == nil {
 		return ListProjectsLiveResult{}, fmt.Errorf("wails: GUI runtime is not ready")
@@ -280,12 +308,23 @@ func (a *App) AddProject() (ListProjectsLiveResult, error) {
 	if err != nil {
 		return ListProjectsLiveResult{}, err
 	}
+	registryPath, err := ensureGUIRegistry()
+	if err != nil {
+		return ListProjectsLiveResult{}, err
+	}
 	action := "register"
 	if !isKronProject(root) {
 		action = "init"
 	}
 	cmd := exec.Command(command, action, "-CWD", root)
 	cmd.SysProcAttr = hiddenProcAttr()
+	env := make([]string, 0, len(os.Environ())+1)
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "KRON_PROJECTS_JSON_PATH=") {
+			env = append(env, entry)
+		}
+	}
+	cmd.Env = append(env, "KRON_PROJECTS_JSON_PATH="+registryPath)
 	if output, runErr := cmd.CombinedOutput(); runErr != nil {
 		return ListProjectsLiveResult{}, fmt.Errorf("wails: kron %s %q failed: %w (%s)", action, root, runErr, strings.TrimSpace(string(output)))
 	}
