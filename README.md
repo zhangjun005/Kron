@@ -4,13 +4,13 @@
 
 Kron 把代码设计意图（Design Intent）存为**纯 Markdown 文件，放在你的仓库里**——无需 API 服务、无需守护进程、无需私有格式。AI 编程助手可以直接读写它们。一切差异就是 `git diff`。
 
-> **最新发布：v0.3.0** — Windows 便携包 + VS Code 扩展：[GitHub Releases](https://github.com/zhangjun005/Kron/releases/tag/v0.3.0)
+> **最新发布：v0.3.1** — Windows 便携包 + VS Code 扩展：[GitHub Releases](https://github.com/zhangjun005/Kron/releases/tag/v0.3.1)
 
 ---
 
 ## 快速开始
 
-1. 安装 v0.3.0 [Windows 便携包 / VSIX](https://github.com/zhangjun005/Kron/releases/tag/v0.3.0)
+1. 安装 v0.3.1 [Windows 便携包 / VSIX](https://github.com/zhangjun005/Kron/releases/tag/v0.3.1)
 2. `kron init -CWD <project>`
 3. `kron add auth/login -CWD <project>`
 4. 在代码里加 `// @kron:intent auth/login`
