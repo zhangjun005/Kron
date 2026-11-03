@@ -81,6 +81,8 @@ type AssumptionCheck = {
   warnings: Array<{ intentSlug: string; assumptionId: string; text: string; severity: string; verified: boolean }>
 }
 
+type UnsavedChoice = 'save' | 'discard' | 'cancel'
+
 type IntentDraft = Pick<Intent, 'slug' | 'kind' | 'title' | 'symbol' | 'status' | 'body'> & {
   summary: string
   reviewersText: string
@@ -448,6 +450,7 @@ function EditChip({ label, value, active, onToggle }: { label: string; value: st
 
 function App(): JSX.Element {
   const [intents, setIntents] = useState<Intent[]>(initialIntents)
+  const [liveDetails, setLiveDetails] = useState<Record<string, Intent>>({})
   const [archivedIntents, setArchivedIntents] = useState<Intent[]>([])
   const [assumptions, setAssumptions] = useState<Assumption[]>(initialAssumptions)
   const [tree, setTree] = useState<TreeResult | null>(null)
@@ -467,6 +470,7 @@ function App(): JSX.Element {
   const [draft, setDraft] = useState<IntentDraft>(newDraft())
   const [draftParentSlug, setDraftParentSlug] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
+  const [unsavedPrompt, setUnsavedPrompt] = useState<{ resolve: (choice: UnsavedChoice) => void } | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [pendingDeleteSlug, setPendingDeleteSlug] = useState<string | null>(null)
   const [pendingEditSlug, setPendingEditSlug] = useState<string | null>(null)
@@ -623,14 +627,23 @@ function App(): JSX.Element {
         void Promise.allSettled(intentNodes.map(async (node) => {
           const result = await sendMcpRequest('kron_get', { slug: node.slug, include_relations: true }, node.workspaceId)
           const intent = intentFromMcp(result, node)
-          return [node.slug, { references: intent.references, dependsOn: intent.dependsOn, kind: intent.kind, exists: true }] as const
+          return {
+            slug: node.slug,
+            intent,
+            relations: { references: intent.references, dependsOn: intent.dependsOn, kind: intent.kind, exists: true },
+          }
         })).then((settled) => {
           if (relationSequence !== treeRelationSequence.current) return
           const next: Record<string, IntentRelations> = {}
+          const loaded: Record<string, Intent> = {}
           for (const item of settled) {
-            if (item.status === 'fulfilled') next[item.value[0]] = item.value[1]
+            if (item.status === 'fulfilled') {
+              next[item.value.slug] = item.value.relations
+              loaded[item.value.slug] = item.value.intent
+            }
           }
           setTreeRelations(next)
+          setLiveDetails(loaded)
         })
         setSelectedSlug((current) => entries.some(({ node }) => node.slug === current)
           ? current
@@ -678,6 +691,7 @@ function App(): JSX.Element {
         if (sequence !== detailRequestSequence.current) return
         const intent = intentFromMcp(result, selectedNode)
         setLiveIntent(intent)
+        setLiveDetails((current) => ({ ...current, [intent.slug]: intent }))
         setAssumptions((current) => {
           const next = [...current]
           for (const linked of intent.assumptions) {
@@ -821,31 +835,31 @@ function App(): JSX.Element {
     }
   }
 
-  const saveIntent = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+  const saveIntent = async (event: FormEvent<HTMLFormElement>): Promise<boolean> => {
     event.preventDefault()
-    if (formMode === null) return
+    if (formMode === null) return false
     const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/
     if (!slugPattern.test(draft.slug)) {
       setFormError('Use lowercase kebab-case segments, with optional / grouping.')
-      return
+      return false
     }
     if (draftParentSlug !== null) {
       const childSlug = draft.slug.slice(`${draftParentSlug}/`.length)
       if (!draft.slug.startsWith(`${draftParentSlug}/`) || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(childSlug)) {
         setFormError(`This child must have exactly one new slug segment under “${draftParentSlug}/”.`)
-        return
+        return false
       }
     }
     const summary = draft.summary.trim() || summaryFromBody(draft.body) || draft.title.trim()
     if (draft.title.trim() === '') {
       setFormError('Title is required.')
-      return
+      return false
     }
     if (formMode === 'create' && (canEdit
       ? intents.some((intent) => intent.slug === draft.slug)
       : rows.some(({ node }) => node.slug === draft.slug && (!node.is_dir || node.title !== undefined || node.status !== undefined)))) {
       setFormError('An intent with this slug already exists.')
-      return
+      return false
     }
 
     const previous = selectedIntent ?? liveIntent ?? undefined
@@ -874,12 +888,12 @@ function App(): JSX.Element {
       setDraftParentSlug(null)
       setFormError(null)
       setNotice(`Preview ${formMode === 'create' ? 'created' : 'updated'} “${next.title}”. No workspace files were written.`)
-      return
+      return false
     }
 
     if (activeWorkspaceId === undefined) {
       setFormError('Select a workspace in the intent tree before creating an intent.')
-      return
+      return false
     }
     const symbolList = splitLines(draft.symbol)
     const body = formMode === 'create'
@@ -914,6 +928,7 @@ function App(): JSX.Element {
       setDraftParentSlug(null)
       setDetailReload((value) => value + 1)
       requestTree(true)
+      return true
     } catch (requestError: unknown) {
       const message = requestError instanceof Error ? requestError.message : 'Kron could not save this intent.'
       setFormError(created
@@ -924,10 +939,54 @@ function App(): JSX.Element {
         setSelectedSlug(draft.slug)
         requestTree(true)
       }
+      return created
     } finally {
       setSaving(false)
     }
   }
+
+  const askUnsaved = useCallback((): Promise<UnsavedChoice> => new Promise((resolve) => {
+    setUnsavedPrompt({ resolve })
+  }), [])
+
+  const confirmEditing = useCallback(async (): Promise<boolean> => {
+    if (formMode === null) return true
+    const choice = await askUnsaved()
+    if (choice === 'cancel') return false
+    if (choice === 'save') {
+      return await saveIntent({ preventDefault: () => undefined } as FormEvent<HTMLFormElement>)
+    }
+    setFormMode(null)
+    setDraftParentSlug(null)
+    setFormError(null)
+    setAssumptionFormError(null)
+    return true
+  }, [askUnsaved, formMode, saveIntent])
+
+  const requestCloseWindow = useCallback(async (_slug: string): Promise<boolean> => {
+    const proceed = await confirmEditing()
+    if (!proceed) return false
+    setFormMode(null)
+    setDraftParentSlug(null)
+    setFormError(null)
+    setAssumptionFormError(null)
+    return true
+  }, [confirmEditing])
+
+  const requestCloseUnlocked = useCallback(async (): Promise<boolean> => confirmEditing(), [confirmEditing])
+
+  const requestSelectNode = useCallback(async (node: TreeNode): Promise<boolean> => {
+    const proceed = await confirmEditing()
+    if (!proceed) return false
+    setSelectedSlug(node.slug)
+    setFormMode(null)
+    setShowAssumptionForm(false)
+    setPendingDeleteSlug(null)
+    setAssumptionCheck(null)
+    setAssumptionCheckError(null)
+    setAssumptionFormError(null)
+    return true
+  }, [confirmEditing])
 
   const attachAssumption = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
@@ -1679,8 +1738,30 @@ function App(): JSX.Element {
     </form>
   )
 
+  const canvasDetails = useMemo(() => {
+    const bySlug = new Map<string, Intent>()
+    for (const intent of intents) bySlug.set(intent.slug, intent)
+    for (const intent of Object.values(liveDetails)) bySlug.set(intent.slug, intent)
+    return [...bySlug.values()]
+  }, [intents, liveDetails])
+
+  const unsavedDialog = unsavedPrompt === null ? null : (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4">
+      <div role="dialog" aria-modal="true" aria-label="Unsaved changes" className="w-full max-w-sm rounded-lg border bg-background p-4 shadow-xl">
+        <p className="text-sm font-semibold">Unsaved changes</p>
+        <p className="mt-1 text-xs text-muted-foreground">Save the current edit before continuing?</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button size="sm" variant="outline" onClick={() => { const resolve = unsavedPrompt.resolve; setUnsavedPrompt(null); resolve('cancel') }}>Cancel</Button>
+          <Button size="sm" variant="outline" onClick={() => { const resolve = unsavedPrompt.resolve; setUnsavedPrompt(null); resolve('discard') }}>Discard</Button>
+          <Button size="sm" onClick={() => { const resolve = unsavedPrompt.resolve; setUnsavedPrompt(null); resolve('save') }}>Save</Button>
+        </div>
+      </div>
+    </div>
+  )
+
   return (
     <main className="h-full w-full overflow-hidden bg-background text-foreground">
+      {unsavedDialog}
       <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden">
         <IntentCanvas
           root={activeTree}
@@ -1690,6 +1771,7 @@ function App(): JSX.Element {
           revealToken={revealToken}
           relations={treeRelations}
           detail={canEdit ? selectedIntent ?? null : liveIntent}
+          details={canvasDetails}
           detailLoading={detailLoading}
           onCreateRelation={createGraphRelation}
           onCreateChild={startCreateChild}
@@ -1713,6 +1795,9 @@ function App(): JSX.Element {
           }}
           editorContent={editorContent}
           assumptionContent={assumptionContent}
+          onRequestCloseWindow={requestCloseWindow}
+          onRequestSelectNode={requestSelectNode}
+          onRequestCloseUnlocked={requestCloseUnlocked}
           onCloseDetails={() => { setFormMode(null); setDraftParentSlug(null); setFormError(null); setAssumptionFormError(null) }}
           onClearSelection={() => { setSelectedSlug(''); setFormMode(null); setDraftParentSlug(null); setFormError(null); setAssumptionCheck(null); setAssumptionCheckError(null); setAssumptionFormError(null) }}
           onSelect={(node) => { setSelectedSlug(node.slug); setFormMode(null); setShowAssumptionForm(false); setPendingDeleteSlug(null); setAssumptionCheck(null); setAssumptionCheckError(null); setAssumptionFormError(null) }}

@@ -48,7 +48,7 @@ var ErrNotImplemented = errors.New("kron serve-mcp: not yet available (planned f
 const (
 	serverName    = "kron"
 	serverTitle   = "Kron"
-	serverVersion = "v0.3.0"
+	serverVersion = "v0.3.1"
 )
 
 // newKronServer constructs the SDK server with Kron's identity and the
